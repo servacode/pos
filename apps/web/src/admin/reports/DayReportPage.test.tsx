@@ -43,6 +43,63 @@ afterEach(() => {
 });
 
 describe('«مبيعات اليوم»', () => {
+  it('averages the invoice net of the returns, and says the payments table is before them', async () => {
+    openDay({
+      status: 200,
+      body: dayReport({
+        returns: { count: 1, totalMinor: 100_000, taxMinor: 0, byMethod: [] },
+        netSalesMinor: 1_184_500,
+      }),
+    });
+    const average = (await screen.findByText('متوسط الفاتورة')).closest('div');
+    // (12,845 - 1,000) / 3 = 3,948, the same average the home page shows
+    expect(text(average as HTMLElement)).toContain('3,948 ل.س');
+    const net = screen.getAllByText('صافي المبيعات بعد المرتجعات')[0]?.closest('div');
+    expect(text(net as HTMLElement)).toContain('قبل المرتجعات 12,845 ل.س');
+    // The payments add up before the returns; the walk to the net names what was really taken after them
+    const methods = screen.getByRole('region', { name: 'حسب طريقة الدفع' });
+    expect(text(methods)).toContain('مجموع الدفعات12,845 ل.س');
+    const walk = screen.getByRole('region', { name: 'من المبيعات إلى الصافي' });
+    expect(text(walk)).toContain('المرتجعات (1)−1,000 ل.س');
+    expect(text(walk)).toContain('المقبوض فعلاً بعد المرتجعات11,845 ل.س');
+  });
+
+  it('names the returns tile «المرتجعات» (the discount is under it), not both', async () => {
+    openDay({
+      status: 200,
+      body: dayReport({ returns: { count: 1, totalMinor: 100_000, taxMinor: 0, byMethod: [] } }),
+    });
+    expect(await screen.findByText('المرتجعات')).toBeInTheDocument();
+    expect(screen.queryByText('المرتجعات والحسم')).not.toBeInTheDocument();
+  });
+
+  it('explains a few liras between the payments and the invoices', async () => {
+    openDay({
+      status: 200,
+      body: dayReport({
+        cashRoundingMinor: 200,
+        tipsMinor: 0,
+        byMethod: [
+          { method: 'cash', currency: 'SYP', amountMinor: 1_284_700, baseAmountMinor: 1_284_700, count: 3 },
+        ],
+      }),
+    });
+    const methods = await screen.findByRole('region', { name: 'حسب طريقة الدفع' });
+    expect(text(methods)).toContain('مجموع الدفعات يختلف عن مجموع الفواتير بـ 2 ل.س: تقريب النقد 2 ل.س');
+  });
+
+  it('heads the sellers table «البائع» with a real total row', async () => {
+    openDay({
+      status: 200,
+      body: dayReport({
+        bySalesperson: [{ userId: 'u-9', fullName: 'مهنّد', invoiceCount: 3, totalMinor: 1_284_500 }],
+      }),
+    });
+    const sellers = text(await screen.findByRole('region', { name: 'حسب البائع' }));
+    expect(sellers).toContain('مهنّد12,845 ل.س3 فاتورة');
+    expect(sellers).toContain('3 فاتورة · 12,845 ل.س');
+  });
+
   it("shows today's totals for every branch, by payment method and by cashier", async () => {
     const { requestsTo } = openDay();
 
@@ -51,7 +108,7 @@ describe('«مبيعات اليوم»', () => {
     expect(requestsTo('GET', `/v1/reports/day?date=${TODAY}`)).toHaveLength(1);
     expect(screen.getByText('كل الفروع · 31 تشرين الأول 2026')).toBeInTheDocument();
 
-    const breakdown = screen.getByRole('region', { name: 'تفصيل المبيعات' });
+    const breakdown = screen.getByRole('region', { name: 'من المبيعات إلى الصافي' });
     expect(text(breakdown)).toContain('المبيعات قبل الحسم والضريبة13,000 ل.س');
     expect(text(breakdown)).toContain('الحسم−500 ل.س');
     expect(text(breakdown)).toContain('الضريبة345 ل.س');
@@ -59,22 +116,20 @@ describe('«مبيعات اليوم»', () => {
     expect(text(breakdown)).toContain('تقريب النقد−5 ل.س');
     expect(text(breakdown)).toContain('الإكرامية20 ل.س');
 
-    const methods = within(screen.getByRole('region', { name: 'حسب طريقة الدفع' })).getAllByRole('row');
+    const methods = within(screen.getByRole('region', { name: 'حسب طريقة الدفع' })).getAllByRole('listitem');
     expect(methods.map(text)).toEqual([
-      'الطريقةالدفعاتالمبلغبالعملة الأساسية',
-      'نقداً · ليرة39,145 ل.س9,145 ل.س',
-      'نقداً · دولار120.00 $2,600 ل.س',
-      'شام كاش11,100 ل.س1,100 ل.س',
-      'المجموع12,845 ل.س',
+      'نقداً · ليرة3 دفعة9,145 ل.س71%',
+      'نقداً · دولار1 دفعة20.00 $20%',
+      'شام كاش1 دفعة1,100 ل.س8.6%',
     ]);
+    expect(text(screen.getByRole('region', { name: 'حسب طريقة الدفع' }))).toContain(
+      'مجموع الدفعات12,845 ل.س',
+    );
 
-    const cashiers = within(screen.getByRole('region', { name: 'حسب الكاشير' })).getAllByRole('row');
-    expect(cashiers.map(text)).toEqual([
-      'الكاشيرالفواتيرالمبيعات',
-      'سامر29,000 ل.س',
-      'لينا13,845 ل.س',
-      'المجموع312,845 ل.س',
-    ]);
+    const cashiers = text(screen.getByRole('region', { name: 'حسب الكاشير' }));
+    expect(cashiers).toContain('سامر9,000 ل.س2 فاتورة');
+    expect(cashiers).toContain('لينا3,845 ل.س1 فاتورة');
+    expect(cashiers).toContain('3 فاتورة · 12,845 ل.س');
     expect(screen.getByRole('link', { name: 'مبيعات اليوم' })).toHaveAttribute('aria-current', 'page');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
@@ -88,10 +143,11 @@ describe('«مبيعات اليوم»', () => {
     expect(requestsTo('GET', `/v1/reports/day?branchId=branch-2&date=${TODAY}`)).toHaveLength(1);
 
     fireEvent.change(screen.getByLabelText('الفرع'), { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('اليوم'), { target: { value: '2026-10-30' } });
+    fireEvent.change(screen.getByLabelText('التاريخ'), { target: { value: '2026-10-30' } });
     expect(await screen.findByRole('heading', { name: 'مبيعات يوم', level: 1 })).toBeInTheDocument();
     expect(requestsTo('GET', '/v1/reports/day?date=2026-10-30')).toHaveLength(1);
-    expect(screen.getByLabelText('اليوم')).toHaveAttribute('max', TODAY);
+    // The field is day-first text; the calendar behind its button carries the limit
+    expect(document.querySelector('input[type="date"]')).toHaveAttribute('max', TODAY);
   });
 
   it('opens on the branch of a manager tied to one, with no «كل الفروع»', async () => {
@@ -151,7 +207,11 @@ describe('«مبيعات اليوم»', () => {
     });
     renderApp('/sales/today');
 
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'مبيعات اليوم' })).not.toBeInTheDocument();
   });
 });

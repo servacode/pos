@@ -60,7 +60,22 @@ describe('/pos on a new device', () => {
     expect(helpers.current.runBootstrap).toHaveBeenCalledOnce();
     expect(await deviceStore().getDevice()).toMatchObject({ deviceCode: '003' });
     // The status bar now names the store, the branch and the device.
-    expect(screen.getByText('مقهى الياسمين')).toBeInTheDocument();
+    expect(screen.getAllByText('مقهى الياسمين').length).toBeGreaterThan(0);
     expect(screen.getByText('الرقة · شارع تل أبيض · كاشير 3')).toBeInTheDocument();
+  });
+
+  it('a link made for a waiter or a kitchen screen lands on its own page, naming that kind', async () => {
+    for (const [kind, label] of [
+      ['waiter', 'جوال النادل · متصفح'],
+      ['kitchen_screen', 'شاشة المطبخ · متصفح'],
+    ] as const) {
+      helpers.current = fakeLinkHelpers();
+      mockFetch({});
+      renderApp(`/link?kind=${kind}#${QR_TOKEN}`);
+      expect(await screen.findByRole('heading', { name: 'سمِّ هذا الجهاز' })).toBeInTheDocument();
+      expect(screen.getByText(label)).toBeInTheDocument();
+      cleanup();
+      await resetDeviceStore();
+    }
   });
 });

@@ -44,7 +44,7 @@ describe('messages to customers', () => {
       headers: as(store),
       payload: { audience: { kind: 'all' } },
     });
-    expect(preview.json()).toEqual({ count: 2 });
+    expect(preview.json()).toEqual({ count: 2, max: 2000 });
 
     const before = codes.sent.length;
     const made = await app.inject({

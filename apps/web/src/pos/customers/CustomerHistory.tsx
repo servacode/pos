@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CustomerPurchases } from '@serva/core/contracts/customers';
-import { Money } from '@serva/ui';
+import { cn, Money, OfflineIcon, Skeleton } from '@serva/ui';
 import { APP_VERSION } from '../../offline/sync';
 import { usePos } from '../services';
 
@@ -44,19 +44,49 @@ export function CustomerHistory({ customerId }: { customerId: string }) {
     };
   }, [customerId, pos]);
 
-  if (data === null) return <p className="text-sm text-ink-muted">جارٍ تحميل مشتريات الزبون…</p>;
-  if (data === 'none') return <p className="text-sm text-ink-muted">سجل الزبون يحتاج اتصالاً بالخادم.</p>;
+  if (data === null) {
+    return (
+      <div
+        aria-busy="true"
+        className="flex flex-col gap-2 rounded-card border border-line bg-surface-muted/50 p-3"
+      >
+        <p className="text-sm text-ink-muted">جارٍ تحميل مشتريات الزبون…</p>
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-4 w-full" />
+      </div>
+    );
+  }
+  if (data === 'none') {
+    return (
+      <p className="flex items-center gap-2 rounded-card border border-line bg-surface-muted/50 px-3 py-2.5 text-sm text-ink-muted">
+        <OfflineIcon size={16} className="shrink-0 text-ink-subtle" />
+        سجل الزبون يحتاج اتصالاً بالخادم.
+      </p>
+    );
+  }
   return (
-    <section aria-label="مشتريات الزبون" className="flex flex-col gap-2 rounded-control bg-surface-muted p-3">
+    <section
+      aria-label="مشتريات الزبون"
+      className="flex flex-col gap-3 rounded-card border border-line bg-surface-muted/50 p-3"
+    >
       {data.sizes.length > 0 ? (
-        <ul aria-label="مقاساته" className="flex flex-wrap gap-2">
+        <ul aria-label="مقاساته" className="flex flex-col gap-2">
           {data.sizes.map((s) => (
-            <li key={s.name} className="text-sm">
+            <li key={s.name} className="flex flex-wrap items-center gap-1.5 text-sm">
               <span className="text-ink-muted">{s.name}: </span>
               {s.values.map((v, i) => (
-                <span key={v.value} className={i === 0 ? 'font-bold text-brand-ink' : 'text-ink'}>
-                  {i > 0 ? '، ' : ''}
-                  {v.value} <span className="num text-xs text-ink-muted">×{v.qty / 1000}</span>
+                <span
+                  key={v.value}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-small border px-2 py-0.5 font-semibold',
+                    i === 0
+                      ? 'border-brand/30 bg-brand-soft text-brand-ink'
+                      : 'border-line bg-surface text-ink',
+                  )}
+                >
+                  {/* «، » stays in the text for screen readers and copying; the chips draw the gap */}
+                  {i > 0 ? <span className="sr-only">، </span> : null}
+                  {v.value} <span className="num text-xs font-normal text-ink-muted">×{v.qty / 1000}</span>
                 </span>
               ))}
             </li>
@@ -66,15 +96,18 @@ export function CustomerHistory({ customerId }: { customerId: string }) {
       {data.invoices.length === 0 ? (
         <p className="text-sm text-ink-muted">لم يشترِ شيئاً بعد.</p>
       ) : (
-        <ul aria-label="فواتيره" className="flex max-h-48 flex-col gap-1 overflow-y-auto text-sm">
+        <ul aria-label="فواتيره" className="flex max-h-48 flex-col overflow-y-auto text-sm">
           {data.invoices.map((inv) => (
-            <li key={inv.id} className="flex flex-col border-b border-line pb-1 last:border-0">
+            <li
+              key={inv.id}
+              className="flex flex-col gap-0.5 border-b border-line py-2 first:pt-0 last:border-0 last:pb-0"
+            >
               <span className="flex items-center justify-between gap-2">
-                <bdi dir="ltr" className="num font-semibold">
+                <bdi dir="ltr" className="num font-semibold text-ink">
                   {inv.number}
                 </bdi>
-                <span className="num text-ink-muted">{inv.date}</span>
-                <Money minor={inv.totalMinor} currency={inv.currency} />
+                <span className="num text-xs text-ink-subtle">{inv.date}</span>
+                <Money minor={inv.totalMinor} currency={inv.currency} className="font-semibold text-ink" />
               </span>
               <span className="text-ink-muted">
                 {inv.lines

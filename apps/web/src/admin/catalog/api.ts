@@ -1,19 +1,23 @@
 import type {
+  ArchiveImpactResponse,
   BarcodeLookupResponse,
   Category,
   CreateCategoryInput,
   CreateProductInput,
-  ListResponse,
+  CreateUnitInput,
+  ProductListResponse,
   ProductDetail,
   ProductImage,
   ProductImageInput,
   ProductImagesResponse,
-  ProductListItem,
+  ProductCostsResponse,
   ProductListQuery,
-  TaxRate,
+  ProductOpeningInput,
+  TaxRateList,
   Unit,
   UpdateCategoryInput,
   UpdateProductInput,
+  UpdateUnitInput,
 } from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
@@ -27,8 +31,14 @@ export function productsPath(query: ProductListQuery): string {
   const params = new URLSearchParams();
   if (query.q) params.set('q', query.q);
   if (query.categoryId) params.set('categoryId', query.categoryId);
+  if (query.season) params.set('season', query.season);
   if (query.status) params.set('status', query.status);
   if (query.branchId) params.set('branchId', query.branchId);
+  if (query.expiry) params.set('expiry', query.expiry);
+  if (query.stock) params.set('stock', query.stock);
+  if (query.sort && query.sort !== 'name') params.set('sort', query.sort);
+  if (query.detail) params.set('detail', query.detail);
+  if (query.cost) params.set('cost', query.cost);
   if (query.cursor) params.set('cursor', query.cursor);
   if (query.limit) params.set('limit', String(query.limit));
   const search = params.toString();
@@ -36,7 +46,7 @@ export function productsPath(query: ProductListQuery): string {
 }
 
 export function listProducts(query: ProductListQuery) {
-  return apiFetch<ListResponse<ProductListItem>>(productsPath(query), { auth: true });
+  return apiFetch<ProductListResponse>(productsPath(query), { auth: true });
 }
 
 export function getProduct(productId: string) {
@@ -55,6 +65,11 @@ export function updateProduct(productId: string, input: UpdateProductInput) {
   });
 }
 
+/** What archiving leaves behind: the stock on the shelf and the dishes that use the product */
+export function getArchiveImpact(productId: string) {
+  return apiFetch<ArchiveImpactResponse>(`/v1/products/${id(productId)}/archive-impact`, { auth: true });
+}
+
 /** `POST /v1/products/{id}/archive` or `/restore`: no body, answers the product. */
 export function setProductArchived(productId: string, archived: boolean) {
   return apiFetch<ProductDetail>(`/v1/products/${id(productId)}/${archived ? 'archive' : 'restore'}`, {
@@ -65,6 +80,17 @@ export function setProductArchived(productId: string, archived: boolean) {
 
 export function lookupBarcode(code: string) {
   return apiFetch<BarcodeLookupResponse>(`/v1/barcodes/${id(code)}`, { auth: true });
+}
+
+/** The same lookup for a code that may be free: null (a 200 answer, no 404 in the console) when no product has it. */
+export async function probeBarcode(code: string): Promise<BarcodeLookupResponse | null> {
+  const answer = await apiFetch<BarcodeLookupResponse | { exists: false }>(
+    `/v1/barcodes/${id(code)}?free=1`,
+    {
+      auth: true,
+    },
+  );
+  return 'exists' in answer ? null : answer;
 }
 
 export function listCategories() {
@@ -87,8 +113,16 @@ export function listUnits() {
   return apiFetch<{ items: Unit[] }>('/v1/units', { auth: true });
 }
 
+export function createUnit(input: CreateUnitInput) {
+  return apiFetch<Unit>('/v1/units', { method: 'POST', body: input, auth: true });
+}
+
+export function updateUnit(unitId: string, input: UpdateUnitInput) {
+  return apiFetch<Unit>(`/v1/units/${id(unitId)}`, { method: 'PATCH', body: input, auth: true });
+}
+
 export function listTaxRates() {
-  return apiFetch<{ items: TaxRate[] }>('/v1/tax-rates', { auth: true });
+  return apiFetch<TaxRateList>('/v1/tax-rates', { auth: true });
 }
 
 // ─── Product pictures ─────────────────────────────────────────────────────────
@@ -113,3 +147,17 @@ export const orderProductImages = (productId: string, ids: string[]) =>
     body: { ids },
     auth: true,
   });
+
+/** The first quantity of pieces that never moved in the branch, with what a unit cost (catalog.manage + inventory.adjust) */
+export function postProductOpening(productId: string, input: ProductOpeningInput) {
+  return apiFetch<{ posted: number }>(`/v1/products/${id(productId)}/opening-stock`, {
+    method: 'POST',
+    body: input,
+    auth: true,
+  });
+}
+
+/** The average cost of each piece (cost.view) */
+export function getProductCosts(productId: string) {
+  return apiFetch<ProductCostsResponse>(`/v1/products/${id(productId)}/costs`, { auth: true });
+}

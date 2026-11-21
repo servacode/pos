@@ -118,6 +118,11 @@ describe('a purchase', () => {
         qty: 10 * PIECE,
         valueMinor: 200_000,
         unitCostMinor: 20_000,
+        // what one piece cost on its latest purchase, and the middle of the latest five (the purchase warning's references)
+        lastCostMinor: 20_000,
+        typicalCostMinor: 20_000,
+        productName: 'حليب',
+        attributes: [],
       }),
     ]);
     expect(await integrity(store)).toEqual([]);
@@ -154,6 +159,39 @@ describe('a purchase', () => {
     expect(b.get('1300')?.base).toBe(40_000);
   });
 
+  it('refuses a payment above what is owed until it is confirmed as an advance, and absurd amounts', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const milk = await makeProduct(app, store, 'حليب', 25_000);
+    await buy(store, {
+      supplierId: s.id,
+      date: '2026-10-30',
+      payment: 'credit',
+      lines: [{ variantId: milk.variantId, qty: PIECE, costMinor: 20_000 }],
+    });
+    const pay = (extra: Record<string, unknown>) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/supplier-payments',
+        headers: as(store),
+        payload: { supplierId: s.id, date: '2026-10-31', method: 'cash', ...extra },
+      });
+    const over = await pay({ amountMinor: 50_000 });
+    expect(over.statusCode).toBe(409);
+    expect(over.json().error.code).toBe('conflict');
+    expect(over.json().error.fields.amountMinor).toContain('دفعة مقدّمة');
+    const absurd = await pay({ amountMinor: 8_829_999_900_000_000 });
+    expect(absurd.statusCode).toBe(400);
+    expect(absurd.json().error.fields.amountMinor).toContain('كبير جداً');
+    const b = await balances(store.tenantId);
+    expect(b.get('2100')?.base).toBe(-20_000);
+    const ok = await pay({ amountMinor: 50_000, advance: true });
+    expect(ok.statusCode, ok.body).toBe(201);
+    const nothing = await pay({ amountMinor: 1 });
+    expect(nothing.statusCode).toBe(409);
+    expect(nothing.json().error.fields.amountMinor).toContain('لا شيء مستحق');
+  });
+
   it('refuses a service, an unknown supplier and the same item twice, in Arabic', async () => {
     const store = await openStore(app);
     const milk = await makeProduct(app, store, 'حليب', 25_000);
@@ -172,7 +210,7 @@ describe('a purchase', () => {
       },
     });
     expect(bad.statusCode).toBe(400);
-    expect(bad.json().error.fields.lines).toBe('كل صنف مرة واحدة في الفاتورة');
+    expect(bad.json().error.fields.lines).toBe('كل صنف مرة واحدة في الفاتورة إلا إن اختلفت الدفعة');
     const s = await supplier(store);
     const ghost = await app.inject({
       method: 'POST',
@@ -224,8 +262,41 @@ describe('the cost of what was sold', () => {
       netSalesMinor: 18_000_00,
       costOfSalesMinor: 13_200_00,
       grossProfitMinor: 4_800_00,
+      belowCostCount: 0,
     });
     expect(await integrity(store)).toEqual([]);
+  });
+
+  it('counts the products sold for less than they cost', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const box = await makeProduct(app, store, 'علبة', 1_000_00);
+    await buy(store, {
+      supplierId: s.id,
+      date: '2026-10-30',
+      payment: 'credit',
+      lines: [{ variantId: box.variantId, qty: 10 * PIECE, costMinor: 30_000_00 }],
+    });
+    await sell(store, box, 2, 1_000_00);
+    const profit = (
+      await app.inject({
+        method: 'GET',
+        url: '/v1/reports/profit?from=2026-10-01&to=2026-10-31',
+        headers: as(store),
+      })
+    ).json<ProfitReport>();
+    expect(profit.grossProfitMinor).toBeLessThan(0);
+    expect(profit.belowCostCount).toBe(1);
+    // The list behind the count: the box, sold 2 for 2,000 against a cost of 6,000
+    expect(profit.belowCost).toEqual([
+      expect.objectContaining({
+        name: 'علبة',
+        qty: 2 * PIECE,
+        soldMinor: 2_000_00,
+        costMinor: 6_000_00,
+        lossMinor: 4_000_00,
+      }),
+    ]);
   });
 
   it('is costed once, however often the device sends the sale', async () => {

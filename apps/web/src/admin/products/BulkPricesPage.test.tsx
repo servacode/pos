@@ -32,7 +32,7 @@ const items = (applied: boolean): BulkPriceResult => ({
 });
 
 describe('«تغيير الأسعار»', () => {
-  it('shows 30% off a category rounded to 500, applies it, and offers the new labels', async () => {
+  it('shows 30% off a category rounded to 5, applies it, and offers the new labels', async () => {
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': { status: 200, body: catalogMe() },
@@ -60,6 +60,7 @@ describe('«تغيير الأسعار»', () => {
     const { user } = renderApp('/prices');
     await screen.findByRole('option', { name: 'رجالي › قمصان' });
     await user.selectOptions(screen.getByLabelText('التصنيف'), 'رجالي › قمصان');
+    await user.type(screen.getByLabelText('النسبة ٪'), '-30');
     await user.click(screen.getByRole('button', { name: 'اعرض الأسعار الجديدة' }));
     const table = await screen.findByRole('table', { name: 'ما سيتغيّر' });
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('31,500');
@@ -67,13 +68,14 @@ describe('«تغيير الأسعار»', () => {
       categoryId: 'c-shirts',
       mode: 'move',
       percentBp: -3000,
-      roundToMinor: 50_000,
+      roundToMinor: 500,
       markWas: true,
       apply: false,
     });
     // The old price, struck through on the labels
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('45,000');
-    await user.click(screen.getByRole('button', { name: 'طبّق على 2 قطعة' }));
+    await user.click(screen.getByRole('button', { name: 'طبّق على قطعتين' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، طبّق التغيير' }));
     expect(await screen.findByRole('link', { name: 'اطبع ملصقات الأسعار الجديدة' })).toHaveAttribute(
       'href',
       '/labels?products=p-1',

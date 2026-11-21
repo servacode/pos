@@ -1,8 +1,10 @@
 import type { SalePayload } from '@serva/core/contracts/documents';
-import { Button, CheckIcon, cn, Money, PrintIcon } from '@serva/ui';
-import { DENOMINATIONS } from '../shift/shift';
+import { Button, CartIcon, CheckIcon, cn, Menu, MenuItem, MoreIcon, OfflineIcon, PrintIcon } from '@serva/ui';
+import { ExactMoney } from '../ExactMoney';
+import { notesFor } from '../shift/shift';
 import { changeNotes } from '../pay/payment';
-import { methodLabel, Receipt, type PaperWidth, type ReceiptData } from './Receipt';
+import { paymentLabel, Receipt, type PaperWidth, type ReceiptData } from './Receipt';
+import { WhatsAppSend } from './WhatsAppSend';
 
 /**
  * «تمت البيعة» (kit cashier/PaymentDone): the change in large type with the notes to hand back,
@@ -15,93 +17,234 @@ export function SaleDone({
   width,
   onWidth,
   onPrint,
+  onPrintWarranty,
+  onPrintA4,
+  onPrintGift,
   onNewSale,
+  customerPhone = null,
 }: {
   data: ReceiptData;
   online: boolean;
   width: PaperWidth;
   onWidth: (width: PaperWidth) => void;
   onPrint: () => void;
+  /** «اطبع شهادة الكفالة» (A4), when the sale has devices with a warranty */
+  onPrintWarranty?: () => void;
+  /** «اطبع A4» and «إشعار تسليم»: the invoice (a tax invoice when the store has a tax number) or its delivery note on A4 */
+  onPrintA4?: (kind: 'invoice' | 'delivery') => void;
+  /** «إيصال هدية»: the same sale's slip with no prices, for the one who receives the gift */
+  onPrintGift?: () => void;
   onNewSale: () => void;
+  /** The customer's phone when the sale named one; without it «أرسل عبر واتساب» asks for a number */
+  customerPhone?: string | null;
 }) {
   const sale = data.doc.payload as unknown as SalePayload;
   const change = sale.change;
-  const notes = change ? changeNotes(change.amountMinor, DENOMINATIONS[change.currency] ?? []) : [];
-  const methods = [...new Set(sale.payments.map((p) => methodLabel(p.method, p.currency, sale.currency)))];
+  const notes = change
+    ? changeNotes(change.amountMinor, notesFor(data.settings.till, change.currency) ?? [])
+    : [];
+  // A sale on account or by cheque has no change: it says what stays with the customer instead
+  const onAccount = (['credit', 'cheque'] as const).flatMap((method) => {
+    const parts = sale.payments.filter((p) => p.method === method);
+    return parts.length > 0
+      ? [{ method, currency: parts[0]!.currency, amountMinor: parts.reduce((s, p) => s + p.amountMinor, 0) }]
+      : [];
+  });
+  const saved = Object.values(data.contractSavings ?? {}).reduce((sum, n) => sum + n, 0);
+  const methods = [...new Set(sale.payments.map((p) => paymentLabel(p, sale.currency)))];
 
   return (
     <section
       aria-label="تمت البيعة"
-      className="flex min-h-0 flex-1 overflow-hidden rounded-card border border-line bg-surface shadow-e3 motion-safe:animate-rise"
+      className="flex min-h-0 flex-1 overflow-hidden rounded-panel border border-line bg-surface shadow-e1 motion-safe:animate-rise"
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-4 p-7">
-        <span className="grid size-16 place-items-center rounded-full bg-success-soft text-success-ink motion-safe:animate-pop">
-          <CheckIcon size={32} />
-        </span>
-        <div className="flex flex-col gap-1">
-          <h2 className="text-3xl font-bold text-ink">تمت البيعة</h2>
-          <p className="text-ink-muted">
-            فاتورة رقم{' '}
-            <bdi dir="ltr" className="num">
-              {data.doc.number}
-            </bdi>{' '}
-            · {methods.join(' + ')} · <Money minor={sale.totals.totalMinor} currency={sale.currency} />
-          </p>
-        </div>
-        {change ? (
-          <div
-            role="status"
-            className="flex flex-col rounded-card border border-line bg-surface-total px-6 py-4"
-          >
-            <span className="font-semibold text-ink-muted">الباقي للزبون</span>
-            <Money
-              minor={change.amountMinor}
-              currency={change.currency}
-              className="text-display font-bold text-ink"
-            />
-            {notes.length > 0 ? (
-              <span className="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-                أعطه:
-                {notes.map((note, i) => (
-                  <Money
-                    key={i}
-                    minor={note}
-                    currency={change.currency}
-                    symbol={false}
-                    className="rounded-small border border-line bg-surface px-2 font-semibold text-ink"
-                  />
-                ))}
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-6 xl:p-8">
+        {/* One centred column; its end clears the pinned «بيعة جديدة» bar, so nothing hides behind it */}
+        <div className="mx-auto flex w-full max-w-xl flex-col gap-4 pb-6">
+          <div className="flex flex-col items-start gap-4">
+            <span className="grid size-12 shrink-0 place-items-center rounded-full bg-success-soft text-success-ink ring-8 ring-success-soft/40 motion-safe:animate-pop">
+              <CheckIcon size={24} strokeWidth={2.5} />
+            </span>
+            <div className="flex min-w-0 flex-col gap-1">
+              <h2 className="text-3xl font-bold text-ink">تمت البيعة</h2>
+              {/* Parts that wrap whole, never a separator dot left at a line's end */}
+              <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-ink-muted">
+                <span className="whitespace-nowrap">
+                  فاتورة رقم{' '}
+                  <bdi dir="ltr" className="num font-semibold text-ink">
+                    {data.doc.number}
+                  </bdi>
+                </span>
+                <span className="whitespace-nowrap">{methods.join(' + ')}</span>
+                <ExactMoney
+                  minor={sale.totals.totalMinor}
+                  currency={sale.currency}
+                  className="font-semibold text-ink"
+                />
+              </p>
+            </div>
+          </div>
+          {change ? (
+            <div
+              role="status"
+              className="flex flex-col gap-2 rounded-card border border-line bg-surface-total px-6 py-5"
+            >
+              <span className="text-sm font-semibold text-ink-muted">الباقي للزبون</span>
+              <ExactMoney
+                minor={change.amountMinor}
+                currency={change.currency}
+                className="text-display font-bold tracking-tight text-ink"
+                unitClassName="text-2xl font-semibold text-ink-subtle"
+              />
+              {notes.length > 0 ? (
+                <span className="flex flex-wrap items-center gap-2 pt-1 text-sm text-ink-muted">
+                  أعطه:
+                  {notes.map((note, i) => (
+                    <ExactMoney
+                      key={i}
+                      minor={note}
+                      currency={change.currency}
+                      symbol={false}
+                      className="rounded-small border border-line-control/50 bg-surface px-2.5 py-1 font-bold text-ink shadow-e1"
+                    />
+                  ))}
+                </span>
+              ) : null}
+            </div>
+          ) : (
+            <div
+              role="status"
+              className="flex items-center gap-3 rounded-card border border-line bg-surface-total px-6 py-5 text-lg font-semibold text-ink"
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-success-soft text-success-ink">
+                <CheckIcon size={20} />
               </span>
+              {onAccount.length > 0 ? (
+                <span className="flex flex-col gap-1">
+                  {onAccount.map((p) => (
+                    <span key={p.method}>
+                      {p.method === 'credit' ? 'على حساب الزبون: ' : 'بشيك: '}
+                      <ExactMoney minor={p.amountMinor} currency={p.currency} />
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                'لا باقي · المبلغ مدفوع تماماً'
+              )}
+            </div>
+          )}
+          {(data.vouchersAfter ?? [])
+            .filter((v) => v.balanceMinor > 0)
+            .map((v) => (
+              // What the customer still holds on the voucher he just paid with
+              <p
+                key={v.code}
+                role="status"
+                aria-label="رصيد القسيمة"
+                className="text-sm font-semibold text-info-ink"
+              >
+                بقي على القسيمة <bdi dir="ltr">{v.code}</bdi>{' '}
+                <ExactMoney minor={v.balanceMinor} currency={v.currency} />
+              </p>
+            ))}
+          {sale.cashRounding && sale.cashRounding.roundingMinor !== 0 ? (
+            // Display only: the cash due was rounded to the step, the difference is booked as before
+            <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
+              قُرّب المبلغ إلى{' '}
+              <ExactMoney
+                minor={Math.abs(sale.cashRounding.dueMinor)}
+                currency={sale.cashRounding.currency}
+                className="font-semibold text-ink"
+              />{' '}
+              (فرق{' '}
+              <bdi dir="ltr" className="num">
+                {sale.cashRounding.roundingMinor < 0 ? '−' : '+'}
+                <ExactMoney
+                  minor={Math.abs(sale.cashRounding.roundingMinor)}
+                  currency={sale.cashRounding.currency}
+                  symbol={false}
+                  decimals={2}
+                  trimZeros
+                />
+              </bdi>
+              )
+            </p>
+          ) : null}
+          {saved > 0 ? (
+            // The customer's price (contract or wholesale) in one sentence: what the receipt says too
+            <p role="status" aria-label="الوفر" className="text-sm font-semibold text-info-ink">
+              وفّرت <ExactMoney minor={saved} currency={sale.currency} />
+            </p>
+          ) : null}
+          {!online ? (
+            <p className="flex items-start gap-2.5 rounded-card border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning-ink">
+              <OfflineIcon size={20} className="shrink-0" />
+              <span>
+                <strong className="font-semibold">دون إنترنت:</strong> الفاتورة محفوظة على هذا الجهاز، وتُرسل
+                وحدها عند عودة الإنترنت.
+              </span>
+            </p>
+          ) : null}
+          {/* The buttons follow the figures directly: no tall gap pushing them to the panel's floor */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            {/* WhatsApp is first and filled, with the customer's number ready: the main way to hand the receipt over */}
+            <WhatsAppSend data={data} phone={customerPhone} primary />
+            <Button
+              variant="secondary"
+              size="lg"
+              icon={<PrintIcon />}
+              onClick={onPrint}
+              className="sm:min-w-36"
+            >
+              اطبع
+            </Button>
+            {onPrintA4 || onPrintGift ? (
+              <Menu
+                label="خيارات أخرى"
+                align="start"
+                trigger={
+                  <Button variant="ghost" size="lg" icon={<MoreIcon />} aria-label="المزيد من الطباعة">
+                    خيارات أخرى
+                  </Button>
+                }
+              >
+                {onPrintA4 ? (
+                  <MenuItem icon={<PrintIcon />} onSelect={() => onPrintA4('invoice')}>
+                    اطبع A4
+                  </MenuItem>
+                ) : null}
+                {onPrintA4 ? (
+                  <MenuItem icon={<PrintIcon />} onSelect={() => onPrintA4('delivery')}>
+                    إشعار تسليم
+                  </MenuItem>
+                ) : null}
+                {onPrintGift ? (
+                  <MenuItem icon={<PrintIcon />} onSelect={onPrintGift}>
+                    إيصال هدية
+                  </MenuItem>
+                ) : null}
+              </Menu>
+            ) : null}
+            {onPrintWarranty ? (
+              <Button variant="secondary" size="lg" icon={<PrintIcon />} onClick={onPrintWarranty}>
+                اطبع شهادة الكفالة
+              </Button>
             ) : null}
           </div>
-        ) : (
-          <div
-            role="status"
-            className="rounded-card bg-surface-total px-5 py-4 text-lg font-semibold text-ink"
-          >
-            لا باقي · المبلغ مدفوع تماماً
-          </div>
-        )}
-        {!online ? (
-          <p className="rounded-control bg-warning-soft px-4 py-3 text-sm text-warning-ink">
-            <strong>دون إنترنت:</strong> الفاتورة محفوظة على هذا الجهاز، وتُرسل وحدها عند عودة الإنترنت.
-          </p>
-        ) : null}
-        <span className="flex-1" />
-        <div className="flex gap-3">
-          <Button variant="secondary" size="lg" icon={<PrintIcon />} onClick={onPrint}>
-            اطبع
-          </Button>
-          <Button size="pay" onClick={onNewSale} className="flex-1 justify-center">
+        </div>
+        {/* «بيعة جديدة» stays in view while the phone box or the long list of buttons scrolls */}
+        <div className="sticky bottom-0 z-10 -mx-6 -mb-6 mt-auto border-t border-line bg-surface px-6 py-3 xl:-mx-8 xl:-mb-8 xl:px-8">
+          <Button variant="secondary" size="pay" onClick={onNewSale} className="w-full min-w-60">
             بيعة جديدة
+            <CartIcon size={24} />
           </Button>
         </div>
       </div>
       <aside
         aria-label="معاينة الإيصال"
-        className="hidden w-[25rem] shrink-0 flex-col items-center gap-3 overflow-y-auto border-s border-line bg-surface-muted px-4 py-5 xl:flex"
+        className="hidden w-100 shrink-0 flex-col items-center gap-4 overflow-y-auto border-s border-line bg-surface-muted/60 px-4 py-5 xl:flex"
       >
-        <div role="group" aria-label="عرض الورق" className="flex gap-1 rounded-control bg-surface p-1">
+        <div role="group" aria-label="عرض الورق" className="flex gap-1 rounded-control bg-surface-muted p-1">
           {([80, 58] as const).map((w) => (
             <button
               key={w}
@@ -109,15 +252,17 @@ export function SaleDone({
               aria-pressed={width === w}
               onClick={() => onWidth(w)}
               className={cn(
-                'min-h-12 rounded-xl px-4 text-sm font-semibold',
-                width === w ? 'bg-brand-soft text-brand-ink' : 'text-ink-muted',
+                'min-h-12 rounded-small px-5 text-base font-semibold transition-[background-color,color,box-shadow] duration-120 ease-standard',
+                width === w
+                  ? 'bg-surface text-ink shadow-e1 ring-1 ring-line'
+                  : 'text-ink-muted hover:text-ink',
               )}
             >
               {w} مم
             </button>
           ))}
         </div>
-        <div className="shadow-e2">
+        <div className="rounded-small shadow-e2 ring-1 ring-line">
           <Receipt data={data} width={width} />
         </div>
       </aside>

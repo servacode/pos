@@ -1,6 +1,7 @@
 import { convert } from '@serva/core/money';
 import type { CurrencyCode as Code } from '@serva/core/currencies';
 import type { TradeRate } from '@serva/core/contracts/common';
+import { cashNotesOf, DEFAULT_CASH_NOTES, type TillSettings } from '@serva/core/contracts/till';
 import type {
   Approval,
   CashCount,
@@ -52,9 +53,19 @@ export function readShift(local: LocalStore, mode: ShiftMode, userId: string): P
 
 /** Banknotes offered by the counter (the boards' denominations), in minor units. */
 export const DENOMINATIONS: Partial<Record<Code, number[]>> = {
-  SYP: [500, 200, 100, 50, 25, 10].map((v) => v * 100),
-  USD: [100, 50, 20, 10, 5, 1].map((v) => v * 100),
+  SYP: DEFAULT_CASH_NOTES.SYP!.map((v) => v * 100),
+  USD: DEFAULT_CASH_NOTES.USD!.map((v) => v * 100),
 };
+
+/**
+ * The notes the counter offers for a currency, in minor units, high to low: the store's own list
+ * («الصندوق › فئات النقد») when it set one, else the built-in one (also when the till has not pulled
+ * the settings). null: a currency counted by total only.
+ */
+export function notesFor(till: TillSettings | null | undefined, currency: Code): number[] | null {
+  const own = cashNotesOf(till, currency);
+  return own ? own.map((v) => v * 100) : (DENOMINATIONS[currency] ?? null);
+}
 
 /** A count typed by note (counts per denomination) or as a total. */
 export interface DrawerCount {
@@ -160,7 +171,51 @@ export interface ShiftActivity {
   /** Per drawer currency, the terms of the formula the device knows */
   terms: Map<Code, Terms>;
   byMethod: ShiftClosePayload['summary']['byMethod'];
+  /** Returns saved in this shift, and what each paid back, per refund method and currency */
+  returns: {
+    count: number;
+    byMethod: { method: string; currency: Code; amountMinor: number }[];
+    /**
+     * Round 39: what the returned goods came to, per invoice currency: the return's own total, the figure the books
+     * take off the sales. A refund paid partly in dollars lists only its pounds in `byMethod`, so the net of the
+     * sales reads this (display only). Missing on an activity read before it existed.
+     */
+    goods?: { currency: Code; totalMinor: number }[];
+  };
+  /** Gift vouchers sold in this shift, per currency */
+  vouchers: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
+  /** Deposits («عربون») taken in this shift, per currency; gift-voucher deposits of older tills stay in `vouchers` */
+  deposits?: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
+  /** Rental deposits («تأمين إيجار») taken in this shift, per currency: kept out of the gift vouchers line (display only) */
+  rentalDeposits?: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
+  /** Deposits paid with on this shift's invoices (taken today or earlier), per currency */
+  depositsUsed?: { currency: Code; amountMinor: number }[];
+  /** What the shift's invoices came to and the discounts given on them, per invoice currency */
+  salesTotals: { currency: Code; totalMinor: number; discountMinor: number }[];
+  /** Per seller (the chosen seller, else the cashier) and invoice currency: invoices and what they came to */
+  bySeller: { sellerId: string; currency: Code; count: number; totalMinor: number }[];
+  /** Drawer movements of this shift in the order they were made */
+  movements: { kind: CashMovementKind; currency: Code; amountMinor: number; reason: string }[];
+  /** Cash that came into the drawer outside a sale: customers' payments, and gift vouchers or deposits sold for cash */
+  cashIn?: {
+    receipts: { currency: Code; amountMinor: number }[];
+    vouchers: { currency: Code; amountMinor: number }[];
+    deposits?: { currency: Code; amountMinor: number }[];
+    rentals?: { currency: Code; amountMinor: number }[];
+  };
+  /** Instalments (display only, from the documents): sales on a plan and the instalments collected */
+  instalments?: {
+    sales: { currency: Code; count: number; downMinor: number; financedMinor: number }[];
+    collected: { currency: Code; amountMinor: number }[];
+  };
+  /** What cash rounding took off (negative) or added (positive) on this shift's invoices and cash refunds, per currency (display only) */
+  cashRounding?: { currency: Code; amountMinor: number }[];
+  /** A foreign cash payment (20$) given back in another currency (800 ل.س): what was paid in, what came back */
+  changeBack?: { paid: Code; change: Code; paidMinor: number; changeMinor: number }[];
 }
+
+/** A rental's deposit is saved as a gift voucher document marked with this reference: the Z names it on its own line */
+export const RENTAL_DEPOSIT_REF = 'تأمين إيجار';
 
 /** Sums the shift's sales and drawer movements (10 › مطابقة الصندوق) from its documents. */
 export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]): ShiftActivity {
@@ -178,14 +233,75 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     { method: PaymentMethod; currency: Code; count: number; amountMinor: number }
   >();
   let saleCount = 0;
+  const rounding = new Map<Code, number>();
+  const salesTotals = new Map<Code, { currency: Code; totalMinor: number; discountMinor: number }>();
+  const bySeller = new Map<string, { sellerId: string; currency: Code; count: number; totalMinor: number }>();
+  const refunds = new Map<string, { method: string; currency: Code; amountMinor: number }>();
+  let returnCount = 0;
+  const returnedGoods = new Map<Code, number>();
+  const gifts = new Map<Code, number>();
+  const deposits = new Map<Code, number>();
+  const depositsCash = new Map<Code, number>();
+  const depositsUsed = new Map<Code, number>();
+  let depositCount = 0;
+  const rentals = new Map<Code, number>();
+  const rentalsCash = new Map<Code, number>();
+  let rentalCount = 0;
+  let giftCount = 0;
+  const plansSold = new Map<
+    Code,
+    { currency: Code; count: number; downMinor: number; financedMinor: number }
+  >();
+  const plansPaid = new Map<Code, number>();
+  const movements: ShiftActivity['movements'] = [];
+  const receiptsCash = new Map<Code, number>();
+  const vouchersCash = new Map<Code, number>();
+  const changeBack = new Map<string, { paid: Code; change: Code; paidMinor: number; changeMinor: number }>();
   for (const { doc } of entries) {
     const payload = doc.payload as Record<string, unknown>;
     if (payload.shiftId !== shiftId) continue;
     if (doc.type === 'sale') {
       const sale = payload as unknown as SalePayload;
       saleCount += 1;
+      if (sale.cashRounding && sale.cashRounding.roundingMinor !== 0) {
+        const r = sale.cashRounding;
+        rounding.set(r.currency, (rounding.get(r.currency) ?? 0) + r.roundingMinor);
+      }
+      const totals = salesTotals.get(sale.currency) ?? {
+        currency: sale.currency,
+        totalMinor: 0,
+        discountMinor: 0,
+      };
+      totals.totalMinor += sale.totals?.totalMinor ?? 0;
+      totals.discountMinor += sale.totals?.discountMinor ?? 0;
+      salesTotals.set(sale.currency, totals);
+      if (sale.installmentPlan) {
+        const row = plansSold.get(sale.currency) ?? {
+          currency: sale.currency,
+          count: 0,
+          downMinor: 0,
+          financedMinor: 0,
+        };
+        row.count += 1;
+        row.downMinor += sale.installmentPlan.downPaymentMinor;
+        row.financedMinor += sale.installmentPlan.financedMinor;
+        plansSold.set(sale.currency, row);
+      }
+      const sellerId = sale.salespersonId ?? sale.cashierId;
+      const sellerKey = `${sellerId}:${sale.currency}`;
+      const seller = bySeller.get(sellerKey) ?? {
+        sellerId,
+        currency: sale.currency,
+        count: 0,
+        totalMinor: 0,
+      };
+      seller.count += 1;
+      seller.totalMinor += sale.totals?.totalMinor ?? 0;
+      bySeller.set(sellerKey, seller);
       for (const p of sale.payments) {
         if (p.method === 'cash') termsOf(p.currency).cashInMinor += p.amountMinor;
+        if (p.method === 'voucher' && /^DEP-/i.test(p.reference ?? ''))
+          depositsUsed.set(p.currency, (depositsUsed.get(p.currency) ?? 0) + p.amountMinor);
         const key = `${p.method}:${p.currency}`;
         const row = byMethod.get(key) ?? { method: p.method, currency: p.currency, count: 0, amountMinor: 0 };
         row.count += 1;
@@ -193,6 +309,22 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
         byMethod.set(key, row);
       }
       if (sale.change) {
+        // A payment in another currency whose change came back in this one: shown together at close
+        const foreign = sale.payments.find(
+          (p) => p.method === 'cash' && p.currency !== sale.change!.currency,
+        );
+        if (foreign) {
+          const key = `${foreign.currency}:${sale.change.currency}`;
+          const row = changeBack.get(key) ?? {
+            paid: foreign.currency,
+            change: sale.change.currency,
+            paidMinor: 0,
+            changeMinor: 0,
+          };
+          row.paidMinor += foreign.amountMinor;
+          row.changeMinor += sale.change.amountMinor;
+          changeBack.set(key, row);
+        }
         termsOf(sale.change.currency).changeOutMinor += sale.change.amountMinor;
         const key = `cash:${sale.change.currency}`;
         const row = byMethod.get(key) ?? {
@@ -206,26 +338,174 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       }
     } else if (doc.type === 'return') {
       // Cash paid back for goods returned comes out of this drawer
+      returnCount += 1;
+      const goods = payload as unknown as ReturnPayload;
+      if (goods.totals && goods.currency)
+        returnedGoods.set(goods.currency, (returnedGoods.get(goods.currency) ?? 0) + goods.totals.totalMinor);
       for (const r of (payload as unknown as ReturnPayload).refunds) {
-        if (r.method === 'cash') termsOf(r.currency).refundsMinor += r.amountMinor;
+        // Round 36: the dollar's part of a cash refund comes out of the dollar drawer, in dollars; the invoice
+        // currency's drawer pays the rest. A refund with no foreign part is all of it, as it always was.
+        const foreign = r.method === 'cash' ? (r.foreign ?? []) : [];
+        const own = r.amountMinor - foreign.reduce((n, f) => n + f.baseAmountMinor, 0);
+        if (r.method === 'cash') termsOf(r.currency).refundsMinor += own;
+        for (const f of foreign) {
+          termsOf(f.currency).refundsMinor += f.amountMinor;
+          const frow = refunds.get(`cash:${f.currency}`) ?? {
+            method: r.method,
+            currency: f.currency,
+            amountMinor: 0,
+          };
+          frow.amountMinor += f.amountMinor;
+          refunds.set(`cash:${f.currency}`, frow);
+        }
+        // A cash refund rounded to the step: what the till paid out less is a gain, more a loss (same sign as the sales')
+        if (r.method === 'cash' && r.roundingMinor)
+          rounding.set(r.currency, (rounding.get(r.currency) ?? 0) - r.roundingMinor);
+        if (own !== 0 || foreign.length === 0) {
+          const key = `${r.method}:${r.currency}`;
+          const row = refunds.get(key) ?? { method: r.method, currency: r.currency, amountMinor: 0 };
+          row.amountMinor += own;
+          refunds.set(key, row);
+        }
       }
     } else if (doc.type === 'receipt') {
       // A customer's payment in cash goes into this drawer
       const r = payload as unknown as ReceiptPayload;
-      if (r.method === 'cash') termsOf(r.currency).receiptsMinor += r.amountMinor;
+      const toPlans = (r.allocations ?? []).reduce((n, a) => n + a.amountMinor, 0);
+      if (toPlans > 0) plansPaid.set(r.currency, (plansPaid.get(r.currency) ?? 0) + toPlans);
+      if (r.method === 'cash') {
+        termsOf(r.currency).receiptsMinor += r.amountMinor;
+        receiptsCash.set(r.currency, (receiptsCash.get(r.currency) ?? 0) + r.amountMinor);
+      }
     } else if (doc.type === 'gift_voucher') {
       // A gift voucher sold for cash goes into this drawer, as money received
       const g = payload as unknown as GiftVoucherPayload;
-      if (g.method === 'cash') termsOf(g.currency).receiptsMinor += g.amountMinor;
+      // The drawer takes it the same either way; a rental's deposit is only named on its own line
+      const rental = g.reference === RENTAL_DEPOSIT_REF;
+      if (g.method === 'cash') {
+        termsOf(g.currency).receiptsMinor += g.amountMinor;
+        const into = rental ? rentalsCash : vouchersCash;
+        into.set(g.currency, (into.get(g.currency) ?? 0) + g.amountMinor);
+      }
+      if (rental) {
+        rentalCount += 1;
+        rentals.set(g.currency, (rentals.get(g.currency) ?? 0) + g.amountMinor);
+      } else {
+        giftCount += 1;
+        gifts.set(g.currency, (gifts.get(g.currency) ?? 0) + g.amountMinor);
+      }
+    } else if (doc.type === 'deposit') {
+      // A deposit taken in cash goes into this drawer exactly like a gift voucher did
+      const g = payload as unknown as GiftVoucherPayload;
+      if (g.method === 'cash') {
+        termsOf(g.currency).receiptsMinor += g.amountMinor;
+        depositsCash.set(g.currency, (depositsCash.get(g.currency) ?? 0) + g.amountMinor);
+      }
+      depositCount += 1;
+      deposits.set(g.currency, (deposits.get(g.currency) ?? 0) + g.amountMinor);
     } else if (doc.type === 'cash_movement') {
       const move = payload as unknown as CashMovementPayload;
       const t = termsOf(move.currency);
+      movements.push({
+        kind: move.kind,
+        currency: move.currency,
+        amountMinor: move.amountMinor,
+        reason: move.reason,
+      });
       if (move.kind === 'pay_in') t.payInMinor += move.amountMinor;
       else if (move.kind === 'safe_drop') t.dropsMinor += move.amountMinor;
       else t.payOutMinor += move.amountMinor;
     }
   }
-  return { saleCount, terms, byMethod: [...byMethod.values()] };
+  return {
+    saleCount,
+    terms,
+    byMethod: [...byMethod.values()],
+    returns: {
+      count: returnCount,
+      byMethod: [...refunds.values()],
+      goods: [...returnedGoods].map(([currency, totalMinor]) => ({ currency, totalMinor })),
+    },
+    vouchers: {
+      count: giftCount,
+      byCurrency: [...gifts].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+    },
+    deposits: {
+      count: depositCount,
+      byCurrency: [...deposits].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+    },
+    ...(rentalCount > 0
+      ? {
+          rentalDeposits: {
+            count: rentalCount,
+            byCurrency: [...rentals].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+          },
+        }
+      : {}),
+    ...(depositsUsed.size > 0
+      ? { depositsUsed: [...depositsUsed].map(([currency, amountMinor]) => ({ currency, amountMinor })) }
+      : {}),
+    salesTotals: [...salesTotals.values()],
+    bySeller: [...bySeller.values()],
+    movements,
+    cashIn: {
+      receipts: [...receiptsCash].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+      vouchers: [...vouchersCash].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+      deposits: depositsCash.size
+        ? [...depositsCash].map(([currency, amountMinor]) => ({ currency, amountMinor }))
+        : undefined,
+      rentals: rentalsCash.size
+        ? [...rentalsCash].map(([currency, amountMinor]) => ({ currency, amountMinor }))
+        : undefined,
+    },
+    changeBack: [...changeBack.values()],
+    ...(plansSold.size > 0 || plansPaid.size > 0
+      ? {
+          instalments: {
+            sales: [...plansSold.values()],
+            collected: [...plansPaid].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+          },
+        }
+      : {}),
+    ...([...rounding].some(([, n]) => n !== 0)
+      ? {
+          cashRounding: [...rounding]
+            .filter(([, n]) => n !== 0)
+            .map(([currency, amountMinor]) => ({ currency, amountMinor })),
+        }
+      : {}),
+  };
+}
+
+/**
+ * The summary's payment rows as the cashier reads them: every method less what the returns paid back by that
+ * method (cash, card, voucher, account…); a row is added when a method was only paid out. Display only: the saved summary and the drawer formula
+ * never read it.
+ */
+export function netMethodRows(activity: ShiftActivity | null | undefined): ShiftActivity['byMethod'] {
+  const rows = (activity?.byMethod ?? []).map((row) => ({ ...row }));
+  for (const refund of activity?.returns.byMethod ?? []) {
+    // A refund voucher issued is not a payment taken back: it has its own line (refundVouchers), never a negative «قسيمة» row
+    if (refund.method === 'voucher') continue;
+    // What went back on the customer's account reduces what was left on account (آجل)
+    const method = (
+      refund.method === 'account' ? 'credit' : refund.method
+    ) as ShiftActivity['byMethod'][number]['method'];
+    const row = rows.find((r) => r.method === method && r.currency === refund.currency);
+    if (row) row.amountMinor -= refund.amountMinor;
+    else rows.push({ method, currency: refund.currency, count: 0, amountMinor: -refund.amountMinor });
+  }
+  return rows;
+}
+
+/** Refund vouchers issued for returns in this shift, per currency: shown on their own line, not netted against the vouchers paid with */
+export function refundVouchers(
+  activity: ShiftActivity | null | undefined,
+): { currency: Code; amountMinor: number }[] {
+  const out = new Map<Code, number>();
+  for (const r of activity?.returns.byMethod ?? [])
+    if (r.method === 'voucher') out.set(r.currency, (out.get(r.currency) ?? 0) + r.amountMinor);
+  return [...out].map(([currency, amountMinor]) => ({ currency, amountMinor }));
 }
 
 /** One drawer at close, with every term of the formula, the expected amount and the difference. */
@@ -293,4 +573,11 @@ export function shiftClosePayload(input: {
     summary: { saleCount: input.activity.saleCount, byMethod: input.activity.byMethod },
     forced: false,
   };
+}
+
+/** What the returned goods came to in an invoice currency: the books' own figure (falls back to the pounds paid back for an older activity) */
+export function returnedGoodsIn(activity: ShiftActivity, currency: string): number {
+  const goods = activity.returns.goods?.filter((g) => g.currency === currency) ?? [];
+  if (goods.length > 0) return goods.reduce((n, g) => n + g.totalMinor, 0);
+  return activity.returns.byMethod.reduce((n, r) => (r.currency === currency ? n + r.amountMinor : n), 0);
 }

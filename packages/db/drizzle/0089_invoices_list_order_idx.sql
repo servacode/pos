@@ -1,0 +1,1 @@
+CREATE INDEX "invoices_list_order_idx" ON "invoices" USING btree ("tenant_id","business_date" DESC NULLS LAST,"device_time" DESC NULLS LAST,"id" DESC NULLS LAST);

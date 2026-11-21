@@ -26,6 +26,13 @@ describe('minorToDecimal', () => {
   });
 });
 
+describe('debitSigned with the account’s own side', () => {
+  it('reads a debit-normal contra revenue (4200) as a debit balance', () => {
+    expect(debitSigned(5_167, 'revenue', 'debit')).toBe(5_167);
+    expect(debitSigned(5_167, 'revenue')).toBe(-5_167);
+  });
+});
+
 describe('debitSigned', () => {
   it('keeps debit-side accounts and turns credit-side ones', () => {
     expect(debitSigned(500, 'asset')).toBe(500);

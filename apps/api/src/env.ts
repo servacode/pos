@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { weakSecretReason } from './auth/tokens';
+import { unknownPlaceholders } from './auth/otp';
 import { parseProxyTrust, type ProxyTrust } from './http/client-ip';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
@@ -20,6 +21,44 @@ const perMinute = (fallback: number) => z.coerce.number().int().positive().defau
 /** An empty value means not set: docker compose passes `${X:-}` as "" when X is absent. */
 const unsetWhenEmpty = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === '' ? undefined : value), schema);
+
+const HEADER_LINE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+:[ -~]+$/;
+
+/** OTP_DELIVERY=sms (or OTP_FALLBACK=sms): the gateway must be complete and safe to call. */
+function checkSms(
+  env: {
+    DEPLOYMENT: string;
+    SMS_GATEWAY_URL?: string | undefined;
+    SMS_GATEWAY_METHOD: string;
+    SMS_GATEWAY_AUTH_HEADER?: string | undefined;
+    SMS_GATEWAY_BODY: string;
+  },
+  ctx: z.RefinementCtx,
+  production: boolean,
+): void {
+  const issue = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
+  const url = env.SMS_GATEWAY_URL;
+  if (!url) return issue('SMS_GATEWAY_URL', 'OTP_DELIVERY=sms needs SMS_GATEWAY_URL');
+  if (env.DEPLOYMENT === 'cloud' && production && !url.startsWith('https://')) {
+    // The code and the key cross the internet: never in clear text from the cloud.
+    issue('SMS_GATEWAY_URL', 'SMS_GATEWAY_URL must be https:// on the cloud server');
+  }
+  // A single character class with one quantifier each side of the colon: linear, and the value
+  // is the operator's own setting, not user input.
+  // nosemgrep: ajinabraham.njsscan.dos.regex_dos.regex_dos
+  if (env.SMS_GATEWAY_AUTH_HEADER && !HEADER_LINE.test(env.SMS_GATEWAY_AUTH_HEADER)) {
+    issue('SMS_GATEWAY_AUTH_HEADER', 'must be one header line, "Name: value"');
+  }
+  const unknown = [...unknownPlaceholders(url), ...unknownPlaceholders(env.SMS_GATEWAY_BODY)];
+  if (unknown.length > 0) {
+    issue('SMS_GATEWAY_BODY', `unknown placeholder {${unknown[0]}}; use {phone} {digits} {code} {message}`);
+  }
+  const carriesCode = (text: string) => text.includes('{message}') || text.includes('{code}');
+  const body = env.SMS_GATEWAY_METHOD === 'GET' ? '' : env.SMS_GATEWAY_BODY;
+  if (!carriesCode(url) && !carriesCode(body)) {
+    issue('SMS_GATEWAY_BODY', 'the URL or the body must contain {message} or {code}');
+  }
+}
 
 const envSchema = z
   .object({
@@ -60,6 +99,18 @@ const envSchema = z
     LOGIN_PHONE_LIMIT_PER_HOUR: perMinute(20),
     /** Sign-up codes per hour sent to one phone number */
     REGISTER_PHONE_LIMIT_PER_HOUR: perMinute(5),
+    /** Password-recovery codes per hour sent to one phone number */
+    RESET_PHONE_LIMIT_PER_HOUR: perMinute(5),
+    /** Password-recovery requests and code attempts per hour from one address */
+    RESET_IP_LIMIT_PER_HOUR: perMinute(20),
+    /**
+     * The platform team must use two-factor (TOTP): a member without it enrols at the next sign-in.
+     * Default: on in production, off elsewhere (read it with platformRequires2fa).
+     */
+    PLATFORM_REQUIRE_2FA: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === 'true')),
     /** Where this server runs: "cloud" (default) or "local", the server in the shop (tab 00). */
     DEPLOYMENT: z.enum(['cloud', 'local']).default('cloud'),
     /**
@@ -68,13 +119,40 @@ const envSchema = z
      * code to the sign-up screen itself (test mode, DEPLOYMENT=local only). Default: log outside
      * production, none in production.
      */
-    OTP_DELIVERY: z.enum(['log', 'none', 'screen', 'gateway']).optional(),
+    OTP_DELIVERY: z.enum(['log', 'none', 'screen', 'gateway', 'sms']).optional(),
     /**
      * OTP_DELIVERY=gateway: the service that sends the code to the phone (a WhatsApp bot today, an
      * SMS provider later). It receives POST {phone, code, purpose, text} with this bearer token.
      */
     OTP_GATEWAY_URL: unsetWhenEmpty(z.url().optional()),
     OTP_GATEWAY_TOKEN: unsetWhenEmpty(z.string().min(16).optional()),
+    /**
+     * A second channel tried when OTP_DELIVERY fails ("sms" then "gateway", or the other way
+     * round). Only for the two network channels; each needs its own settings below.
+     */
+    OTP_FALLBACK: unsetWhenEmpty(z.enum(['gateway', 'sms']).optional()),
+    /**
+     * OTP_DELIVERY=sms: any HTTP SMS provider, described here. In the URL and the body, {phone}
+     * (+9639…), {digits} (9639…), {code} and {message} are replaced, escaped for where they land.
+     */
+    SMS_GATEWAY_URL: unsetWhenEmpty(z.url().optional()),
+    SMS_GATEWAY_METHOD: unsetWhenEmpty(z.enum(['POST', 'PUT', 'GET']).default('POST')),
+    /** One header line, "Name: value" (e.g. "Authorization: Bearer …"); it is a secret */
+    SMS_GATEWAY_AUTH_HEADER: unsetWhenEmpty(z.string().optional()),
+    SMS_GATEWAY_CONTENT_TYPE: unsetWhenEmpty(z.string().default('application/json')),
+    SMS_GATEWAY_BODY: unsetWhenEmpty(z.string().default('{"to":"{phone}","text":"{message}"}')),
+    /** Also send broadcast messages to customers by SMS (each one is paid); off by default */
+    SMS_ALLOW_BROADCASTS: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
+    /**
+     * Error reports in the Sentry protocol (Sentry, or self-hosted GlitchTip): off unless set.
+     * Only the error type, a scrubbed message, the stack and the route pattern are sent.
+     */
+    SENTRY_DSN: unsetWhenEmpty(z.url().optional()),
+    SENTRY_ENVIRONMENT: unsetWhenEmpty(z.string().max(64).optional()),
+    SENTRY_RELEASE: unsetWhenEmpty(z.string().max(64).optional()),
     /** Requests per minute per signed-in session (17: 300 per token) */
     SESSION_RATE_LIMIT_PER_MINUTE: perMinute(300),
     /** Requests per minute per store, all its users and devices together */
@@ -136,6 +214,14 @@ const envSchema = z
       .enum(['true', 'false'])
       .default('true')
       .transform((v) => v === 'true'),
+    /**
+     * "false" switches the read-only rule off (an emergency lever, e.g. while the payment provider
+     * is down): an expired store keeps selling. On by default (07 › دورة حياة الاشتراك).
+     */
+    SUBSCRIPTION_ENFORCEMENT: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   })
   .superRefine((env, ctx) => {
@@ -162,7 +248,7 @@ const envSchema = z
         message: 'OTP_DELIVERY=screen shows sign-up codes on screen; allowed only with DEPLOYMENT=local',
       });
     }
-    if (env.OTP_DELIVERY === 'gateway') {
+    if (env.OTP_DELIVERY === 'gateway' || env.OTP_FALLBACK === 'gateway') {
       if (!env.OTP_GATEWAY_URL || !env.OTP_GATEWAY_TOKEN) {
         ctx.addIssue({
           code: 'custom',
@@ -178,6 +264,34 @@ const envSchema = z
           message: 'OTP_GATEWAY_URL must be https:// on the cloud server',
         });
       }
+    }
+    if (env.OTP_FALLBACK) {
+      if (env.OTP_DELIVERY !== 'sms' && env.OTP_DELIVERY !== 'gateway') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['OTP_FALLBACK'],
+          message: 'OTP_FALLBACK needs OTP_DELIVERY to be "sms" or "gateway"',
+        });
+      } else if (env.OTP_FALLBACK === env.OTP_DELIVERY) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['OTP_FALLBACK'],
+          message: 'OTP_FALLBACK must be the other channel, not the same as OTP_DELIVERY',
+        });
+      }
+    }
+    if (env.OTP_DELIVERY === 'sms' || env.OTP_FALLBACK === 'sms') checkSms(env, ctx, production);
+    if (
+      env.SENTRY_DSN &&
+      env.DEPLOYMENT === 'cloud' &&
+      production &&
+      !env.SENTRY_DSN.startsWith('https://')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SENTRY_DSN'],
+        message: 'SENTRY_DSN must be https:// on the cloud server',
+      });
     }
     if (production && !env.COOKIE_SECURE) {
       ctx.addIssue({

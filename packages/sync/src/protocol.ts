@@ -194,16 +194,38 @@ export const SYNC_FLAGS = [
   'credit_limit_exceeded',
   'over_return',
   'duplicate_customer',
+  /** A product made at the till offline asked for a barcode another product holds now: made without it, for the owner to merge */
+  'duplicate_barcode',
   /** A sold serial number the store never received (03 › الإلكترونيات) */
   'unknown_serial',
   /** A serial number already sold by another sale */
   'serial_sold_twice',
+  /** A serial number in stock under another product was sold as this one */
+  'serial_other_product',
+  /** A serial-tracked product left with fewer numbers than pieces: accepted, flagged for the owner to pick the serial */
+  'serial_missing',
   /** A sale spent a voucher the server does not know (03 › قسيمة الاستبدال) */
   'unknown_voucher',
   /** A sale spent more than was left on a voucher */
   'voucher_overdrawn',
+  /** A sale spent a voucher that was voided or past its last day (round 48) */
+  'voucher_expired',
   'points_overdrawn',
+  /** A controlled drug sold without the prescription, doctor and patient details (03 › الصيدليات) */
+  'controlled_incomplete',
+  /** A sale took more from a batch than its balance held (the till's list was behind): accepted, flagged */
+  'batch_over_balance',
+  /** A sale took from a batch that was blocked (a recall) or past its date */
+  'batch_blocked',
   'posted_to_open_period',
+  /** A refund to the customer's account named a customer other than the sale's (or the sale had none) */
+  'refund_customer_mismatch',
+  /** Instalments (الأقساط): a sale's plan did not add up, so the sale stands and the plan was left out */
+  'installment_plan_invalid',
+  /** The plan's schedule on the sale differs from the server's own: the printed schedule is kept */
+  'schedule_mismatch',
+  /** A receipt paid more toward an instalment than was left of it (two tills): the money is accepted, the rest stays as the customer's credit */
+  'installment_overpaid',
   /**
    * Stored safely, but this server has nothing yet that posts this type (task M0-3): no entry,
    * no stock, no drawer. "accepted" says the document arrived, never that it was posted; this

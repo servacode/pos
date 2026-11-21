@@ -1,0 +1,47 @@
+/* The store admin's frame painted before any code loads (see #boot in index.html) */
+#boot {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--color-canvas, #f3f6fc);
+}
+#boot i {
+  display: block;
+  border-radius: 0.5rem;
+  background: var(--color-surface-muted, #e8edf7);
+}
+#boot aside {
+  display: none;
+  width: 16.5rem;
+  padding: 0.5rem 0 0.5rem 0.5rem;
+}
+#boot aside div {
+  height: 100%;
+  border-radius: 1rem;
+  background: var(--color-sidebar, #0a1a3f);
+  padding: 1.5rem 0.75rem;
+}
+#boot aside i {
+  height: 2.5rem;
+  margin-top: 0.5rem;
+  background: rgb(255 255 255 / 0.08);
+}
+#boot section {
+  flex: 1;
+  min-width: 0;
+  padding: 1rem;
+}
+#boot header {
+  height: 3rem;
+  margin-bottom: 1.5rem;
+}
+#boot section i {
+  margin-bottom: 1rem;
+}
+@media (min-width: 64rem) {
+  #boot aside {
+    display: block;
+  }
+  #boot section {
+    padding: 1.5rem 2rem;
+  }
+}

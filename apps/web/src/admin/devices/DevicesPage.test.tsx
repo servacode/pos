@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceSummary, MeResponse } from '@serva/core';
 import { deviceSummary, pairingCode } from '../../test/devices';
@@ -89,7 +89,8 @@ describe('/devices list', () => {
     openDevices([cashier1, offlineTill, stolen, refused]);
 
     expect(await screen.findByRole('heading', { name: 'الأجهزة', level: 1 })).toBeInTheDocument();
-    const main = screen.getByRole('region', { name: 'الفرع الرئيسي' });
+    // The title shows at once; the list follows when the devices arrive.
+    const main = await screen.findByRole('region', { name: 'الفرع الرئيسي' });
     const naim = screen.getByRole('region', { name: 'دوار النعيم' });
 
     const first = within(main).getAllByRole('listitem');
@@ -102,7 +103,12 @@ describe('/devices list', () => {
     expect(first[1]).toHaveTextContent('كاشير قديم');
     expect(first[1]).toHaveTextContent('موقوف');
     expect(first[1]).toHaveTextContent('أُوقف قبل ساعة');
-    expect(within(first[1]!).queryByRole('button', { name: /أوقف عن بُعد/ })).not.toBeInTheDocument();
+    expect(within(first[1]!).queryByRole('button', { name: /افصل هذا الجهاز/ })).not.toBeInTheDocument();
+    // A stopped device only offers to leave the list: no rename, no second stop.
+    expect(within(first[1]!).getByRole('button', { name: /إجراءات/ })).toBeInTheDocument();
+    // the branch counts the working devices; the stopped one is said apart
+    expect(main).toHaveTextContent('جهاز واحد');
+    expect(main).toHaveTextContent('و1 موقوف');
 
     const [till] = within(naim).getAllByRole('listitem');
     expect(till).toHaveTextContent('كاشير أندرويد بطابعة · أندرويد');
@@ -111,7 +117,11 @@ describe('/devices list', () => {
 
     // A refused request is not a device of the store.
     expect(screen.queryByText('جهاز غريب')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'الأجهزة' })).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(screen.getByRole('navigation', { name: 'القائمة الرئيسية' })).getByRole('link', {
+        name: 'الإعدادات',
+      }),
+    ).toHaveAttribute('aria-current', 'page');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 
@@ -145,6 +155,7 @@ describe('/devices list', () => {
     expect(
       screen.queryByRole('button', { name: /اسمح|ارفض|اربط جهازاً|أوقف|غيّر اسم/ }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /إجراءات/ })).not.toBeInTheDocument();
   });
 });
 
@@ -162,8 +173,11 @@ describe('approving a new device', () => {
     expect(screen.getByRole('heading', { name: 'بانتظار موافقتك' })).toBeInTheDocument();
     expect(card).toHaveTextContent('جهاز جديد يطلب الربط');
     expect(card).toHaveTextContent('الفرع الرئيسي · قبل دقيقة واحدة');
-    // On a phone the two buttons share a row: «ارفض» narrow, «اسمح» wide, both 48 px tall.
-    expect(within(card).getByRole('button', { name: 'اسمح: كاشير 3' })).toHaveClass('min-h-12');
+    // On a phone the two buttons share a row: «ارفض» narrow, «اسمح» wide, both 48 px tall under a
+    // finger (هوية 4: 40 with a mouse, 48 on a coarse pointer).
+    expect(within(card).getByRole('button', { name: 'اسمح: كاشير 3' })).toHaveClass(
+      'pointer-coarse:min-h-12',
+    );
 
     await user.click(within(card).getByRole('button', { name: 'اسمح: كاشير 3' }));
 
@@ -280,6 +294,73 @@ describe('the pairing dialog «اربط جهازاً جديداً»', () => {
     ]);
   });
 
+  it('offers «جوال مندوب», asks for the van and makes the code for that van', async () => {
+    const van = (id: string, name: string, over: Record<string, unknown> = {}) => ({
+      id,
+      code: id,
+      name,
+      parentBranchId: 'branch-1',
+      parentBranchName: 'الفرع الرئيسي',
+      vehiclePlate: null,
+      isActive: true,
+      repId: null,
+      repName: null,
+      ...over,
+    });
+    const { user, requestsTo } = openDevices([cashier1], {
+      'GET /v1/vans': {
+        status: 200,
+        body: [van('van-1', 'سيارة 1', { repName: 'أحمد' }), van('van-2', 'سيارة 2', { isActive: false })],
+      },
+      'POST /v1/devices/pairing-codes': { status: 200, body: pairingCode() },
+    });
+    await user.click(await screen.findByRole('button', { name: 'اربط جهازاً جديداً' }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByRole('img', { name: /الفرع الرئيسي/ });
+    await user.selectOptions(within(dialog).getByLabelText('نوع الجهاز'), 'rep_phone');
+    const vanSelect = await within(dialog).findByLabelText('السيارة');
+    // Only a live van is offered, with its rep
+    expect(
+      within(vanSelect)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['سيارة 1 · أحمد']);
+    await waitFor(() =>
+      expect(requestsTo('POST', '/v1/devices/pairing-codes').map((r) => r.body)).toEqual([
+        { branchId: 'branch-1' },
+        { branchId: 'van-1', kind: 'rep_phone' },
+      ]),
+    );
+  });
+
+  it('says there is no van yet when a rep phone is picked and the store has none', async () => {
+    const { user } = openDevices([cashier1], {
+      'GET /v1/vans': { status: 200, body: [] },
+      'POST /v1/devices/pairing-codes': { status: 200, body: pairingCode() },
+    });
+    await user.click(await screen.findByRole('button', { name: 'اربط جهازاً جديداً' }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByRole('img', { name: /الفرع الرئيسي/ });
+    await user.selectOptions(within(dialog).getByLabelText('نوع الجهاز'), 'rep_phone');
+    expect(await within(dialog).findByText(/لا توجد سيارة فعّالة بعد/)).toBeInTheDocument();
+  });
+
+  it('makes a link for the kind of device picked, so a kitchen screen opens its own page', async () => {
+    const { user, requestsTo } = openDevices([cashier1], {
+      'POST /v1/devices/pairing-codes': { status: 200, body: pairingCode() },
+    });
+    await user.click(await screen.findByRole('button', { name: 'اربط جهازاً جديداً' }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByRole('img', { name: /الفرع الرئيسي/ });
+    await user.selectOptions(within(dialog).getByLabelText('نوع الجهاز'), 'kitchen_screen');
+    await waitFor(() =>
+      expect(requestsTo('POST', '/v1/devices/pairing-codes').map((r) => r.body)).toEqual([
+        { branchId: 'branch-1' },
+        { branchId: 'branch-1', kind: 'kitchen_screen' },
+      ]),
+    );
+  });
+
   it('says when the code ran out', async () => {
     const { user } = openDevices([cashier1], {
       'POST /v1/devices/pairing-codes': {
@@ -347,8 +428,11 @@ describe('renaming and stopping a device', () => {
       }),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'غيّر اسم «كاشير 1»' }));
+    // A device's actions are in its menu (إجراءات «…»); renaming opens in place, in focus.
+    await user.click(await screen.findByRole('button', { name: 'إجراءات «كاشير 1»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'غيّر اسم «كاشير 1»' }));
     const field = screen.getByLabelText('الاسم الجديد لـ«كاشير 1»');
+    expect(field).toHaveFocus();
     await user.clear(field);
     await user.click(screen.getByRole('button', { name: 'احفظ' }));
     expect(screen.getByText('اسم الجهاز مطلوب')).toBeInTheDocument();
@@ -368,7 +452,8 @@ describe('renaming and stopping a device', () => {
       'PATCH /v1/devices/dev-1': apiError(409, 'conflict', 'تغيّر السجل.'),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'غيّر اسم «كاشير 1»' }));
+    await user.click(await screen.findByRole('button', { name: 'إجراءات «كاشير 1»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'غيّر اسم «كاشير 1»' }));
     await user.type(screen.getByLabelText('الاسم الجديد لـ«كاشير 1»'), ' أ');
     await user.click(screen.getByRole('button', { name: 'احفظ' }));
 
@@ -386,8 +471,9 @@ describe('renaming and stopping a device', () => {
       },
     });
 
-    await user.click(await screen.findByRole('button', { name: 'أوقف عن بُعد: كاشير النعيم' }));
-    let dialog = await screen.findByRole('dialog', { name: 'أوقف «كاشير النعيم» عن بُعد؟' });
+    await user.click(await screen.findByRole('button', { name: 'إجراءات «كاشير النعيم»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'افصل هذا الجهاز: كاشير النعيم' }));
+    let dialog = await screen.findByRole('dialog', { name: 'افصل «كاشير النعيم» عن متجرك؟' });
     expect(dialog).toHaveTextContent('يتوقف البيع عليه عند أول اتصال');
     expect(dialog).toHaveTextContent('بانتظار الإرسال على الجهاز: 12 مستنداً');
     expect(dialog).toHaveTextContent('أعلن عنها الجهاز ولم تصل: 3 مستندات');
@@ -397,18 +483,36 @@ describe('renaming and stopping a device', () => {
       within(dialog)
         .getAllByRole('button')
         .map((b) => b.textContent),
-    ).toEqual(['', 'تراجع', 'أوقف الجهاز']);
-    await user.click(within(dialog).getByRole('button', { name: 'تراجع' }));
+    ).toEqual(['', 'لا، أبقِه', 'افصل الجهاز']);
+    await user.click(within(dialog).getByRole('button', { name: 'لا، أبقِه' }));
     expect(requestsTo('POST', '/v1/devices/dev-2/revoke')).toHaveLength(0);
 
-    await user.click(screen.getByRole('button', { name: 'أوقف عن بُعد: كاشير النعيم' }));
+    await user.click(screen.getByRole('button', { name: 'إجراءات «كاشير النعيم»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'افصل هذا الجهاز: كاشير النعيم' }));
     dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'أوقف الجهاز' }));
+    await user.click(within(dialog).getByRole('button', { name: 'افصل الجهاز' }));
 
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(requestsTo('POST', '/v1/devices/dev-2/revoke')).toHaveLength(1);
     const row = within(screen.getByRole('region', { name: 'دوار النعيم' })).getByRole('listitem');
     expect(row).toHaveTextContent('موقوف');
-    expect(within(row).queryByRole('button', { name: /أوقف عن بُعد/ })).not.toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /افصل هذا الجهاز/ })).not.toBeInTheDocument();
+    expect(within(row).queryByRole('menuitem', { name: /غيّر اسم/ })).not.toBeInTheDocument();
+  });
+
+  it('takes a stopped device off the list with «احذف من القائمة»', async () => {
+    const { user, requestsTo } = openDevices([cashier1, stolen], {
+      'POST /v1/devices/dev-3/hide': { status: 200, body: stolen },
+    });
+    expect(await screen.findByText('كاشير قديم')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'إجراءات «كاشير قديم»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'احذف من القائمة: كاشير قديم' }));
+    // asks first: nothing is sent until the dialog is confirmed
+    const sure = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/devices/dev-3/hide')).toHaveLength(0);
+    await user.click(within(sure).getByRole('button', { name: 'احذفه من القائمة' }));
+    await vi.waitFor(() => expect(screen.queryByText('كاشير قديم')).not.toBeInTheDocument());
+    expect(requestsTo('POST', '/v1/devices/dev-3/hide')).toHaveLength(1);
+    expect(screen.getByText('كاشير 1')).toBeInTheDocument();
   });
 });

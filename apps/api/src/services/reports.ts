@@ -31,6 +31,10 @@ import type { z } from 'zod';
 import { forbidden, inScope, permissionScope } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
+import { cashRefundDrawers } from './refund-drawers';
+
+/** The name a rental's deposit refund carries on the sale (the till writes «ردّ العربون · RNT-…»). */
+const DEPOSIT_BACK_NAME = 'ردّ العربون';
 
 /**
  * The report and accounting routes of packages/core › contracts/accounting.ts. Everything is read
@@ -152,6 +156,50 @@ async function paymentsByMethod(tx: Transaction, where: SQL) {
   }));
 }
 
+/** One day of the range: what the day's invoices came to, and what its returns took back. */
+export interface DayTotal {
+  date: string;
+  invoiceCount: number;
+  totalMinor: number;
+  returnsMinor: number;
+}
+
+/**
+ * The day totals of a range in one read (the home page's sparklines and chart), the same sums as
+ * `dayReport` for each day, so the home page asks once instead of once per day. Days without
+ * sales are not listed.
+ */
+export async function dayTotals(
+  db: Database,
+  auth: AccessClaims,
+  query: { branchId?: string | undefined; from: string; to: string },
+): Promise<{ items: DayTotal[] }> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const filter = await branchFilter(tx, auth, 'report.view', query.branchId);
+    const sold = await tx.execute<{ day: string; n: string; total: string }>(sql`
+      select i.business_date::text as day, count(*)::text as n, coalesce(sum(i.total_minor), 0)::text as total
+      from invoices i
+      where i.business_date between ${query.from} and ${query.to} and ${inBranches(sql`i.branch_id`, filter)}
+      group by i.business_date`);
+    const back = await tx.execute<{ day: string; total: string }>(sql`
+      select r.business_date::text as day, coalesce(sum(r.total_minor), 0)::text as total
+      from sale_returns r
+      where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`, filter)}
+      group by r.business_date`);
+    const returned = new Map(back.map((row) => [row.day, num(row.total)]));
+    const days = new Set([...sold.map((row) => row.day), ...returned.keys()]);
+    const soldBy = new Map(sold.map((row) => [row.day, row]));
+    return {
+      items: [...days].sort().map((date) => ({
+        date,
+        invoiceCount: num(soldBy.get(date)?.n),
+        totalMinor: num(soldBy.get(date)?.total),
+        returnsMinor: returned.get(date) ?? 0,
+      })),
+    };
+  });
+}
+
 export async function dayReport(
   db: Database,
   auth: AccessClaims,
@@ -200,19 +248,32 @@ export async function dayReport(
       where ${where}
       group by t.root, rc.name
       order by sum(l.total_minor) desc, rc.name nulls last`);
+    const returnsWhere = sql`r.business_date = ${query.date} and ${inBranches(sql`r.branch_id`, filter)}`;
+    // The best sellers are net of the day's returns, and a rental's deposit refund (a line of the
+    // sale, not a product) is not a product that sold.
     const top = await tx.execute<{ id: string; name: string; qty: string; total: string }>(sql`
-      select l.product_id as id, min(coalesce(p.name_ar, l.name)) as name, sum(l.base_qty)::text as qty,
-             sum(l.total_minor)::text as total
-      from invoice_lines l
-      join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
-      left join products p on p.tenant_id = l.tenant_id and p.id = l.product_id
-      where ${where}
-      group by l.product_id
-      order by sum(l.total_minor) desc, l.product_id
+      with sold as (
+        select l.product_id as id, min(coalesce(p.name_ar, l.name)) as name, sum(l.base_qty) as qty,
+               sum(l.total_minor) as total
+        from invoice_lines l
+        join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+        left join products p on p.tenant_id = l.tenant_id and p.id = l.product_id
+        where ${where} and l.name not like ${`${DEPOSIT_BACK_NAME}%`}
+        group by l.product_id
+      ), back as (
+        select rl.product_id as id, sum(rl.base_qty) as qty, sum(rl.total_minor) as total
+        from sale_return_lines rl
+        join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
+        where ${returnsWhere}
+        group by rl.product_id
+      )
+      select s.id, s.name, (s.qty - coalesce(b.qty, 0))::text as qty, (s.total - coalesce(b.total, 0))::text as total
+      from sold s left join back b on b.id = s.id
+      where s.qty - coalesce(b.qty, 0) > 0
+      order by s.total - coalesce(b.total, 0) desc, s.id
       limit 10`);
     const total = num(totals?.total);
     const tax = num(totals?.tax);
-    const returnsWhere = sql`r.business_date = ${query.date} and ${inBranches(sql`r.branch_id`, filter)}`;
     const [returned] = await tx.execute<{ n: string; total: string; tax: string }>(sql`
       select count(*)::text as n, coalesce(sum(r.total_minor), 0)::text as total,
              coalesce(sum(r.tax_minor), 0)::text as tax
@@ -223,10 +284,12 @@ export async function dayReport(
       amount: string;
       n: string;
     }>(sql`
-      select r.refund_method as method, r.currency, sum(r.total_minor)::text as amount, count(*)::text as n
+      select r.refund_method as method, r.currency,
+             sum(coalesce((r.payload -> 'refunds' -> 0 ->> 'amountMinor')::bigint, r.total_minor))::text as amount,
+             count(*)::text as n
       from sale_returns r where ${returnsWhere} and r.refund_method is not null
       group by r.refund_method, r.currency
-      order by array_position(array['cash', 'card', 'wallet', 'transfer', 'voucher'], r.refund_method), r.currency`);
+      order by array_position(array['cash', 'card', 'wallet', 'transfer', 'voucher', 'account'], r.refund_method), r.currency`);
     const returnsTotal = num(returned?.total);
     const collected = await tx.execute<{
       method: ReceiptMethod;
@@ -324,7 +387,7 @@ type ShiftRow = {
   } | null;
 };
 
-async function shiftRows(tx: Transaction, where: SQL): Promise<ShiftRow[]> {
+async function shiftRows(tx: Transaction, where: SQL, limit?: number): Promise<ShiftRow[]> {
   return tx.execute<ShiftRow>(sql`
     select s.id, s.number, s.branch_id, d.code as device_code, s.opened_by, u.full_name as opened_by_name,
            s.opened_at, s.closed_at, s.status, s.opening, s.closing,
@@ -336,7 +399,7 @@ async function shiftRows(tx: Transaction, where: SQL): Promise<ShiftRow[]> {
     join devices d on d.id = s.device_id
     left join users u on u.id = s.opened_by
     where ${where}
-    order by coalesce(s.opened_at, s.closed_at), s.id`);
+    order by coalesce(s.opened_at, s.closed_at), s.id${limit ? sql` limit ${limit}` : sql``}`);
 }
 
 const summaryOf = (r: ShiftRow): ShiftSummary => ({
@@ -354,80 +417,48 @@ const summaryOf = (r: ShiftRow): ShiftSummary => ({
   returnsTotalMinor: num(r.returns_total),
 });
 
-export async function listShifts(
-  db: Database,
-  auth: AccessClaims,
-  query: z.output<typeof shiftListQuery>,
-): Promise<ShiftListResponse> {
-  return withTenant(db, auth.tenantId, async (tx) => {
-    const filter = await branchFilter(tx, auth, 'report.view', query.branchId);
-    // A shift's day is its opening's business day; a close that came alone, its closing day.
-    const day = query.date
-      ? sql`coalesce(s.business_date,
-          (select (s.closed_at at time zone t.timezone)::date from tenants t where t.id = s.tenant_id)) = ${query.date}`
-      : sql`true`;
-    const rows = await shiftRows(tx, sql`${inBranches(sql`s.branch_id`, filter)} and ${day}`);
-    return { items: rows.map(summaryOf) };
-  });
-}
-
 /**
- * GET /v1/shifts/{id}: the drawer of each currency by the formula of 10 › مطابقة الصندوق, from the
- * documents the server holds (an open shift's X report too). The expected amount and the
- * difference are only for those who may see them (shift.view_difference).
+ * The drawer of each currency of the shifts given, by the formula of 10 › مطابقة الصندوق, in one
+ * pass for all of them (the list and the report share it). The expected amount and the difference
+ * are null where `seesDifference(branchId)` is false.
  */
-export async function shiftReport(db: Database, auth: AccessClaims, id: string): Promise<ShiftReport> {
-  return withTenant(db, auth.tenantId, async (tx) => {
-    const [row] = await shiftRows(tx, sql`s.id = ${id}`);
-    if (!row) throw notFound('هذه الوردية غير موجودة.');
-    const scope = await permissionScope(tx, auth.userId, 'report.view');
-    if (!inScope(scope, row.branch_id)) throw forbidden();
-    const seesDifference = inScope(
-      await permissionScope(tx, auth.userId, 'shift.view_difference'),
-      row.branch_id,
-    );
-
-    const ofShift = sql`i.shift_id = ${id}`;
-    const byMethod = await paymentsByMethod(tx, ofShift);
-    const flows = await tx.execute<{ currency: CurrencyCode; kind: string; amount: string }>(sql`
-      select p.currency, 'cash_in' as kind, sum(p.amount_minor)::text as amount
+async function drawersOf(
+  tx: Transaction,
+  rows: readonly ShiftRow[],
+  seesDifference: (branchId: string) => boolean,
+): Promise<Map<string, ShiftCurrencyReport[]>> {
+  const result = new Map<string, ShiftCurrencyReport[]>();
+  if (rows.length === 0) return result;
+  const ids = sql.join(
+    rows.map((r) => sql`${r.id}::uuid`),
+    sql`, `,
+  );
+  const flows = await tx.execute<{
+    shift_id: string;
+    currency: CurrencyCode;
+    kind: string;
+    amount: string;
+  }>(sql`
+      select i.shift_id, p.currency, 'cash_in' as kind, sum(p.amount_minor)::text as amount
       from invoice_payments p join invoices i on i.id = p.invoice_id
-      where ${ofShift} and p.method = 'cash' group by p.currency
+      where i.shift_id in (${ids}) and p.method = 'cash' group by i.shift_id, p.currency
       union all
-      select i.payload -> 'change' ->> 'currency', 'change', sum((i.payload -> 'change' ->> 'amountMinor')::bigint)::text
-      from invoices i where ${ofShift} and jsonb_typeof(i.payload -> 'change') = 'object'
-      group by i.payload -> 'change' ->> 'currency'
+      select i.shift_id, i.payload -> 'change' ->> 'currency', 'change', sum((i.payload -> 'change' ->> 'amountMinor')::bigint)::text
+      from invoices i where i.shift_id in (${ids}) and jsonb_typeof(i.payload -> 'change') = 'object'
+      group by i.shift_id, i.payload -> 'change' ->> 'currency'
       union all
-      select r.currency, 'receipt', sum(r.amount_minor)::text from receipts r
-      where r.shift_id = ${id} and r.method = 'cash' group by r.currency
+      select r.shift_id, r.currency, 'receipt', sum(r.amount_minor)::text from receipts r
+      where r.shift_id in (${ids}) and r.method = 'cash' group by r.shift_id, r.currency
       union all
-      select r.currency, 'refund', sum(r.total_minor)::text from sale_returns r
-      where r.shift_id = ${id} and r.refund_method = 'cash' group by r.currency
+      select x.shift_id, x.currency, 'refund', sum(x.amount)::text
+      from (${cashRefundDrawers(sql`r.shift_id in (${ids})`)}) x group by x.shift_id, x.currency
       union all
-      select v.currency, 'receipt', sum(v.amount_minor)::text from vouchers v
-      where v.shift_id = ${id} and v.kind = 'gift' and v.method = 'cash' group by v.currency
+      select v.shift_id, v.currency, 'receipt', sum(v.amount_minor)::text from vouchers v
+      where v.shift_id in (${ids}) and v.kind in ('gift', 'deposit') and v.method = 'cash' group by v.shift_id, v.currency
       union all
-      select m.currency, m.kind, sum(m.amount_minor)::text from cash_movements m
-      where m.shift_id = ${id} group by m.currency, m.kind`);
-    const movements = await tx.execute<{
-      id: string;
-      kind: ShiftReport['movements'][number]['kind'];
-      currency: CurrencyCode;
-      amount: string;
-      reason: string;
-      approver: string | null;
-      approver_name: string | null;
-      at: string | null;
-    }>(sql`
-      select m.id, m.kind, m.currency, m.amount_minor::text as amount, m.reason,
-             u.id as approver, u.full_name as approver_name,
-             coalesce(x.device_time, m.created_at) as at
-      from cash_movements m
-      left join users u on u.id = (m.approval ->> 'userId')::uuid
-      left join sync_inbox x on x.doc_id = m.id
-      where m.shift_id = ${id}
-      order by coalesce(x.device_time, m.created_at), m.id`);
-
+      select m.shift_id, m.currency, m.kind, sum(m.amount_minor)::text from cash_movements m
+      where m.shift_id in (${ids}) group by m.shift_id, m.currency, m.kind`);
+  for (const row of rows) {
     const currencies = new Map<CurrencyCode, ShiftCurrencyReport>();
     const drawer = (currency: CurrencyCode) => {
       let d = currencies.get(currency);
@@ -455,6 +486,7 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       row.opening ?? row.closing?.cash.map((c) => ({ currency: c.currency, amountMinor: c.openingMinor }));
     for (const o of opening ?? []) drawer(o.currency).openingMinor = o.amountMinor;
     for (const f of flows) {
+      if (f.shift_id !== row.id) continue;
       const d = drawer(f.currency);
       const amount = num(f.amount);
       if (f.kind === 'cash_in') d.cashSalesMinor += amount;
@@ -466,6 +498,7 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       else if (f.kind === 'safe_drop') d.dropsMinor += amount;
     }
     for (const c of row.closing?.cash ?? []) drawer(c.currency).countedMinor = c.countedMinor;
+    const sees = seesDifference(row.branch_id);
     for (const d of currencies.values()) {
       const expected =
         d.openingMinor +
@@ -476,13 +509,107 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
         d.payInMinor -
         d.payOutMinor -
         d.dropsMinor;
-      d.expectedMinor = seesDifference ? expected : null;
-      d.differenceMinor = seesDifference && d.countedMinor !== null ? d.countedMinor - expected : null;
+      d.expectedMinor = sees ? expected : null;
+      d.differenceMinor = sees && d.countedMinor !== null ? d.countedMinor - expected : null;
     }
+    result.set(
+      row.id,
+      [...currencies.values()].sort((x, y) => x.currency.localeCompare(y.currency)),
+    );
+  }
+  return result;
+}
+
+/** The most shifts one list answers with; more is said in `truncated` */
+const SHIFT_LIST_MAX = 500;
+/** With no day, range or status asked, the list covers this many days back from the store's today */
+const SHIFT_DEFAULT_DAYS = 31;
+
+export async function listShifts(
+  db: Database,
+  auth: AccessClaims,
+  query: z.output<typeof shiftListQuery>,
+): Promise<ShiftListResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const filter = await branchFilter(tx, auth, 'report.view', query.branchId);
+    // A shift's day is its opening's business day; a close that came alone, its closing day.
+    const shiftDay = sql`coalesce(s.business_date,
+          (select (s.closed_at at time zone t.timezone)::date from tenants t where t.id = s.tenant_id))`;
+    const day =
+      query.status === 'open'
+        ? sql`s.status = 'open'`
+        : query.date
+          ? sql`${shiftDay} = ${query.date}`
+          : query.from && query.to
+            ? sql`${shiftDay} between ${query.from} and ${query.to}`
+            : sql`${shiftDay} >= (select (now() at time zone t.timezone)::date from tenants t where t.id = s.tenant_id) - ${SHIFT_DEFAULT_DAYS}::int`;
+    const found = await shiftRows(
+      tx,
+      sql`${inBranches(sql`s.branch_id`, filter)} and ${day}`,
+      SHIFT_LIST_MAX + 1,
+    );
+    const truncated = found.length > SHIFT_LIST_MAX;
+    const rows = truncated ? found.slice(0, SHIFT_LIST_MAX) : found;
+    // Expected, counted and the difference of every shift, in one pass (not one report per shift)
+    const scope = await permissionScope(tx, auth.userId, 'shift.view_difference');
+    const drawers = await drawersOf(tx, rows, (branchId) => inScope(scope, branchId));
+    return {
+      items: rows.map((row) => ({
+        ...summaryOf(row),
+        cash: (drawers.get(row.id) ?? []).map((d) => ({
+          currency: d.currency,
+          expectedMinor: d.expectedMinor,
+          countedMinor: d.countedMinor,
+          differenceMinor: d.differenceMinor,
+        })),
+      })),
+      ...(truncated ? { truncated } : {}),
+    };
+  });
+}
+
+/**
+ * GET /v1/shifts/{id}: the drawer of each currency by the formula of 10 › مطابقة الصندوق, from the
+ * documents the server holds (an open shift's X report too). The expected amount and the
+ * difference are only for those who may see them (shift.view_difference).
+ */
+export async function shiftReport(db: Database, auth: AccessClaims, id: string): Promise<ShiftReport> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const [row] = await shiftRows(tx, sql`s.id = ${id}`);
+    if (!row) throw notFound('هذه الوردية غير موجودة.');
+    const scope = await permissionScope(tx, auth.userId, 'report.view');
+    if (!inScope(scope, row.branch_id)) throw forbidden();
+    const seesDifference = inScope(
+      await permissionScope(tx, auth.userId, 'shift.view_difference'),
+      row.branch_id,
+    );
+
+    const ofShift = sql`i.shift_id = ${id}`;
+    const byMethod = await paymentsByMethod(tx, ofShift);
+    const movements = await tx.execute<{
+      id: string;
+      kind: ShiftReport['movements'][number]['kind'];
+      currency: CurrencyCode;
+      amount: string;
+      reason: string;
+      approver: string | null;
+      approver_name: string | null;
+      at: string | null;
+    }>(sql`
+      select m.id, m.kind, m.currency, m.amount_minor::text as amount, m.reason,
+             u.id as approver, u.full_name as approver_name,
+             coalesce(x.device_time, m.created_at) as at
+      from cash_movements m
+      left join users u on u.id = (m.approval ->> 'userId')::uuid
+      left join sync_inbox x on x.doc_id = m.id
+      where m.shift_id = ${id}
+      order by coalesce(x.device_time, m.created_at), m.id`);
+
+    const byCurrency = (await drawersOf(tx, [row], () => seesDifference)).get(id) ?? [];
 
     return {
       ...summaryOf(row),
-      byCurrency: [...currencies.values()].sort((a, b) => a.currency.localeCompare(b.currency)),
+      byCurrency,
       byMethod: byMethod.map(({ baseAmountMinor: _base, ...m }) => m),
       movements: movements.map((m) => ({
         id: m.id,
@@ -520,8 +647,8 @@ export async function journal(
     const filter = await branchFilter(tx, auth, 'accounting.view', query.branchId);
     const after = decodeCursor(query.cursor);
     const conditions: SQL[] = [inBranches(sql`e.branch_id`, filter)];
-    if (query.from) conditions.push(sql`e.entry_date >= ${query.from}`);
-    if (query.to) conditions.push(sql`e.entry_date <= ${query.to}`);
+    if (query.from) conditions.push(sql`e.posting_date >= ${query.from}`);
+    if (query.to) conditions.push(sql`e.posting_date <= ${query.to}`);
     if (after) conditions.push(sql`(e.year, e.seq) > (${after.year}, ${after.seq})`);
     const entries = await tx.execute<{
       id: string;
@@ -618,13 +745,13 @@ export async function trialBalance(
       credit: string;
     }>(sql`
       select a.code, a.name, a.type, a.normal_side,
-             coalesce(sum(l.debit_minor - l.credit_minor) filter (where e.entry_date < ${query.from}), 0)::text as opening,
-             coalesce(sum(l.debit_minor) filter (where e.entry_date >= ${query.from}), 0)::text as debit,
-             coalesce(sum(l.credit_minor) filter (where e.entry_date >= ${query.from}), 0)::text as credit
+             coalesce(sum(l.debit_minor - l.credit_minor) filter (where e.posting_date < ${query.from}), 0)::text as opening,
+             coalesce(sum(l.debit_minor) filter (where e.posting_date >= ${query.from}), 0)::text as debit,
+             coalesce(sum(l.credit_minor) filter (where e.posting_date >= ${query.from}), 0)::text as credit
       from journal_lines l
       join journal_entries e on e.id = l.entry_id
       join accounts a on a.id = l.account_id
-      where e.entry_date <= ${query.to} and ${inBranches(sql`e.branch_id`, filter)}
+      where e.posting_date <= ${query.to} and ${inBranches(sql`e.branch_id`, filter)}
       group by a.code, a.name, a.type, a.normal_side
       order by a.code`);
     let debitTotal = 0;
@@ -644,6 +771,7 @@ export async function trialBalance(
           accountCode: r.code,
           accountName: r.name,
           type: r.type,
+          normalSide: r.normal_side,
           openingMinor: sign * opening + 0,
           debitMinor: debit,
           creditMinor: credit,

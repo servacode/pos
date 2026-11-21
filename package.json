@@ -29,6 +29,10 @@
     "local:restore": "bash scripts/local/restore.sh",
     "local:key": "bash scripts/local/key.sh",
     "local:schedule": "bash scripts/local/schedule.sh",
+    "local:cleanup": "bash scripts/local/cleanup.sh",
+    "local:offsite": "bash scripts/local/offsite-s3.sh",
+    "local:alert": "bash scripts/local/alert.sh",
+    "local:health-watch": "bash scripts/local/health-watch.sh",
     "local:integrity": "bash scripts/local/integrity.sh"
   },
   "devDependencies": {

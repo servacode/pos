@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { Transaction } from '@serva/db';
+import { cashRefundDrawers } from './refund-drawers';
 
 /**
  * «فحص السلامة» (task M0-5): canonical fingerprints of a store's books, and the first
@@ -242,12 +243,12 @@ async function drawerLedger(tx: Transaction, tenantId: string): Promise<Integrit
   const gifts = (await hasColumn(tx, 'vouchers', 'shift_id'))
     ? sql`union all
       select v.shift_id, v.currency, v.amount_minor
-      from vouchers v where v.tenant_id = ${tenantId} and v.kind = 'gift' and v.method = 'cash'`
+      from vouchers v where v.tenant_id = ${tenantId} and v.kind in ('gift', 'deposit') and v.method = 'cash'`
     : sql``;
   const refunds = (await hasReturns(tx))
     ? sql`union all
-      select r.shift_id, r.currency, -r.total_minor
-      from sale_returns r where r.tenant_id = ${tenantId} and r.refund_method = 'cash'`
+      select x.shift_id, x.currency, -x.amount
+      from (${cashRefundDrawers(sql`r.tenant_id = ${tenantId}`)}) x`
     : sql``;
   // What went in and out of each drawer by the documents, and the close's counted amount less the
   // expected one; against the drawer accounts (children of 1110) by shift. The float itself is not
@@ -355,8 +356,13 @@ async function dayReportLedger(tx: Transaction, tenantId: string): Promise<Integ
       select branch_id, business_date, 'net', -(total_minor - tax_minor)
       from sale_returns where tenant_id = ${tenantId}
       union all select branch_id, business_date, 'tax', -tax_minor from sale_returns where tenant_id = ${tenantId}
-      union all select branch_id, business_date, 'pay:' || refund_method, -total_minor
-      from sale_returns where tenant_id = ${tenantId} and refund_method is not null`
+      union all select branch_id, business_date,
+        'pay:' || case when refund_method = 'account' then 'credit' else refund_method end,
+        -coalesce((payload -> 'refunds' -> 0 ->> 'amountMinor')::bigint, total_minor)
+      from sale_returns where tenant_id = ${tenantId} and refund_method is not null
+      union all select branch_id, business_date, 'rounding',
+        -coalesce((payload -> 'refunds' -> 0 ->> 'roundingMinor')::bigint, 0)
+      from sale_returns where tenant_id = ${tenantId} and refund_method = 'cash'`
     : sql``;
   const rows = await tx.execute<{
     branch: string;
@@ -429,7 +435,11 @@ async function stockValueLedger(tx: Transaction, tenantId: string): Promise<Inte
   if (!(await hasTable(tx, 'stock_values'))) return check('stock_value_ledger', []);
   const rows = await tx.execute<{ branch: string; stock: string; ledger: string }>(sql`
     with stock as (
-      select branch_id, sum(value_minor) as amount from stock_values where tenant_id = ${tenantId} group by branch_id
+      -- a store's damaged goods (round 35, D7) are on the store's books
+      select coalesce(d.parent_branch_id, sv.branch_id) as branch_id, sum(sv.value_minor) as amount
+      from stock_values sv
+      left join branches d on d.tenant_id = sv.tenant_id and d.id = sv.branch_id and d.kind = 'damaged'
+      where sv.tenant_id = ${tenantId} group by 1
     ),
     books as (
       select e.branch_id, sum(l.debit_minor - l.credit_minor) as amount

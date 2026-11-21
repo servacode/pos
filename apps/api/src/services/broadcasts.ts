@@ -38,7 +38,7 @@ const who = (audience: BroadcastAudience): SQL => {
         where i.customer_id = c.id and p.category_id in (select id from tree))`;
     case 'recent':
       return sql`exists (select 1 from invoices i where i.customer_id = c.id
-        and i.business_date >= current_date - ${audience.days}::int)`;
+        and i.business_date >= (timezone((select timezone from tenants limit 1), now()))::date - ${audience.days}::int)`;
   }
 };
 
@@ -67,10 +67,14 @@ export function previewBroadcast(
   app: FastifyInstance,
   auth: AccessClaims,
   audience: BroadcastAudience,
-): Promise<{ count: number }> {
+): Promise<{ count: number; max: number }> {
   return withTenant(app.db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
-    return { count: Math.min((await phonesOf(tx, audience)).length, MAX_BROADCAST_RECIPIENTS) };
+    // The true number, even above the cap: the page says so and keeps «أرسل» off instead of failing later
+    const [row] = await tx.execute<{ n: string }>(sql`
+      select count(distinct c.phone)::text as n from customers c
+      where c.archived_at is null and not c.no_messages and c.phone is not null and ${who(audience)}`);
+    return { count: Number(row?.n ?? 0), max: MAX_BROADCAST_RECIPIENTS };
   });
 }
 
@@ -85,6 +89,8 @@ export async function createBroadcast(
   }
   const made = await withTenant(app.db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
+    // Two requests at once (a double click, two tabs) wait for each other, so only one sees «no broadcast is sending»
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'broadcast:' + auth.tenantId}))`);
     const [busy] = await tx
       .select({ id: broadcasts.id })
       .from(broadcasts)
@@ -155,25 +161,35 @@ export function runBroadcast(app: FastifyInstance, tenantId: string, id: string)
         );
         return;
       }
+      // The phone is taken before it is sent to: a crash or a second server never sends it twice
+      // (at most once). Someone marked «لا يريد رسائل» after the broadcast was made is skipped.
+      const taken = await withTenant(app.db, tenantId, (tx) =>
+        tx
+          .update(broadcasts)
+          .set({ nextIndex: row.nextIndex + 1 })
+          .where(and(eq(broadcasts.id, id), eq(broadcasts.nextIndex, row.nextIndex)))
+          .returning({ id: broadcasts.id }),
+      );
+      if (taken.length === 0) continue;
+      const phone = row.phones[row.nextIndex]!;
+      const [stopped] = await withTenant(app.db, tenantId, (tx) =>
+        tx.execute<{ n: string }>(
+          sql`select count(*)::text as n from customers where phone = ${phone} and no_messages`,
+        ),
+      );
+      if (Number(stopped?.n ?? 0) > 0) continue;
       let ok = true;
       try {
-        await app.otpSender!.send({
-          phone: row.phones[row.nextIndex]!,
-          code: '',
-          purpose: 'broadcast',
-          text: row.text,
-        });
-      } catch {
+        await app.otpSender!.send({ phone, code: '', purpose: 'broadcast', text: row.text });
+      } catch (error) {
         ok = false;
+        app.log.warn({ err: (error as Error).message, broadcast: id }, 'broadcast message failed');
       }
       await withTenant(app.db, tenantId, (tx) =>
         tx
           .update(broadcasts)
-          .set({
-            nextIndex: row.nextIndex + 1,
-            ...(ok ? { sent: row.sent + 1 } : { failed: row.failed + 1 }),
-          })
-          .where(and(eq(broadcasts.id, id), eq(broadcasts.nextIndex, row.nextIndex))),
+          .set(ok ? { sent: sql`${broadcasts.sent} + 1` } : { failed: sql`${broadcasts.failed} + 1` })
+          .where(eq(broadcasts.id, id)),
       );
       if (app.env.BROADCAST_DELAY_MS > 0) await pause(app.env.BROADCAST_DELAY_MS);
     }

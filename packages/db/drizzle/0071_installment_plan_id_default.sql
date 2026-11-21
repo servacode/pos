@@ -1,0 +1,1 @@
+ALTER TABLE "installment_plans" ALTER COLUMN "id" SET DEFAULT uuid_generate_v7();

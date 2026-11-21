@@ -119,6 +119,7 @@ describe('GET /v1/sync/bootstrap and the snapshot file', () => {
       'products',
       'promotions',
       'roles',
+      'serials',
       'settings',
       'stock_levels',
       'tax_rates',

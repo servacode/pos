@@ -18,7 +18,12 @@ export function orderCart(
 ): { cart: Cart; missing: string[] } {
   let cart: Cart = {
     ...EMPTY_CART,
-    onlineOrder: { id: order.id, number: order.number, customerName: order.customerName },
+    onlineOrder: {
+      id: order.id,
+      number: order.number,
+      customerName: order.customerName,
+      ...(order.couponRule ? { couponRule: order.couponRule } : {}),
+    },
     // A hold's deposit, paid as a voucher, comes off first at payment
     ...(order.depositCode ? { voucher: order.depositCode } : {}),
   };

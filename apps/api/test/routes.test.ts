@@ -1,9 +1,13 @@
+import { randomBytes } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { createUuidV7, parseSnapshot, payloadHash, type SyncDocumentBody } from '@serva/sync';
+import { cartLine, documents, openStore, push, sale, shiftOpen } from './accounting-fixtures';
 import { createDevice, deviceFields, firstBranch } from './devices';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
+import { hashDeviceToken } from '../src/auth/device-guard';
+import { hashSecret } from '../src/auth/passwords';
+import { closeAppDb, closeOwnerDb, codes, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
 
 /**
  * Every route is classified here. A new route fails this file until it is: public routes are
@@ -12,12 +16,14 @@ import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabas
  * Device routes take no id: the store comes from the device token alone, and each gets a probe
  * that another store's device can neither see nor touch this store's data.
  */
-const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 'platform'> = {
+const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 'platform' | 'agent'> = {
   'GET /health': 'public',
   'GET /v1/meta': 'public',
   'POST /v1/auth/register': 'public',
   'POST /v1/auth/register/verify': 'public',
   'POST /v1/auth/login': 'public',
+  'POST /v1/auth/forgot': 'public',
+  'POST /v1/auth/forgot/reset': 'public',
   'POST /v1/auth/refresh': 'public',
   'POST /v1/auth/logout': 'public',
   'GET /v1/me': 'signed-in',
@@ -28,23 +34,80 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/customers/:id': 'signed-in',
   'GET /v1/customers/:id/purchases': 'signed-in',
   'GET /v1/device/customers/:id/purchases': 'device',
+  'GET /v1/device/subscription': 'device',
   'PUT /v1/customers/:id': 'signed-in',
+  'POST /v1/customers/:id/payments': 'signed-in',
+  'POST /v1/customers/:id/archive-duplicate': 'signed-in',
+  'POST /v1/customers/:id/opening-debt': 'signed-in',
   'GET /v1/suppliers': 'signed-in',
   'POST /v1/suppliers': 'signed-in',
   'PUT /v1/suppliers/:id': 'signed-in',
   'GET /v1/purchases': 'signed-in',
   'POST /v1/purchases': 'signed-in',
   'GET /v1/purchases/:id': 'signed-in',
+  'POST /v1/purchases/:id/correct': 'signed-in',
+  'GET /v1/purchase-orders': 'signed-in',
+  'GET /v1/purchase-orders/suggest': 'signed-in',
+  'POST /v1/purchase-orders': 'signed-in',
+  'GET /v1/purchase-orders/:id': 'signed-in',
+  'PUT /v1/purchase-orders/:id': 'signed-in',
+  'POST /v1/purchase-orders/:id/status': 'signed-in',
   'POST /v1/supplier-payments': 'signed-in',
   'GET /v1/inventory': 'signed-in',
   'GET /v1/inventory/expiry': 'signed-in',
+  'GET /v1/inventory/count-sheet': 'signed-in',
+  'GET /v1/reports/waste': 'signed-in',
+  'POST /v1/device/waste': 'device',
+  'GET /v1/damaged-stock': 'signed-in',
+  'GET /v1/batches/recall': 'signed-in',
+  'POST /v1/batches/block': 'signed-in',
+  'POST /v1/batches/unblock': 'signed-in',
   'GET /v1/serials': 'signed-in',
+  'GET /v1/serials/unassigned': 'signed-in',
+  'POST /v1/serials/fix': 'signed-in',
+  'GET /v1/recipes/:productId': 'signed-in',
+  'PUT /v1/recipes/:productId': 'signed-in',
+  'GET /v1/reports/food-cost': 'signed-in',
+  'GET /v1/warranty/lookup': 'signed-in',
+  'GET /v1/warranty/claims': 'signed-in',
+  'POST /v1/warranty/claims': 'signed-in',
+  'POST /v1/warranty/claims/:id/status': 'signed-in',
+  'GET /v1/rentals': 'signed-in',
+  'GET /v1/maintenance': 'signed-in',
+  'POST /v1/maintenance': 'signed-in',
+  'POST /v1/maintenance/:id/visits': 'signed-in',
+  'POST /v1/maintenance/:id/renew': 'signed-in',
+  'GET /v1/contract-prices': 'signed-in',
+  'GET /v1/contract-prices/price-list': 'signed-in',
+  'POST /v1/contract-prices': 'signed-in',
+  'PUT /v1/contract-prices/:id': 'signed-in',
+  'DELETE /v1/contract-prices/:id': 'signed-in',
+  'GET /v1/reports/debt-ageing': 'signed-in',
+  'GET /v1/quotations': 'signed-in',
+  'GET /v1/quotations/customer-pricing': 'signed-in',
+  'GET /v1/quotations/:id': 'signed-in',
+  'POST /v1/quotations': 'signed-in',
+  'PUT /v1/quotations/:id': 'signed-in',
+  'POST /v1/quotations/:id/status': 'signed-in',
+  'GET /v1/device/quotations': 'device',
+  'GET /v1/device/quotations/:id': 'device',
+  'POST /v1/device/quotations': 'device',
+  'POST /v1/device/quotations/:id/convert': 'device',
   'POST /v1/stocktakes': 'signed-in',
+  'POST /v1/import': 'signed-in',
+  'GET /v1/export': 'signed-in',
   'GET /v1/reports/profit': 'signed-in',
   'GET /v1/subscription': 'signed-in',
   'POST /v1/subscription/invoices': 'signed-in',
   'POST /v1/subscription/payments': 'signed-in',
   'POST /v1/platform/login': 'public',
+  'POST /v1/platform/login/code': 'public',
+  'POST /v1/platform/login/password': 'public',
+  'POST /v1/platform/login/enrol': 'public',
+  'POST /v1/platform/login/enrol/confirm': 'public',
+  'GET /v1/platform/2fa': 'platform',
+  'POST /v1/platform/2fa/enrol': 'platform',
+  'POST /v1/platform/2fa/enrol/confirm': 'platform',
   'GET /v1/platform/stores': 'platform',
   'PUT /v1/platform/stores/:id/subscription': 'platform',
   'GET /v1/platform/payments': 'platform',
@@ -54,6 +117,23 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PUT /v1/platform/plans/:code': 'platform',
   'GET /v1/platform/settings': 'platform',
   'PUT /v1/platform/settings': 'platform',
+  'GET /v1/platform/legal': 'platform',
+  'PUT /v1/platform/legal': 'platform',
+  'GET /v1/platform/agents': 'platform',
+  'POST /v1/platform/agents': 'platform',
+  'GET /v1/platform/agents/:id': 'platform',
+  'PUT /v1/platform/agents/:id': 'platform',
+  'POST /v1/platform/agents/:id/balance': 'platform',
+  'PUT /v1/platform/stores/:id/agent': 'platform',
+  'POST /v1/agent/login': 'public',
+  'POST /v1/agent/login/code': 'public',
+  'PUT /v1/agent/password': 'agent',
+  'GET /v1/agent/me': 'agent',
+  'GET /v1/agent/stores': 'agent',
+  'GET /v1/agent/ledger': 'agent',
+  'POST /v1/agent/stores/:id/activate': 'agent',
+  'GET /v1/legal': 'public',
+  'GET /v1/plans': 'public',
   'PUT /v1/store/profile': 'signed-in',
   'PUT /v1/store/currency': 'signed-in',
   'PUT /v1/store/onboarding': 'signed-in',
@@ -64,14 +144,106 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PUT /v1/promotions/:id': 'signed-in',
   'GET /v1/cheques': 'signed-in',
   'POST /v1/cheques/actions': 'signed-in',
+  'GET /v1/installment-plans': 'signed-in',
+  'GET /v1/installment-plans/:id': 'signed-in',
+  'POST /v1/installment-plans/:id/collect': 'signed-in',
+  'POST /v1/installment-plans/:id/cancel': 'signed-in',
+  'POST /v1/installment-plans/:id/notes-printed': 'signed-in',
+  'POST /v1/promissory-notes/:id/action': 'signed-in',
+  'GET /v1/installments/worklist': 'signed-in',
+  'GET /v1/installments/summary': 'signed-in',
+  'POST /v1/installments/:planId/:no/reminders': 'signed-in',
+  'GET /v1/store/installments-settings': 'signed-in',
+  'PUT /v1/store/installments-settings': 'signed-in',
+  'GET /v1/device/installments/customer/:id': 'device',
   'POST /v1/device/staff-sessions': 'device',
+  'GET /v1/branches': 'signed-in',
+  'POST /v1/branches': 'signed-in',
+  'PATCH /v1/branches/:id': 'signed-in',
+  'POST /v1/branches/:id/active': 'signed-in',
+  'GET /v1/regions': 'signed-in',
+  'POST /v1/regions': 'signed-in',
+  'PATCH /v1/regions/:id': 'signed-in',
+  'GET /v1/vans': 'signed-in',
+  'POST /v1/vans': 'signed-in',
+  'PATCH /v1/vans/:id': 'signed-in',
+  'POST /v1/vans/:id/active': 'signed-in',
+  'GET /v1/reps': 'signed-in',
+  'POST /v1/reps': 'signed-in',
+  'PATCH /v1/reps/:id': 'signed-in',
+  'POST /v1/reps/:id/active': 'signed-in',
+  'GET /v1/routes': 'signed-in',
+  'POST /v1/routes': 'signed-in',
+  'GET /v1/routes/:id': 'signed-in',
+  'PATCH /v1/routes/:id': 'signed-in',
+  'PUT /v1/routes/:id/customers': 'signed-in',
+  'GET /v1/reps/candidates': 'signed-in',
+  'GET /v1/distribution/settings': 'signed-in',
+  'PUT /v1/distribution/settings': 'signed-in',
+  'GET /v1/device/distribution/settings': 'device',
+  'GET /v1/no-sale-reasons': 'signed-in',
+  'POST /v1/no-sale-reasons': 'signed-in',
+  'PATCH /v1/no-sale-reasons/:id': 'signed-in',
+  'GET /v1/commission-plans': 'signed-in',
+  'POST /v1/commission-plans': 'signed-in',
+  'PATCH /v1/commission-plans/:id': 'signed-in',
+  'POST /v1/customers/:id/approval': 'signed-in',
+  'GET /v1/sales-orders': 'signed-in',
+  'POST /v1/sales-orders': 'signed-in',
+  'GET /v1/sales-orders/picking': 'signed-in',
+  'GET /v1/sales-orders/committed': 'signed-in',
+  'GET /v1/sales-orders/:id': 'signed-in',
+  'POST /v1/sales-orders/:id/cancel': 'signed-in',
+  'POST /v1/sales-orders/:id/assign': 'signed-in',
+  'POST /v1/device/sales-orders': 'device',
+  'GET /v1/device/rep/day': 'device',
+  'POST /v1/device/rep/day': 'device',
+  'POST /v1/device/rep/visits': 'device',
+  'POST /v1/device/rep/van-count': 'device',
+  'GET /v1/rep-settlements/preview': 'signed-in',
+  'GET /v1/rep-settlements': 'signed-in',
+  'POST /v1/rep-settlements': 'signed-in',
+  'GET /v1/rep-settlements/:id': 'signed-in',
+  'POST /v1/rep-settlements/:id/approve': 'signed-in',
+  'POST /v1/rep-settlements/:id/cancel': 'signed-in',
+  'GET /v1/rep-debts': 'signed-in',
+  'GET /v1/reps/:id/debt': 'signed-in',
+  'POST /v1/reps/:id/debt/payments': 'signed-in',
+  'POST /v1/reps/:id/debt/forgive': 'signed-in',
+  'GET /v1/distribution/today': 'signed-in',
+  'GET /v1/distribution/reports/:kind': 'signed-in',
+  'GET /v1/rep-targets': 'signed-in',
+  'POST /v1/rep-targets': 'signed-in',
+  'PUT /v1/rep-targets/:id': 'signed-in',
+  'DELETE /v1/rep-targets/:id': 'signed-in',
+  'GET /v1/staff': 'signed-in',
+  'POST /v1/staff': 'signed-in',
+  'POST /v1/staff/pin-check': 'signed-in',
+  'PATCH /v1/staff/:id': 'signed-in',
+  'POST /v1/staff/:id/pin': 'signed-in',
+  'POST /v1/staff/:id/deactivate': 'signed-in',
+  'POST /v1/staff/:id/reactivate': 'signed-in',
   'POST /v1/device/holds': 'device',
+  'POST /v1/device/products': 'device',
   'POST /v1/broadcasts/preview': 'signed-in',
   'POST /v1/broadcasts': 'signed-in',
   'GET /v1/broadcasts': 'signed-in',
   'GET /v1/device/alterations': 'device',
   'POST /v1/device/alterations': 'device',
   'POST /v1/device/alterations/:id/status': 'device',
+  'GET /v1/device/rentals': 'device',
+  'GET /v1/device/rentals/units': 'device',
+  'POST /v1/device/rentals': 'device',
+  'POST /v1/device/rentals/:id/return': 'device',
+  'GET /v1/device/maintenance': 'device',
+  'POST /v1/device/maintenance/:id/billed': 'device',
+  'GET /v1/device/contract-prices': 'device',
+  'GET /v1/device/hall': 'device',
+  'POST /v1/device/hall': 'device',
+  'GET /v1/device/kitchen': 'device',
+  'POST /v1/device/kitchen': 'device',
+  'GET /v1/device/menu': 'device',
+  'GET /v1/hall/cancellations': 'signed-in',
   'POST /v1/sync/push': 'device',
   'GET /v1/sync/pull': 'device',
   'POST /v1/sync/resync': 'device',
@@ -88,16 +260,55 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/devices/:id/approve': 'signed-in',
   'POST /v1/devices/:id/reject': 'signed-in',
   'POST /v1/devices/:id/revoke': 'signed-in',
+  'POST /v1/devices/:id/hide': 'signed-in',
   'GET /v1/products': 'signed-in',
   'POST /v1/products': 'signed-in',
   'GET /v1/products/:id': 'signed-in',
   'GET /v1/products/options': 'signed-in',
   'PUT /v1/store/loyalty': 'signed-in',
+  'PUT /v1/store/pharmacy': 'signed-in',
+  'PUT /v1/store/till': 'signed-in',
+  'PUT /v1/store/catalog-options': 'signed-in',
+  'GET /v1/device/invoices/lookup': 'device',
+  'GET /v1/device/invoices/search': 'device',
+  'GET /v1/pharmacy/controlled-register': 'signed-in',
+  'POST /v1/device/shortages': 'device',
+  'GET /v1/pharmacy/shortages': 'signed-in',
+  'POST /v1/pharmacy/shortages/resolve': 'signed-in',
   'GET /v1/transfers': 'signed-in',
   'GET /v1/supplier-returns': 'signed-in',
   'POST /v1/supplier-returns': 'signed-in',
   'POST /v1/transfers': 'signed-in',
+  'GET /v1/transfers/settings': 'signed-in',
+  'PUT /v1/transfers/settings': 'signed-in',
+  'GET /v1/transfers/:id': 'signed-in',
+  'POST /v1/transfers/:id/receive': 'signed-in',
+  'GET /v1/me/home-summary': 'signed-in',
+  'GET /v1/products/:id/costs': 'signed-in',
+  'GET /v1/products/:id/archive-impact': 'signed-in',
+  'GET /v1/sales/summary': 'signed-in',
+  'GET /v1/stocktakes': 'signed-in',
+  'GET /v1/vouchers': 'signed-in',
+  'PUT /v1/vouchers/:code': 'signed-in',
+  'GET /v1/customer-groups': 'signed-in',
+  'POST /v1/customer-groups': 'signed-in',
+  'PUT /v1/customer-groups/:id': 'signed-in',
+  'GET /v1/me/search': 'signed-in',
+  'GET /v1/promotions/report': 'signed-in',
+  'POST /v1/promotions/preview': 'signed-in',
+  'POST /v1/prices/bulk/:id/undo': 'signed-in',
+  'POST /v1/suppliers/:id/opening-balance': 'signed-in',
+  'POST /v1/products/:id/opening-stock': 'signed-in',
+  'POST /v1/promotions/:id/archive': 'signed-in',
+  'POST /v1/promotions/:id/end-date': 'signed-in',
+  'POST /v1/shop/:slug/quote': 'public',
+  'POST /v1/transfers/:id/cancel': 'signed-in',
+  'GET /v1/period-close': 'signed-in',
+  'POST /v1/period-close/close': 'signed-in',
+  'POST /v1/period-close/reopen': 'signed-in',
   'POST /v1/prices/bulk': 'signed-in',
+  'POST /v1/prices/list/preview': 'signed-in',
+  'POST /v1/prices/list/apply': 'signed-in',
   'GET /v1/products/:id/images': 'signed-in',
   'POST /v1/products/:id/images': 'signed-in',
   'POST /v1/products/:id/images/order': 'signed-in',
@@ -109,10 +320,22 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/shop/:slug/orders': 'public',
   'POST /v1/shop/:slug/orders/code': 'public',
   'GET /v1/shop/:slug/orders/:token': 'public',
+  'POST /v1/shop/:slug/orders/:token/cancel-request': 'public',
   'GET /v1/online-store': 'signed-in',
   'PUT /v1/online-store': 'signed-in',
   'GET /v1/online-orders': 'signed-in',
   'POST /v1/online-orders/:id/status': 'signed-in',
+  'GET /v1/online-orders/cod': 'signed-in',
+  'POST /v1/online-orders/:id/delivery': 'signed-in',
+  'PUT /v1/online-store/image/:slot': 'signed-in',
+  'DELETE /v1/online-store/image/:slot': 'signed-in',
+  'GET /v1/shop/:slug/coupon': 'public',
+  'POST /v1/shop/:slug/products/:id/notify': 'public',
+  'GET /v1/products/:id/shop-text': 'signed-in',
+  'PUT /v1/products/:id/shop-text': 'signed-in',
+  'GET /v1/products/:id/stock-alerts': 'signed-in',
+  'POST /v1/stock-alerts/:id/notified': 'signed-in',
+  'GET /v1/price-history': 'signed-in',
   'PATCH /v1/products/:id': 'signed-in',
   'POST /v1/products/:id/archive': 'signed-in',
   'POST /v1/products/:id/restore': 'signed-in',
@@ -126,13 +349,31 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/tax-rates': 'signed-in',
   'POST /v1/tax-rates': 'signed-in',
   'PATCH /v1/tax-rates/:id': 'signed-in',
+  'PUT /v1/tax-rates/default': 'signed-in',
   'GET /v1/accounts': 'signed-in',
   'GET /v1/reports/day': 'signed-in',
+  'GET /v1/reports/days': 'signed-in',
   'GET /v1/reports/merchandise': 'signed-in',
+  'GET /v1/reports/sales-breakdown': 'signed-in',
   'GET /v1/shifts': 'signed-in',
   'GET /v1/shifts/:id': 'signed-in',
+  'GET /v1/sales': 'signed-in',
+  'GET /v1/sales/:id': 'signed-in',
   'GET /v1/journal': 'signed-in',
   'GET /v1/reports/trial-balance': 'signed-in',
+  'GET /v1/customers/:id/statement': 'signed-in',
+  'GET /v1/suppliers/:id/statement': 'signed-in',
+  'GET /v1/expenses': 'signed-in',
+  'POST /v1/expenses': 'signed-in',
+  'POST /v1/expenses/:id/void': 'signed-in',
+  'POST /v1/journal/manual': 'signed-in',
+  'POST /v1/journal/:id/reverse': 'signed-in',
+  'GET /v1/reports/profit-loss': 'signed-in',
+  'GET /v1/reports/balance-sheet': 'signed-in',
+  'GET /v1/reports/cash-flow': 'signed-in',
+  'GET /v1/reports/account-ledger': 'signed-in',
+  'GET /v1/reports/tax': 'signed-in',
+  'GET /v1/reports/supplier-ageing': 'signed-in',
   'GET /v1/sync/evidence': 'signed-in',
 };
 
@@ -236,7 +477,7 @@ const makeReference =
 
 /** Routes with an id in the path, each with a probe using another store's record. */
 /** Store B's owner on store A's customer: 404, and the customer is untouched. */
-function customerIdor(method: 'GET' | 'PUT') {
+function customerIdor(method: 'GET' | 'PUT' | 'POST', suffix = '', body?: Record<string, unknown>) {
   return async (app: FastifyInstance, { a, b }: Stores) => {
     const made = await app.inject({
       method: 'POST',
@@ -247,14 +488,216 @@ function customerIdor(method: 'GET' | 'PUT') {
     const id = made.json<{ id: string }>().id;
     const res = await app.inject({
       method,
-      url: `/v1/customers/${id}`,
+      url: `/v1/customers/${id}${suffix}`,
       headers: owner(b),
       ...(method === 'PUT' ? { payload: { name: 'مسروق' } } : {}),
+      ...(body ? { payload: body } : {}),
     });
-    expect(res.statusCode, `${method} /v1/customers/:id`).toBe(404);
+    expect(res.statusCode, `${method} /v1/customers/:id${suffix}`).toBe(404);
     const [row] = await ownerDb()<{ name: string }[]>`select name from customers where id = ${id}`;
     expect(row!.name).toBe('زبون أ');
   };
+}
+
+/** Store B's owner on store A's branch: 404, and the branch is untouched. */
+function branchIdor(url: (id: string) => string, method: 'PATCH' | 'POST', payload: Record<string, unknown>) {
+  return async (app: FastifyInstance, { a, b }: Stores) => {
+    // The store's own first branch: the plan may not allow a second one
+    const [first] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+    const id = first!.id;
+    const [before] = await ownerDb()<{ name: string; is_active: boolean }[]>`
+      select name, is_active from branches where id = ${id}`;
+    const res = await app.inject({ method, url: url(id), headers: owner(b), payload });
+    expect(res.statusCode, `${method} ${url(':id')}`).toBe(404);
+    const [row] = await ownerDb()<{ name: string; is_active: boolean }[]>`
+      select name, is_active from branches where id = ${id}`;
+    expect(row).toEqual(before);
+  };
+}
+
+/**
+ * Store B's owner (on a plan with the reps module) on store A's region, van, rep or route: 404, and the
+ * row is untouched. The rows are written straight to the tables, since store A's plan has no reps.
+ */
+let distributionRowCount = 0;
+const distributionRows = {
+  region: async (a: Stores['a']) =>
+    (
+      await ownerDb()<{ id: string }[]>`
+        insert into regions (tenant_id, name) values (${a.tenantId}, ${`منطقة ${++distributionRowCount}`}) returning id`
+    )[0]!.id,
+  van: async (a: Stores['a']) => {
+    const [branch] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+    return (
+      await ownerDb()<{ id: string }[]>`
+        insert into branches (tenant_id, code, name, kind, parent_branch_id)
+        values (${a.tenantId}, ${String(900 + ++distributionRowCount)}, 'سيارة أ', 'van', ${branch!.id}) returning id`
+    )[0]!.id;
+  },
+  rep: async (a: Stores['a']) => {
+    const [branch] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+    const [user] = await ownerDb()<{ id: string }[]>`
+      insert into users (tenant_id, full_name, phone, password_hash)
+      values (${a.tenantId}, 'مندوب أ', ${`+96394400${String(++distributionRowCount).padStart(4, '0')}`}, 'x') returning id`;
+    return (
+      await ownerDb()<{ id: string }[]>`
+        insert into sales_reps (tenant_id, user_id, branch_id) values (${a.tenantId}, ${user!.id}, ${branch!.id})
+        returning id`
+    )[0]!.id;
+  },
+  route: async (a: Stores['a']) =>
+    (
+      await ownerDb()<{ id: string }[]>`
+        insert into routes (tenant_id, name) values (${a.tenantId}, ${`خط ${++distributionRowCount}`}) returning id`
+    )[0]!.id,
+  reason: async (a: Stores['a']) =>
+    (
+      await ownerDb()<{ id: string }[]>`
+        insert into no_sale_reasons (tenant_id, name) values (${a.tenantId}, ${`سبب ${++distributionRowCount}`}) returning id`
+    )[0]!.id,
+  plan: async (a: Stores['a']) =>
+    (
+      await ownerDb()<{ id: string }[]>`
+        insert into commission_plans (tenant_id, name, rate_bp) values (${a.tenantId}, ${`خطة ${++distributionRowCount}`}, 100) returning id`
+    )[0]!.id,
+  customer: async (a: Stores['a']) =>
+    (
+      await ownerDb()<{ id: string }[]>`
+        insert into customers (tenant_id, name, approval_status) values (${a.tenantId}, ${`زبون ${++distributionRowCount}`}, 'pending') returning id`
+    )[0]!.id,
+  settlement: async (a: Stores['a']) => {
+    const [branch] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+    const rep = await distributionRows.rep(a);
+    return (
+      await ownerDb()<{ id: string }[]>`
+        insert into rep_settlements (tenant_id, number, rep_id, branch_id, business_date)
+        values (${a.tenantId}, ${`RST-2026-9${String(++distributionRowCount).padStart(5, '0')}`}, ${rep}, ${branch!.id}, '2026-10-30')
+        returning id`
+    )[0]!.id;
+  },
+  target: async (a: Stores['a']) => {
+    const rep = await distributionRows.rep(a);
+    return (
+      await ownerDb()<{ id: string }[]>`
+        insert into rep_targets (tenant_id, rep_id, period_start, period_end, metric, target_value)
+        values (${a.tenantId}, ${rep}, '2026-10-01', '2026-10-31', 'net_sales', 100)
+        returning id`
+    )[0]!.id;
+  },
+  order: async (a: Stores['a']) => {
+    const [branch] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+    const customer = await distributionRows.customer(a);
+    return (
+      await ownerDb()<{ id: string }[]>`
+        insert into sales_orders (tenant_id, number, branch_id, warehouse_branch_id, customer_id, business_date, currency, total_minor, lines)
+        values (${a.tenantId}, ${`SO-2026-9${String(++distributionRowCount).padStart(5, '0')}`}, ${branch!.id}, ${branch!.id}, ${customer}, '2026-10-30', 'SYP', 0, '[]'::jsonb)
+        returning id`
+    )[0]!.id;
+  },
+};
+
+/** A rep's phone for a store: a rep_phone device on a van of the store, with a token of its own */
+async function distributionPhone(store: Stores['a']) {
+  const home = await firstBranch(store.tenantId);
+  const [van] = await ownerDb()<{ id: string }[]>`
+    insert into branches (tenant_id, code, name, kind, parent_branch_id)
+    values (${store.tenantId}, ${String(800 + ++distributionRowCount)}, 'سيارة', 'van', ${home}) returning id`;
+  const token = `sdt_${randomBytes(32).toString('base64url')}`;
+  await ownerDb()`
+    insert into devices (tenant_id, branch_id, code, name, kind, status, token_hash)
+    values (${store.tenantId}, ${van!.id}, '777', 'جوال مندوب', 'rep_phone', 'active', ${hashDeviceToken(token)})`;
+  return { authorization: `Device ${token}` };
+}
+
+function distributionIdor(
+  table:
+    | 'regions'
+    | 'branches'
+    | 'sales_reps'
+    | 'routes'
+    | 'no_sale_reasons'
+    | 'commission_plans'
+    | 'customers'
+    | 'sales_orders'
+    | 'rep_settlements'
+    | 'rep_targets',
+  make: keyof typeof distributionRows,
+  method: 'GET' | 'PATCH' | 'POST' | 'PUT' | 'DELETE',
+  path: (id: string) => string,
+  payload?: (b: { branchId: string }) => Record<string, unknown>,
+) {
+  return async (app: FastifyInstance, { a, b }: Stores) => {
+    await ownerDb()`update plans set limits = limits || '{"reps": null}'::jsonb`;
+    try {
+      const id = await distributionRows[make](a);
+      const read = async () =>
+        (
+          await ownerDb()<{ version: number; name: string | null }[]>`
+          select version, to_jsonb(t) ->> 'name' as name from ${ownerDb()(table)} t where id = ${id}`
+        )[0];
+      const before = await read();
+      const res = await app.inject({
+        method,
+        url: path(id),
+        headers: owner(b),
+        ...(payload ? { payload: payload({ branchId: await firstBranch(b.tenantId) }) } : {}),
+      });
+      expect(res.statusCode, `${method} ${path(':id')}`).toBe(404);
+      expect(await read()).toEqual(before);
+    } finally {
+      await ownerDb()`update plans set limits = limits || '{"reps": 0}'::jsonb`;
+    }
+  };
+}
+
+/** Store B's owner on store A's staff member: 404, and the person is untouched. */
+function staffIdor(method: 'PATCH' | 'POST', suffix: string, payload?: Record<string, unknown>) {
+  return async (app: FastifyInstance, { a, b }: Stores) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/staff',
+      headers: owner(a),
+      payload: { fullName: 'كاشير أ', roleKey: 'cashier', branchIds: null, pin: '4829' },
+    });
+    const id = made.json<{ id: string }>().id;
+    const read = async () =>
+      (
+        await ownerDb()<
+          { version: number; status: string }[]
+        >`select version, status from users where id = ${id}`
+      )[0];
+    const before = await read();
+    const res = await app.inject({
+      method,
+      url: `/v1/staff/${id}${suffix}`,
+      headers: owner(b),
+      ...(payload ? { payload } : {}),
+    });
+    expect(res.statusCode, `${method} /v1/staff/:id${suffix}`).toBe(404);
+    expect(await read()).toEqual(before);
+  };
+}
+
+/** A draft purchase order in store A, for another store's owner to go after */
+async function orderOf(app: FastifyInstance, a: Stores['a']) {
+  const product = await productOf(app, a);
+  const made = await app.inject({
+    method: 'POST',
+    url: '/v1/purchase-orders',
+    headers: owner(a),
+    payload: {
+      supplierId: await supplierOf(app, a),
+      notes: 'طلبية أ',
+      lines: [{ variantId: product.variants[0]!.id, qty: 1000, costMinor: 100 }],
+    },
+  });
+  expect(made.statusCode, made.body).toBe(201);
+  return made.json<{ id: string }>().id;
 }
 
 /** Store B's owner on store A's supplier and purchase: 404, nothing changed. */
@@ -266,6 +709,44 @@ async function supplierOf(app: FastifyInstance, a: Stores['a']) {
     payload: { name: 'مورد أ' },
   });
   return made.json<{ id: string }>().id;
+}
+
+let transitCount = 0;
+/** A transfer of store A on its way between two of its branches */
+async function transitOf(app: FastifyInstance, a: Stores['a']) {
+  const product = await productOf(app, a);
+  const supplierId = await supplierOf(app, a);
+  const [main] = await ownerDb()<
+    { id: string }[]
+  >`select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+  const [other] = await ownerDb()<{ id: string }[]>`
+    insert into branches (tenant_id, code, name) values (${a.tenantId}, ${`0${70 + ++transitCount}`}, 'فرع آخر') returning id`;
+  const bought = await app.inject({
+    method: 'POST',
+    url: '/v1/purchases',
+    headers: owner(a),
+    payload: {
+      supplierId,
+      date: '2026-10-30',
+      payment: 'credit',
+      lines: [{ variantId: product.variants[0]!.id, qty: 5000, costMinor: 500 }],
+    },
+  });
+  expect(bought.statusCode, bought.body).toBe(201);
+  const sent = await app.inject({
+    method: 'POST',
+    url: '/v1/transfers',
+    headers: owner(a),
+    payload: {
+      fromBranchId: main!.id,
+      toBranchId: other!.id,
+      date: '2026-10-30',
+      mode: 'transit',
+      lines: [{ variantId: product.variants[0]!.id, qty: 2000 }],
+    },
+  });
+  expect(sent.statusCode, sent.body).toBe(201);
+  return { transferId: sent.json<{ id: string }>().id };
 }
 
 /** A product of store A with one picture */
@@ -335,7 +816,179 @@ async function twoShops(app: FastifyInstance, { a, b }: Stores) {
   return productOf(app, a);
 }
 
+const QUOTATION = { lines: [{ name: 'قفازات', qty: 2000, unitPriceMinor: 10_000 }] };
+
+/** Rows of store A's rentals, maintenance contracts and contract prices, written once per store straight into the tables */
+const contractRows = new Map<string, ReturnType<typeof makeContractRows>>();
+const contractRowsOf = (app: FastifyInstance, a: Stores['a']) => {
+  if (!contractRows.has(a.tenantId)) contractRows.set(a.tenantId, makeContractRows(app, a));
+  return contractRows.get(a.tenantId)!;
+};
+async function makeContractRows(app: FastifyInstance, a: Stores['a']) {
+  const [branch] = await ownerDb()<{ id: string }[]>`
+    select id from branches where tenant_id = ${a.tenantId} order by created_at limit 1`;
+  const product = await productOf(app, a);
+  const variantId = product.variants[0]!.id;
+  const [rental] = await ownerDb()<{ id: string; version: number }[]>`
+    insert into rentals (tenant_id, seq, number, branch_id, serial, variant_id, item, customer_name, customer_phone,
+                         start_date, expected_return, rate_unit, rate_minor, currency)
+    values (${a.tenantId}, (select coalesce(max(seq), 0) + 1 from rentals), 'RNT-000001', ${branch!.id}, ${`WC${Math.random()}`}, ${variantId}, 'كرسي', 'زبون', '0944555666',
+            '2026-11-01', '2026-11-05', 'day', 1000, 'SYP')
+    returning id, version`;
+  const [contract] = await ownerDb()<{ id: string; version: number }[]>`
+    insert into maintenance_contracts (tenant_id, seq, number, customer_name, start_date, end_date,
+                                       visit_every_months, currency, price_minor)
+    values (${a.tenantId}, (select coalesce(max(seq), 0) + 1 from maintenance_contracts), 'MC-000001', 'عيادة',
+            '2026-01-01', '2026-12-31', 3, 'SYP', 1000)
+    returning id, version`;
+  const customer = await app.inject({
+    method: 'POST',
+    url: '/v1/customers',
+    headers: owner(a),
+    payload: { name: 'مشفى', kind: 'hospital' },
+  });
+  const customerId = customer.json<{ id: string }>().id;
+  const [price] = await ownerDb()<{ id: string; version: number }[]>`
+    insert into contract_prices (tenant_id, customer_id, variant_id, currency, price_minor, valid_from)
+    values (${a.tenantId}, ${customerId}, ${variantId}, 'SYP', 900, '2026-01-01')
+    returning id, version`;
+  return {
+    rental: rental!,
+    contract: contract!,
+    price: price!,
+    customerId,
+    variantId,
+    productId: product.id,
+  };
+}
+
+/** A rentable piece of store A in stock, for the probes that try to rent it from store B */
+async function rentablePieceOf(app: FastifyInstance, a: Stores['a']) {
+  const product = await productOf(app, a);
+  const serial = `WC${Math.random()}`;
+  await ownerDb()`update products set rentable = true where id = ${product.id}`;
+  await ownerDb()`
+    insert into serials (tenant_id, variant_id, serial, status)
+    values (${a.tenantId}, ${product.variants[0]!.id}, ${serial}, 'in_stock')`;
+  return serial;
+}
+
+/** A customer of this store with an instalment plan of one instalment, written straight to the tables */
+async function planOf(app: FastifyInstance, a: Stores['a']) {
+  const made = await app.inject({
+    method: 'POST',
+    url: '/v1/customers',
+    headers: owner(a),
+    payload: { name: 'زبون أقساط' },
+  });
+  expect(made.statusCode, made.body).toBe(201);
+  const customerId = made.json<{ id: string }>().id;
+  const planId = createUuidV7()();
+  const [branch] = await ownerDb()<
+    { id: string }[]
+  >`select id from branches where tenant_id = ${a.tenantId} limit 1`;
+  await ownerDb()`
+    insert into installment_plans (id, tenant_id, number, branch_id, customer_id, currency, total_minor,
+      down_payment_minor, principal_minor, markup_minor, financed_minor, installments_count, frequency, first_due_date)
+    values (${planId}, ${a.tenantId}, ${'INV-' + planId.slice(-6)}, ${branch!.id}, ${customerId}, 'SYP', 1000, 200, 800, 0, 800, 1,
+      'monthly', '2026-12-01')`;
+  await ownerDb()`
+    insert into installments (tenant_id, plan_id, no, due_date, amount_minor)
+    values (${a.tenantId}, ${planId}, 1, '2026-12-01', 800)`;
+  return { planId, customerId };
+}
+
 const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
+  // Another store's instalment plan answers 404 for reading, collecting, cancelling and reminding, and stays as it was
+  'GET /v1/installment-plans/:id': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/installment-plans/${planId}`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+  },
+  'POST /v1/installment-plans/:id/collect': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/installment-plans/${planId}/collect`,
+      headers: owner(b),
+      payload: { amountMinor: 100 },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { paid: string }[]
+    >`select paid_minor::text as paid from installments where plan_id = ${planId}`;
+    expect(row!.paid).toBe('0');
+  },
+  'POST /v1/installment-plans/:id/cancel': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/installment-plans/${planId}/cancel`,
+      headers: owner(b),
+      payload: { reason: 'x' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { status: string }[]
+    >`select status from installment_plans where id = ${planId}`;
+    expect(row!.status).toBe('active');
+  },
+  'POST /v1/installment-plans/:id/notes-printed': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/installment-plans/${planId}/notes-printed`,
+      headers: owner(b),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
+  },
+  'POST /v1/promissory-notes/:id/action': async (app, { a, b }) => {
+    const { planId, customerId } = await planOf(app, a);
+    const [note] = await ownerDb()<{ id: string }[]>`
+      insert into promissory_notes (tenant_id, number, plan_id, no, customer_id, amount_minor, issue_date, due_date)
+      values (${a.tenantId}, ${'N-' + planId.slice(-6)}, ${planId}, 1, ${customerId}, 800, '2026-11-01', '2026-12-01')
+      returning id`;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/promissory-notes/${note!.id}/action`,
+      headers: owner(b),
+      payload: { action: 'paid' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { status: string }[]
+    >`select status from promissory_notes where id = ${note!.id}`;
+    expect(row!.status).toBe('issued');
+  },
+  'POST /v1/installments/:planId/:no/reminders': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/installments/${planId}/1/reminders`,
+      headers: owner(b),
+      payload: { kind: 'due' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from installment_reminders`;
+    expect(n!.n).toBe(0);
+  },
+  // Another store's device sees none of this store's customer's plans
+  'GET /v1/device/installments/customer/:id': async (app, { a, b }) => {
+    const { customerId } = await planOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/device/installments/customer/${customerId}`,
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ plans: unknown[] }>().plans).toEqual([]);
+  },
   'GET /v1/shop/:slug': async (app, stores) => {
     const product = await twoShops(app, stores);
     const b = await app.inject({ method: 'GET', url: '/v1/shop/b-shop' });
@@ -406,6 +1059,37 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     // A's order is not on B's link
     expect((await at('b-shop')).statusCode).toBe(404);
   },
+  'POST /v1/shop/:slug/orders/:token/cancel-request': async (app, stores) => {
+    await twoShops(app, stores);
+    const service = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: owner(stores.a),
+      payload: {
+        nameAr: 'تقصير',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 100 } }],
+      },
+    });
+    const placed = await app.inject({
+      method: 'POST',
+      url: '/v1/shop/a-shop/orders',
+      payload: {
+        name: 'زبون',
+        phone: '0944555666',
+        fulfilment: 'pickup',
+        lines: [{ variantId: service.json<{ variants: { id: string }[] }>().variants[0]!.id, qty: 1 }],
+      },
+    });
+    const token = placed.json<{ trackPath: string }>().trackPath.split('/').at(-1)!;
+    const ask = (slug: string) =>
+      app.inject({ method: 'POST', url: `/v1/shop/${slug}/orders/${token}/cancel-request` });
+    // A's order cannot be cancelled through B's link, and the failed try changes nothing
+    expect((await ask('b-shop')).statusCode).toBe(404);
+    const still = await app.inject({ method: 'GET', url: `/v1/shop/a-shop/orders/${token}` });
+    expect(still.json<{ status: string }>().status).toBe('pending');
+    expect((await ask('a-shop')).statusCode).toBe(200);
+  },
   'POST /v1/online-orders/:id/status': async (app, stores) => {
     const product = await twoShops(app, stores);
     // A's shirt has no stock and the shop shows what ran out, but it cannot be ordered: use a service
@@ -443,6 +1127,161 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect(res.statusCode).toBe(404);
     const after = await app.inject({ method: 'GET', url: '/v1/online-orders', headers: owner(stores.a) });
     expect(after.json<{ items: { status: string }[] }>().items[0]!.status).toBe('pending');
+  },
+  'GET /v1/shop/:slug/coupon': async (app, stores) => {
+    await twoShops(app, stores);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      headers: owner(stores.a),
+      payload: { name: 'خصم', kind: 'percent', percentBp: 1000, scope: 'all', couponCode: 'IDORCODE' },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const ask = (slug: string) => app.inject({ method: 'GET', url: `/v1/shop/${slug}/coupon?code=IDORCODE` });
+    expect((await ask('a-shop')).statusCode).toBe(200);
+    // A's code opens nothing in B's shop
+    expect((await ask('b-shop')).statusCode).toBe(400);
+  },
+  'POST /v1/shop/:slug/products/:id/notify': async (app, stores) => {
+    const product = await twoShops(app, stores);
+    const body = { variantId: product.variants[0]!.id, phone: '0944555666' };
+    const at = (slug: string) =>
+      app.inject({ method: 'POST', url: `/v1/shop/${slug}/products/${product.id}/notify`, payload: body });
+    expect((await at('a-shop')).statusCode).toBe(204);
+    expect((await at('b-shop')).statusCode).toBe(404);
+  },
+  'GET /v1/products/:id/stock-alerts': async (app, stores) => {
+    const product = await twoShops(app, stores);
+    const url = `/v1/products/${product.id}/stock-alerts`;
+    expect((await app.inject({ method: 'GET', url, headers: owner(stores.a) })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url, headers: owner(stores.b) })).statusCode).toBe(404);
+  },
+  'POST /v1/stock-alerts/:id/notified': async (app, stores) => {
+    const product = await twoShops(app, stores);
+    await app.inject({
+      method: 'POST',
+      url: `/v1/shop/a-shop/products/${product.id}/notify`,
+      payload: { variantId: product.variants[0]!.id, phone: '0944777888' },
+    });
+    const list = await app.inject({
+      method: 'GET',
+      url: `/v1/products/${product.id}/stock-alerts`,
+      headers: owner(stores.a),
+    });
+    const [alert] = list.json<{ items: { id: string }[] }>().items;
+    const url = `/v1/stock-alerts/${alert!.id}/notified`;
+    expect((await app.inject({ method: 'POST', url, headers: owner(stores.b) })).statusCode).toBe(404);
+    const still = await app.inject({
+      method: 'GET',
+      url: `/v1/products/${product.id}/stock-alerts`,
+      headers: owner(stores.a),
+    });
+    expect(still.json<{ items: { notifiedAt: string | null }[] }>().items[0]!.notifiedAt).toBeNull();
+  },
+  'GET /v1/products/:id/shop-text': catalogIdor(
+    'products',
+    productOf,
+    'GET',
+    (id) => `/v1/products/${id}/shop-text`,
+  ),
+  'PUT /v1/products/:id/shop-text': async (app, { a, b }) => {
+    const record = await productOf(app, a);
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/products/${record.id}/shop-text`,
+      headers: owner(b),
+      payload: { description: 'مسروق', sizeGuide: null },
+    });
+    expect(res.statusCode).toBe(404);
+    const mine = await app.inject({
+      method: 'GET',
+      url: `/v1/products/${record.id}/shop-text`,
+      headers: owner(a),
+    });
+    expect(mine.json<{ description: string | null }>().description).toBeNull();
+  },
+  'PUT /v1/online-store/image/:slot': async (app, stores) => {
+    await twoShops(app, stores);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7]).toString('base64');
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/v1/online-store/image/logo',
+      headers: owner(stores.b),
+      payload: { contentType: 'image/png', data: png, thumb: png, width: 8, height: 8 },
+    });
+    expect(put.statusCode, put.body).toBe(200);
+    // B's logo is B's alone
+    const logoOf = async (slug: string) =>
+      (await app.inject({ method: 'GET', url: `/v1/shop/${slug}` })).json<{
+        store: { logoUrl: string | null };
+      }>().store.logoUrl;
+    expect(await logoOf('a-shop')).toBeNull();
+    expect(await logoOf('b-shop')).not.toBeNull();
+  },
+  'DELETE /v1/online-store/image/:slot': async (app, stores) => {
+    await twoShops(app, stores);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9]).toString('base64');
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/online-store/image/cover',
+      headers: owner(stores.a),
+      payload: { contentType: 'image/png', data: png, thumb: png, width: 8, height: 8 },
+    });
+    // B removing its own cover does not touch A's
+    const gone = await app.inject({
+      method: 'DELETE',
+      url: '/v1/online-store/image/cover',
+      headers: owner(stores.b),
+    });
+    expect(gone.statusCode).toBe(200);
+    const home = await app.inject({ method: 'GET', url: '/v1/shop/a-shop' });
+    expect(home.json<{ store: { coverUrl: string | null } }>().store.coverUrl).not.toBeNull();
+  },
+  'POST /v1/online-orders/:id/delivery': async (app, stores) => {
+    await twoShops(app, stores);
+    const service = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: owner(stores.a),
+      payload: {
+        nameAr: 'تقصير',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 100 } }],
+      },
+    });
+    const placed = await app.inject({
+      method: 'POST',
+      url: '/v1/shop/a-shop/orders',
+      payload: {
+        name: 'زبون',
+        phone: '0944555666',
+        fulfilment: 'delivery',
+        address: 'المزة',
+        lines: [{ variantId: service.json<{ variants: { id: string }[] }>().variants[0]!.id, qty: 1 }],
+      },
+    });
+    expect(placed.statusCode, placed.body).toBe(201);
+    const mine = await app.inject({ method: 'GET', url: '/v1/online-orders', headers: owner(stores.a) });
+    const [target] = mine.json<{ items: { id: string; version: number }[] }>().items;
+    const accepted = await app.inject({
+      method: 'POST',
+      url: `/v1/online-orders/${target!.id}/status`,
+      headers: owner(stores.a),
+      payload: { status: 'accepted', version: target!.version },
+    });
+    const version = accepted.json<{ version: number }>().version;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/online-orders/${target!.id}/delivery`,
+      headers: owner(stores.b),
+      payload: { stage: 'out', courier: 'مسروق', version },
+    });
+    expect(res.statusCode).toBe(404);
+    const after = await app.inject({ method: 'GET', url: '/v1/online-orders', headers: owner(stores.a) });
+    const row = after
+      .json<{ items: { id: string; deliveryStage: string | null }[] }>()
+      .items.find((o) => o.id === target!.id);
+    expect(row!.deliveryStage).toBeNull();
   },
   'GET /v1/products/:id/images': imageIdor('GET', (p) => `/v1/products/${p}/images`),
   'POST /v1/products/:id/images': imageIdor(
@@ -528,7 +1367,488 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     });
     expect(res.statusCode).toBe(404);
   },
+  // Round 36: another store's purchase cannot be corrected: 404, and nothing is reversed
+  'POST /v1/purchases/:id/correct': async (app, { a, b }) => {
+    const supplierId = await supplierOf(app, a);
+    const product = await productOf(app, a);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/purchases',
+      headers: owner(a),
+      payload: {
+        supplierId,
+        date: '2026-10-30',
+        payment: 'credit',
+        lines: [{ variantId: product.variants[0]!.id, qty: 1000, costMinor: 100 }],
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const id = made.json<{ id: string }>().id;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/purchases/${id}/correct`,
+      headers: owner(b),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { n: string }[]
+    >`select count(*)::text as n from purchase_reversals where purchase_id = ${id}`;
+    expect(row!.n).toBe('0');
+  },
+  // Round 37 (decision 16): another store's transfer on its way is not read or received by a stranger
+  'GET /v1/transfers/:id': async (app, { a, b }) => {
+    const { transferId } = await transitOf(app, a);
+    const res = await app.inject({ method: 'GET', url: `/v1/transfers/${transferId}`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+  },
+  // Another store's product: its costs are not read and no opening stock is posted to it
+  'GET /v1/products/:id/costs': catalogIdor('products', productOf, 'GET', (id) => `/v1/products/${id}/costs`),
+  'GET /v1/products/:id/archive-impact': catalogIdor(
+    'products',
+    productOf,
+    'GET',
+    (id) => `/v1/products/${id}/archive-impact`,
+  ),
+  'POST /v1/products/:id/opening-stock': async (app, { a, b }) => {
+    const record = await productOf(app, a);
+    const [branch] = await ownerDb()<
+      { id: string }[]
+    >`select id from branches where tenant_id = ${b.tenantId} order by code limit 1`;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/products/${record.id}/opening-stock`,
+      headers: owner(b),
+      payload: {
+        date: '2026-10-30',
+        branchId: branch!.id,
+        lines: [{ variantId: record.variants[0]!.id, qty: 1000, unitCostMinor: 100 }],
+      },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { n: string }[]
+    >`select count(*)::text as n from stock_movements where variant_id = ${record.variants[0]!.id}`;
+    expect(row!.n).toBe('0');
+  },
+  // Another store's offer is not archived
+  'POST /v1/promotions/:id/archive': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      headers: owner(a),
+      payload: { name: 'عرض أ', kind: 'percent', percentBp: 500, scope: 'all' },
+    });
+    const { id } = made.json<{ id: string }>();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/promotions/${id}/archive`,
+      headers: owner(b),
+      payload: { version: 1, archived: true },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { archived_at: Date | null }[]
+    >`select archived_at from promotions where id = ${id}`;
+    expect(row!.archived_at).toBeNull();
+  },
+  // Another store's offer does not get a new end date
+  'POST /v1/promotions/:id/end-date': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      headers: owner(a),
+      payload: { name: 'عرض أ', kind: 'percent', percentBp: 500, scope: 'all' },
+    });
+    const { id } = made.json<{ id: string }>();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/promotions/${id}/end-date`,
+      headers: owner(b),
+      payload: { version: 1, endsAt: '2030-01-01T00:00:00.000Z' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { ends_at: Date | null }[]
+    >`select ends_at from promotions where id = ${id}`;
+    expect(row!.ends_at).toBeNull();
+  },
+  // A product of one shop is not priced through another shop's address
+  'POST /v1/shop/:slug/quote': async (app, stores) => {
+    const product = await twoShops(app, stores);
+    const at = (slug: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/v1/shop/${slug}/quote`,
+        payload: { lines: [{ variantId: product.variants[0]!.id, qty: 1 }], coupon: null },
+      });
+    expect((await at('a-shop')).statusCode).toBe(200);
+    // B's shop does not sell A's piece: refused, nothing priced
+    expect((await at('b-shop')).statusCode).toBe(400);
+  },
+  // Another store's transfer on the way is not cancelled and stays on the way
+  'POST /v1/transfers/:id/cancel': async (app, { a, b }) => {
+    const { transferId } = await transitOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/transfers/${transferId}/cancel`,
+      headers: owner(b),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { in_transit: boolean }[]
+    >`select in_transit from transfers where id = ${transferId}`;
+    expect(row!.in_transit).toBe(true);
+  },
+  'POST /v1/transfers/:id/receive': async (app, { a, b }) => {
+    const { transferId } = await transitOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/transfers/${transferId}/receive`,
+      headers: owner(b),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { n: string }[]
+    >`select count(*)::text as n from transfer_receipts where transfer_id = ${transferId}`;
+    expect(row!.n).toBe('0');
+  },
+  // Another store's purchase order answers 404 for reading, editing and moving on, and stays as it was
+  'GET /v1/purchase-orders/:id': async (app, { a, b }) => {
+    const id = await orderOf(app, a);
+    const res = await app.inject({ method: 'GET', url: `/v1/purchase-orders/${id}`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+  },
+  'PUT /v1/purchase-orders/:id': async (app, { a, b }) => {
+    const id = await orderOf(app, a);
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/purchase-orders/${id}`,
+      headers: owner(b),
+      payload: {
+        supplierId: await supplierOf(app, b),
+        version: 1,
+        lines: [{ variantId: createUuidV7()(), qty: 1000, costMinor: 1 }],
+      },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { notes: string | null }[]
+    >`select notes from purchase_orders where id = ${id}`;
+    expect(row!.notes).toBe('طلبية أ');
+  },
+  'POST /v1/purchase-orders/:id/status': async (app, { a, b }) => {
+    const id = await orderOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/purchase-orders/${id}/status`,
+      headers: owner(b),
+      payload: { status: 'cancelled', version: 1 },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from purchase_orders where id = ${id}`;
+    expect(row!.status).toBe('draft');
+  },
   'GET /v1/customers/:id': customerIdor('GET'),
+  // Store B's owner on store A's customer, supplier, expense and entry: 404, nothing of A's in the answer.
+  'GET /v1/customers/:id/statement': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: owner(a),
+      payload: { name: 'زبون كشف' },
+    });
+    const id = made.json<{ id: string }>().id;
+    const own = await app.inject({
+      method: 'GET',
+      url: `/v1/customers/${id}/statement?from=2026-01-01&to=2026-12-31`,
+      headers: owner(a),
+    });
+    expect(own.statusCode, own.body).toBe(200);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/customers/${id}/statement?from=2026-01-01&to=2026-12-31`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('زبون كشف');
+  },
+  // Store B's owner on store A's supplier, bulk price change, voucher and customer group: 404, nothing changed.
+  'POST /v1/suppliers/:id/opening-balance': async (app, { a, b }) => {
+    const id = await supplierOf(app, a);
+    const [before] = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from journal_entries where tenant_id = ${a.tenantId}`;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/suppliers/${id}/opening-balance`,
+      headers: owner(b),
+      payload: { kind: 'debt', amountMinor: 5000 },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('مورد أ');
+    const [after] = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from journal_entries where tenant_id = ${a.tenantId}`;
+    expect(after!.n).toBe(before!.n);
+  },
+  'POST /v1/prices/bulk/:id/undo': async (app, { a, b }) => {
+    const product = await productOf(app, a);
+    const cat = await app.inject({
+      method: 'POST',
+      url: '/v1/categories',
+      headers: owner(a),
+      payload: { name: 'تصنيف الخصم' },
+    });
+    expect(cat.statusCode, cat.body).toBe(201);
+    const categoryId = cat.json<{ id: string }>().id;
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: `/v1/products/${product.id}`,
+      headers: owner(a),
+      payload: { version: product.version, categoryId },
+    });
+    expect(moved.statusCode, moved.body).toBe(200);
+    const applied = await app.inject({
+      method: 'POST',
+      url: '/v1/prices/bulk',
+      headers: owner(a),
+      payload: { categoryId, percentBp: 1000, roundToMinor: 1, apply: true },
+    });
+    expect(applied.statusCode, applied.body).toBe(200);
+    const { changeId } = applied.json<{ changeId?: string }>();
+    expect(changeId).toBeTruthy();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/prices/bulk/${changeId!}/undo`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from audit_logs where tenant_id = ${a.tenantId} and action = 'prices.bulk_undone'`;
+    expect(row!.n).toBe('0');
+  },
+  'PUT /v1/vouchers/:code': async (app, { a, b }) => {
+    await ownerDb()`
+      insert into vouchers (id, tenant_id, code, return_id, kind, currency, amount_minor)
+      values (gen_random_uuid(), ${a.tenantId}, 'IDOR-VCH-1', gen_random_uuid(), 'gift', 'SYP', 5000)`;
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/v1/vouchers/IDOR-VCH-1',
+      headers: owner(b),
+      payload: { void: true, reason: 'مسروق' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ voided_at: Date | null }[]>`
+      select voided_at from vouchers where tenant_id = ${a.tenantId} and code = 'IDOR-VCH-1'`;
+    expect(row!.voided_at).toBeNull();
+  },
+  'PUT /v1/customer-groups/:id': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customer-groups',
+      headers: owner(a),
+      payload: { name: 'مجموعة أ', discountBps: 500 },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const { id } = made.json<{ id: string }>();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/customer-groups/${id}`,
+      headers: owner(b),
+      payload: { name: 'مسروق', discountBps: 9000 },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ name: string; discount_bps: number }[]>`
+      select name, discount_bps from customer_groups where id = ${id}`;
+    expect(row).toEqual({ name: 'مجموعة أ', discount_bps: 500 });
+  },
+  'GET /v1/suppliers/:id/statement': async (app, { a, b }) => {
+    const id = await supplierOf(app, a);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/suppliers/${id}/statement?from=2026-01-01&to=2026-12-31`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('مورد أ');
+  },
+  'POST /v1/expenses/:id/void': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/expenses',
+      headers: owner(a),
+      payload: {
+        date: '2026-10-30',
+        branchId: await firstBranch(a.tenantId),
+        accountCode: '6101',
+        amountMinor: 5000,
+        currency: 'SYP',
+        payFrom: 'safe',
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const id = made.json<{ id: string }>().id;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/expenses/${id}/void`,
+      headers: owner(b),
+      payload: { reason: 'سرقة' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [n] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from journal_entries where kind = 'reversal'`;
+    expect(n!.n).toBe(0);
+  },
+  'POST /v1/journal/:id/reverse': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/journal/manual',
+      headers: owner(a),
+      payload: {
+        date: '2026-10-30',
+        branchId: await firstBranch(a.tenantId),
+        memo: 'قيد أ',
+        lines: [
+          { accountCode: '6190', debitMinor: 100 },
+          { accountCode: '1120', creditMinor: 100 },
+        ],
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/journal/${made.json<{ id: string }>().id}/reverse`,
+      headers: owner(b),
+      payload: { reason: 'سرقة' },
+    });
+    expect(res.statusCode).toBe(404);
+  },
+  // Another store's claim cannot be moved on: its id answers 404 and the row stays as it was
+  // Another store's dish answers 404 for reading and for replacing its recipe, and its rows stay
+  'GET /v1/recipes/:productId': async (app, { a, b }) => {
+    const dish = (await productOf(app, a)).id;
+    const res = await app.inject({ method: 'GET', url: `/v1/recipes/${dish}`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+  },
+  'PUT /v1/recipes/:productId': async (app, { a, b }) => {
+    const dish = (await productOf(app, a)).id;
+    const flour = (await productOf(app, b)).variants[0]!.id;
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/recipes/${dish}`,
+      headers: owner(b),
+      payload: { items: [{ variantId: flour, qty: 200 }] },
+    });
+    expect(res.statusCode).toBe(404);
+    const rows = await ownerDb()`select 1 from recipe_items where product_id = ${dish}`;
+    expect(rows).toHaveLength(0);
+  },
+  'POST /v1/warranty/claims/:id/status': async (app, { a, b }) => {
+    const [claim] = await ownerDb()<{ id: string; version: number }[]>`
+      insert into warranty_claims (tenant_id, seq, number, serial, item, issue)
+      values (${a.tenantId}, 1, 'WC-000001', 'IMEI-A-1', 'جوال', 'لا يشحن')
+      returning id, version`;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/warranty/claims/${claim!.id}/status`,
+      headers: owner(b),
+      payload: { status: 'ready', version: claim!.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { status: string }[]
+    >`select status from warranty_claims where id = ${claim!.id}`;
+    expect(row!.status).toBe('received');
+  },
+  // Another store's quotation answers 404 for reading, editing and moving on, and stays as it was
+  'GET /v1/quotations/:id': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/quotations/${made.json<{ id: string }>().id}`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+  },
+  'PUT /v1/quotations/:id': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const q = made.json<{ id: string; version: number }>();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/quotations/${q.id}`,
+      headers: owner(b),
+      payload: { ...QUOTATION, version: q.version, notes: 'تغيير' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { notes: string | null }[]
+    >`select notes from quotations where id = ${q.id}`;
+    expect(row!.notes).toBeNull();
+  },
+  'POST /v1/quotations/:id/status': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const q = made.json<{ id: string; version: number }>();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/quotations/${q.id}/status`,
+      headers: owner(b),
+      payload: { status: 'sent', version: q.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from quotations where id = ${q.id}`;
+    expect(row!.status).toBe('draft');
+  },
+  'GET /v1/device/quotations/:id': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/device/quotations/${made.json<{ id: string }>().id}`,
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.statusCode).toBe(404);
+  },
+  'POST /v1/device/quotations/:id/convert': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const q = made.json<{ id: string; version: number }>();
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/quotations/${q.id}/convert`,
+      headers: { authorization: deviceB.authorization },
+      payload: { version: q.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from quotations where id = ${q.id}`;
+    expect(row!.status).toBe('draft');
+  },
   'POST /v1/device/alterations/:id/status': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);
     const made = await app.inject({
@@ -559,6 +1879,88 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     >`select status from alteration_tickets where id = ${t.id}`;
     expect(row!.status).toBe('received');
   },
+  'POST /v1/device/rentals/:id/return': async (app, { a, b }) => {
+    const { rental } = await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/rentals/${rental.id}/return`,
+      headers: { authorization: deviceB.authorization },
+      payload: { version: rental.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from rentals where id = ${rental.id}`;
+    expect(row!.status).toBe('out');
+  },
+  'POST /v1/device/maintenance/:id/billed': async (app, { a, b }) => {
+    const { contract } = await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/maintenance/${contract.id}/billed`,
+      headers: { authorization: deviceB.authorization },
+      payload: { version: contract.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { billed_on: string | null }[]
+    >`select billed_on from maintenance_contracts where id = ${contract.id}`;
+    expect(row!.billed_on).toBeNull();
+  },
+  'POST /v1/maintenance/:id/visits': async (app, { a, b }) => {
+    const { contract } = await contractRowsOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/maintenance/${contract.id}/visits`,
+      headers: owner(b),
+      payload: { technician: 'فني', version: contract.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { visits: unknown[] }[]
+    >`select visits from maintenance_contracts where id = ${contract.id}`;
+    expect(row!.visits).toEqual([]);
+  },
+  'POST /v1/maintenance/:id/renew': async (app, { a, b }) => {
+    const { contract } = await contractRowsOf(app, a);
+    const [before] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from maintenance_contracts`;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/maintenance/${contract.id}/renew`,
+      headers: owner(b),
+      payload: { version: contract.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [count] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from maintenance_contracts`;
+    expect(count!.n).toBe(before!.n);
+  },
+  'PUT /v1/contract-prices/:id': async (app, { a, b }) => {
+    const { price, customerId, variantId } = await contractRowsOf(app, a);
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/contract-prices/${price.id}`,
+      headers: owner(b),
+      payload: { version: price.version, customerId, variantId, priceMinor: 1, validFrom: '2026-01-01' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { price_minor: string }[]
+    >`select price_minor::text from contract_prices where id = ${price.id}`;
+    expect(row!.price_minor).toBe('900');
+  },
+  'DELETE /v1/contract-prices/:id': async (app, { a, b }) => {
+    const { price } = await contractRowsOf(app, a);
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/contract-prices/${price.id}`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+    const [count] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from contract_prices`;
+    expect(count!.n).toBeGreaterThan(0);
+    const [still] = await ownerDb()<{ id: string }[]>`select id from contract_prices where id = ${price.id}`;
+    expect(still!.id).toBe(price.id);
+  },
   'GET /v1/customers/:id/purchases': async (app, { a, b }) => {
     const made = await app.inject({
       method: 'POST',
@@ -587,6 +1989,182 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect(res.statusCode).toBe(404);
   },
   'PUT /v1/customers/:id': customerIdor('PUT'),
+  'POST /v1/customers/:id/payments': customerIdor('POST', '/payments', { amountMinor: 1000, method: 'cash' }),
+  'POST /v1/customers/:id/opening-debt': customerIdor('POST', '/opening-debt', { amountMinor: 1000 }),
+  'POST /v1/customers/:id/archive-duplicate': customerIdor('POST', '/archive-duplicate'),
+  'PATCH /v1/branches/:id': branchIdor((id) => `/v1/branches/${id}`, 'PATCH', { name: 'مسروق' }),
+  'POST /v1/branches/:id/active': branchIdor((id) => `/v1/branches/${id}/active`, 'POST', { active: false }),
+  'PATCH /v1/regions/:id': distributionIdor(
+    'regions',
+    'region',
+    'PATCH',
+    (id) => `/v1/regions/${id}`,
+    () => ({
+      name: 'مسروق',
+      version: 1,
+    }),
+  ),
+  'PATCH /v1/vans/:id': distributionIdor(
+    'branches',
+    'van',
+    'PATCH',
+    (id) => `/v1/vans/${id}`,
+    ({ branchId }) => ({
+      name: 'مسروق',
+      parentBranchId: branchId,
+    }),
+  ),
+  'POST /v1/vans/:id/active': distributionIdor(
+    'branches',
+    'van',
+    'POST',
+    (id) => `/v1/vans/${id}/active`,
+    () => ({ active: false }),
+  ),
+  'PATCH /v1/reps/:id': distributionIdor(
+    'sales_reps',
+    'rep',
+    'PATCH',
+    (id) => `/v1/reps/${id}`,
+    ({ branchId }) => ({
+      branchId,
+      mode: 'both',
+      version: 1,
+    }),
+  ),
+  'POST /v1/reps/:id/active': distributionIdor(
+    'sales_reps',
+    'rep',
+    'POST',
+    (id) => `/v1/reps/${id}/active`,
+    () => ({ active: false }),
+  ),
+  'GET /v1/routes/:id': distributionIdor('routes', 'route', 'GET', (id) => `/v1/routes/${id}`),
+  'PATCH /v1/routes/:id': distributionIdor(
+    'routes',
+    'route',
+    'PATCH',
+    (id) => `/v1/routes/${id}`,
+    () => ({
+      name: 'مسروق',
+      version: 1,
+    }),
+  ),
+  'PUT /v1/routes/:id/customers': distributionIdor(
+    'routes',
+    'route',
+    'PUT',
+    (id) => `/v1/routes/${id}/customers`,
+    () => ({ customerIds: [], version: 1 }),
+  ),
+  'PATCH /v1/no-sale-reasons/:id': distributionIdor(
+    'no_sale_reasons',
+    'reason',
+    'PATCH',
+    (id) => `/v1/no-sale-reasons/${id}`,
+    () => ({ name: 'مسروق', version: 1 }),
+  ),
+  'PATCH /v1/commission-plans/:id': distributionIdor(
+    'commission_plans',
+    'plan',
+    'PATCH',
+    (id) => `/v1/commission-plans/${id}`,
+    () => ({ name: 'مسروق', mode: 'flat', rateBp: 1, version: 1 }),
+  ),
+  'POST /v1/customers/:id/approval': distributionIdor(
+    'customers',
+    'customer',
+    'POST',
+    (id) => `/v1/customers/${id}/approval`,
+    () => ({ status: 'approved' }),
+  ),
+  'GET /v1/sales-orders/:id': distributionIdor(
+    'sales_orders',
+    'order',
+    'GET',
+    (id) => `/v1/sales-orders/${id}`,
+  ),
+  'POST /v1/sales-orders/:id/cancel': distributionIdor(
+    'sales_orders',
+    'order',
+    'POST',
+    (id) => `/v1/sales-orders/${id}/cancel`,
+    () => ({ reason: 'مسروق', version: 1 }),
+  ),
+  // The report names the rep it is about by a query id: another store's rep answers 404 and shows nothing
+  'GET /v1/distribution/reports/:kind': async (app, { a, b }) => {
+    await ownerDb()`update plans set limits = limits || '{"reps": null}'::jsonb`;
+    try {
+      const repId = await distributionRows.rep(a);
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/distribution/reports/sales_by_rep?from=2026-10-01&to=2026-10-31&repId=${repId}`,
+        headers: owner(b),
+      });
+      expect(res.statusCode).toBe(404);
+    } finally {
+      await ownerDb()`update plans set limits = limits || '{"reps": 0}'::jsonb`;
+    }
+  },
+  'GET /v1/rep-settlements/:id': distributionIdor(
+    'rep_settlements',
+    'settlement',
+    'GET',
+    (id) => `/v1/rep-settlements/${id}`,
+  ),
+  'POST /v1/rep-settlements/:id/approve': distributionIdor(
+    'rep_settlements',
+    'settlement',
+    'POST',
+    (id) => `/v1/rep-settlements/${id}/approve`,
+    () => ({ version: 1 }),
+  ),
+  'POST /v1/rep-settlements/:id/cancel': distributionIdor(
+    'rep_settlements',
+    'settlement',
+    'POST',
+    (id) => `/v1/rep-settlements/${id}/cancel`,
+    () => ({ version: 1, reason: 'مسروق' }),
+  ),
+  'GET /v1/reps/:id/debt': distributionIdor('sales_reps', 'rep', 'GET', (id) => `/v1/reps/${id}/debt`),
+  'POST /v1/reps/:id/debt/payments': distributionIdor(
+    'sales_reps',
+    'rep',
+    'POST',
+    (id) => `/v1/reps/${id}/debt/payments`,
+    () => ({ amountMinor: 1000 }),
+  ),
+  'POST /v1/reps/:id/debt/forgive': distributionIdor(
+    'sales_reps',
+    'rep',
+    'POST',
+    (id) => `/v1/reps/${id}/debt/forgive`,
+    () => ({ amountMinor: 1000, reason: 'مسروق' }),
+  ),
+  'PUT /v1/rep-targets/:id': distributionIdor(
+    'rep_targets',
+    'target',
+    'PUT',
+    (id) => `/v1/rep-targets/${id}`,
+    () => ({ targetValue: 1, version: 1 }),
+  ),
+  'DELETE /v1/rep-targets/:id': distributionIdor(
+    'rep_targets',
+    'target',
+    'DELETE',
+    (id) => `/v1/rep-targets/${id}`,
+  ),
+  'POST /v1/sales-orders/:id/assign': distributionIdor(
+    'sales_orders',
+    'order',
+    'POST',
+    (id) => `/v1/sales-orders/${id}/assign`,
+    ({ branchId }) => ({ warehouseBranchId: branchId, version: 1 }),
+  ),
+  'PATCH /v1/staff/:id': staffIdor('PATCH', '', { fullName: 'مسروق' }),
+  'POST /v1/staff/:id/pin': staffIdor('POST', '/pin', { pin: '7391' }),
+  'POST /v1/staff/:id/deactivate': staffIdor('POST', '/deactivate'),
+  'POST /v1/staff/:id/reactivate': staffIdor('POST', '/reactivate'),
   'GET /v1/products/:id': catalogIdor('products', productOf, 'GET', (id) => `/v1/products/${id}`),
   'PATCH /v1/products/:id': catalogIdor('products', productOf, 'PATCH', (id) => `/v1/products/${id}`),
   'POST /v1/products/:id/archive': catalogIdor(
@@ -631,6 +2209,7 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
   'POST /v1/devices/:id/approve': deviceIdor((id) => `/v1/devices/${id}/approve`, 'POST'),
   'POST /v1/devices/:id/reject': deviceIdor((id) => `/v1/devices/${id}/reject`, 'POST'),
   'POST /v1/devices/:id/revoke': deviceIdor((id) => `/v1/devices/${id}/revoke`, 'POST'),
+  'POST /v1/devices/:id/hide': deviceIdor((id) => `/v1/devices/${id}/hide`, 'POST'),
   // The poll secret of a device of store B never reads store A's waiting device.
   'GET /v1/devices/activations/:id': async (app, { a, b }) => {
     const deviceA = await pendingDevice(app, a);
@@ -656,6 +2235,22 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect(res.statusCode).toBe(404);
     expect(res.body).not.toContain('SFT-001-002');
   },
+  // Store B's owner asking for store A's invoice: 404, nothing of store A in the answer.
+  'GET /v1/sales/:id': async (app, { a, b }) => {
+    const deviceA = await createDevice(a.tenantId);
+    const [userA] = await ownerDb()<{ id: string }[]>`select id from users where tenant_id = ${a.tenantId}`;
+    const saleId = createUuidV7()();
+    await ownerDb()`insert into invoices (tenant_id, id, branch_id, device_id, number, business_date,
+        device_time, shift_id, cashier_id, currency, tax_inclusive, gross_minor, discount_minor, tax_minor,
+        total_minor, tip_minor, payload)
+      values (${a.tenantId}, ${saleId}, ${deviceA.branchId}, ${deviceA.deviceId}, 'INV-001-002-0000001',
+        '2026-10-30', now(), ${createUuidV7()()}, ${userA!.id}, 'SYP', true, 100, 0, 0, 100, 0, '{}'::jsonb)`;
+    const own = await app.inject({ method: 'GET', url: `/v1/sales/${saleId}`, headers: owner(a) });
+    expect(own.statusCode).toBe(200);
+    const res = await app.inject({ method: 'GET', url: `/v1/sales/${saleId}`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('INV-001-002');
+  },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);
     const deviceB = await createDevice(b.tenantId);
@@ -671,10 +2266,163 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     });
     expect(res.statusCode).toBe(404);
   },
+  // An agent pays only for his own stores: agent 1 cannot activate (or find) agent 2's store
+  'POST /v1/agent/stores/:id/activate': async (app, { a, b }) => {
+    // A paid plan to activate, whatever ran before on this database (a fresh one may have none)
+    await ownerDb()`
+      insert into plans (code, name, sort_order, limits, features, price_monthly_minor, price_yearly_minor)
+      values ('basic', 'الأساسية', 1, '{}', '{}', 1000, 10000)
+      on conflict (code) do update set price_monthly_minor = 1000, price_yearly_minor = 10000, is_active = true`;
+    const hash = await hashSecret('agent-pass-123');
+    const ids: string[] = [];
+    for (const [n, tenantId] of [
+      ['1', a.tenantId],
+      ['2', b.tenantId],
+    ] as const) {
+      const [agent] = await ownerDb()<{ id: string }[]>`
+        insert into agents (code, full_name, email, phone, password_hash, balance_minor)
+        values (${'AG-' + n}, ${'وكيل ' + n}, ${`agent${n}@agents.test`}, ${`+96394400000${n}`}, ${hash}, 5000) returning id`;
+      await ownerDb()`update tenants set agent_id = ${agent!.id} where id = ${tenantId}`;
+      await ownerDb()`update subscriptions set trial_ends_at = '2026-10-01T00:00:00Z' where tenant_id = ${tenantId}`;
+      ids.push(agent!.id);
+    }
+    const login = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/login',
+      payload: { email: 'agent1@agents.test', password: 'agent-pass-123' },
+    });
+    // Round 37 (decision 21): the password opens a second step, the code that went to his phone
+    const step = login.json<{ challengeId: string }>();
+    const signed = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/login/code',
+      payload: { challengeId: step.challengeId, code: codes.last('+963944000001') },
+    });
+    const headers = { authorization: `Bearer ${signed.json<{ token: string }>().token}` };
+    const go = (tenantId: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/v1/agent/stores/${tenantId}/activate`,
+        headers,
+        payload: { planCode: 'basic', billingCycle: 'monthly', requestKey: `idor-probe-${tenantId}` },
+      });
+    for (const tenantId of [b.tenantId, '0192a000-0000-7000-8000-000000000001']) {
+      expect((await go(tenantId)).statusCode, tenantId).toBe(404);
+    }
+    const [theirs] = await ownerDb()<{ status: string; balance: string }[]>`
+      select s.status, (select balance_minor::text from agents where id = ${ids[1]!}) as balance
+      from subscriptions s where s.tenant_id = ${b.tenantId}`;
+    expect(theirs).toEqual({ status: 'trialing', balance: '5000' });
+    // His own store does pay, so the 404 above is the guard, not a broken route
+    const mine = await go(a.tenantId);
+    expect(mine.statusCode, mine.body).toBe(200);
+  },
 };
 
 /** Device routes: store B's device acting on store A's ids gets nothing of store A. */
+/** Store A with a café menu, one table, a waiter-capable owner and an open order (optionally sent). */
+async function hallFixtureOf(app: FastifyInstance, a: Stores['a'], send = false) {
+  const deviceA = await createDevice(a.tenantId);
+  const [me] = await ownerDb()<{ id: string }[]>`
+    select id from users where tenant_id = ${a.tenantId} limit 1`;
+  const userA = me!.id;
+  await ownerDb()`update tenant_settings set service = ${ownerDb().json({ tables: ['1'], orderNumbers: false, kitchenTickets: true })} where tenant_id = ${a.tenantId}`;
+  const made = await app.inject({
+    method: 'POST',
+    url: '/v1/products',
+    headers: owner(a),
+    payload: {
+      nameAr: 'قهوة',
+      type: 'service',
+      variants: [{ price: { currency: 'SYP', priceMinor: 15_000 } }],
+    },
+  });
+  const product = made.json<{ id: string; variants: { id: string }[] }>();
+  const post = (payload: object) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/device/hall',
+      headers: { authorization: deviceA.authorization },
+      payload,
+    });
+  const opened = await post({ type: 'open', userId: userA, table: '1' });
+  expect(opened.statusCode, opened.body).toBe(200);
+  const orderId = opened.json<{ order: { id: string } }>().order.id;
+  const added = await post({
+    type: 'add',
+    userId: userA,
+    orderId,
+    lines: [{ productId: product.id, variantId: product.variants[0]!.id, name: 'قهوة', qty: 1 }],
+  });
+  expect(added.statusCode, added.body).toBe(200);
+  if (send) expect((await post({ type: 'send', userId: userA, orderId })).statusCode).toBe(200);
+  const [line] = await ownerDb()<
+    { id: string }[]
+  >`select id from open_order_lines where order_id = ${orderId}`;
+  return { deviceA, orderId, userA, lineId: line!.id };
+}
+
 const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
+  // «وضع المندوب»: the day sheet and its writes belong to a rep phone alone; a till, or another store's phone, gets nothing
+  'GET /v1/device/rep/day': async (app, { a, b }) => {
+    const deviceA = await createDevice(a.tenantId);
+    const deviceB = await createDevice(b.tenantId);
+    for (const device of [deviceA, deviceB]) {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/device/rep/day',
+        headers: { authorization: device.authorization },
+      });
+      expect([403]).toContain(res.statusCode);
+    }
+  },
+  'POST /v1/device/rep/day': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/rep/day',
+      headers: { authorization: deviceB.authorization },
+      payload: { businessDate: '2026-11-18' },
+    });
+    expect(res.statusCode).toBe(403);
+    const [n] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from rep_days where tenant_id = ${a.tenantId}`;
+    expect(n!.n).toBe(0);
+  },
+  'POST /v1/device/rep/van-count': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/rep/van-count',
+      headers: { authorization: deviceB.authorization },
+      payload: { businessDate: '2026-11-18', lines: [] },
+    });
+    expect(res.statusCode).toBe(403);
+    const [n] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from rep_days where tenant_id = ${a.tenantId}`;
+    expect(n!.n).toBe(0);
+  },
+  'POST /v1/device/rep/visits': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/rep/visits',
+      headers: { authorization: deviceB.authorization },
+      payload: {
+        id: '0192a000-0000-7000-8000-0000000000f1',
+        businessDate: '2026-11-18',
+        customerId: '0192a000-0000-7000-8000-0000000000f2',
+        arrivedAt: '2026-11-18T07:00:00.000Z',
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    const [n] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from rep_visits where tenant_id = ${a.tenantId}`;
+    expect(n!.n).toBe(0);
+  },
   'POST /v1/sync/push': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);
     const deviceB = await createDevice(b.tenantId);
@@ -799,6 +2547,20 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
       select count(*)::int as n from pin_attempts where tenant_id = ${a.tenantId}`;
     expect(attempts!.n).toBe(0);
   },
+  // Store B's device asking for store A's item as a shortage: refused, and neither store has a request
+  'POST /v1/device/shortages': async (app, { a, b }) => {
+    const product = await productOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/shortages',
+      headers: { authorization: deviceB.authorization },
+      payload: { id: createUuidV7()(), variantId: product.variants[0]!.id, name: 'دواء', qty: 1000 },
+    });
+    expect(res.statusCode).toBe(400);
+    const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from shortage_requests`;
+    expect(n!.n).toBe(0);
+  },
   // Store B's device holding store A's piece: refused, and neither store has a hold
   'POST /v1/device/holds': async (app, { a, b }) => {
     const product = await productOf(app, a);
@@ -818,16 +2580,412 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from online_orders`;
     expect(n!.n).toBe(0);
   },
+  // Store B's device naming store A's owner as the one who adds the product: refused, and neither store gets one
+  'POST /v1/device/products': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const [ownerA] = await ownerDb()<
+      { id: string }[]
+    >`select id from users where tenant_id = ${a.tenantId} limit 1`;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/products',
+      headers: { authorization: deviceB.authorization },
+      payload: {
+        actorId: ownerA!.id,
+        nameAr: 'صنف دخيل',
+        priceMinor: 1000,
+        categoryId: null,
+        barcode: 'IDOR-NEW-1',
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    const [n] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from products where name_ar = 'صنف دخيل'`;
+    expect(n!.n).toBe(0);
+  },
+  // Store B's device naming store A's owner as the one who writes off: refused, and no stock count is made
+  'POST /v1/device/waste': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const [ownerA] = await ownerDb()<
+      { id: string }[]
+    >`select id from users where tenant_id = ${a.tenantId} limit 1`;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/waste',
+      headers: { authorization: deviceB.authorization },
+      payload: {
+        id: '0192a000-0000-7000-8000-0000000000a1',
+        actorId: ownerA!.id,
+        reason: 'انكسر',
+        lines: [{ variantId: '0192a000-0000-7000-8000-0000000000a2', qty: 1000 }],
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from stocktakes`;
+    expect(n!.n).toBe(0);
+  },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {
     await IDOR_PROBES['GET /v1/sync/snapshots/:id']!(app, { a, b });
+  },
+  'GET /v1/device/installments/customer/:id': async (app, { a, b }) => {
+    await IDOR_PROBES['GET /v1/device/installments/customer/:id']!(app, { a, b });
   },
   'GET /v1/device/customers/:id/purchases': async (app, { a, b }) => {
     await IDOR_PROBES['GET /v1/device/customers/:id/purchases']!(app, { a, b });
   },
+  'GET /v1/device/quotations/:id': async (app, { a, b }) => {
+    await IDOR_PROBES['GET /v1/device/quotations/:id']!(app, { a, b });
+  },
+  'POST /v1/device/quotations/:id/convert': async (app, { a, b }) => {
+    await IDOR_PROBES['POST /v1/device/quotations/:id/convert']!(app, { a, b });
+  },
   'POST /v1/device/alterations/:id/status': async (app, { a, b }) => {
     await IDOR_PROBES['POST /v1/device/alterations/:id/status']!(app, { a, b });
   },
+  'POST /v1/device/rentals/:id/return': async (app, { a, b }) => {
+    await IDOR_PROBES['POST /v1/device/rentals/:id/return']!(app, { a, b });
+  },
+  'POST /v1/device/maintenance/:id/billed': async (app, { a, b }) => {
+    await IDOR_PROBES['POST /v1/device/maintenance/:id/billed']!(app, { a, b });
+  },
+  // Another store's rentals, contracts, prices and pieces never reach this store's till
+  'GET /v1/device/rentals': async (app, { a, b }) => {
+    await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/rentals?status=all',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'GET /v1/device/maintenance': async (app, { a, b }) => {
+    await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/maintenance',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'GET /v1/device/contract-prices': async (app, { a, b }) => {
+    const { customerId } = await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/device/contract-prices?customerId=${customerId}`,
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'GET /v1/device/rentals/units': async (app, { a, b }) => {
+    await rentablePieceOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/rentals/units',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'POST /v1/device/rentals': async (app, { a, b }) => {
+    const serial = await rentablePieceOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/rentals',
+      headers: { authorization: deviceB.authorization },
+      payload: {
+        serial,
+        customerName: 'زبون',
+        phone: '0944555666',
+        expectedReturn: '2099-01-01',
+        rateUnit: 'day',
+        rateMinor: 1000,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from serials where serial = ${serial}`;
+    expect(row!.status).toBe('in_stock');
+  },
+  // An invoice is found by its number only inside its own store: another store's till gets 404
+  'GET /v1/device/invoices/lookup': async (app) => {
+    const owner = await openStore(app, '0933333333');
+    const doc = documents(owner.device);
+    const open = doc('shift_open', shiftOpen(owner.userId));
+    const sold = doc(
+      'sale',
+      sale({ userId: owner.userId }, open.id, {
+        lines: [cartLine(1, 15_000, { qty: 1000 })],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 15_000 }],
+      }),
+    );
+    await push(app, owner.device, [open, sold]);
+    const find = (authorization: string) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/device/invoices/lookup?q=${encodeURIComponent(sold.number!)}`,
+        headers: { authorization },
+      });
+    expect((await find(owner.device.authorization)).statusCode).toBe(200);
+    const other = await registerStore(app, { phone: '0944444444' });
+    const stranger = await createDevice(other.body.tenant.id as string);
+    expect((await find(stranger.authorization)).statusCode).toBe(404);
+  },
+  // Recent invoices are found by the customer's phone in any form, never from another store
+  'GET /v1/device/invoices/search': async (app) => {
+    const owner = await openStore(app, '0933333344');
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { name: 'ريم', phone: '0955123456' },
+    });
+    const customerId = made.json<{ id: string }>().id;
+    const doc = documents(owner.device);
+    const open = doc('shift_open', shiftOpen(owner.userId));
+    const sold = doc(
+      'sale',
+      sale({ userId: owner.userId }, open.id, {
+        customerId,
+        lines: [cartLine(1, 15_000, { qty: 1000 })],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 15_000 }],
+      }),
+    );
+    await push(app, owner.device, [open, sold]);
+    const search = (authorization: string, q: string) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/device/invoices/search?q=${encodeURIComponent(q)}`,
+        headers: { authorization },
+      });
+    // By the end of the number
+    const hit = await search(owner.device.authorization, sold.number!.slice(-4));
+    expect(hit.statusCode).toBe(200);
+    expect(hit.json<{ invoices: { number: string }[] }>().invoices.map((i) => i.number)).toContain(
+      sold.number,
+    );
+    // By any part of the printed number: the whole of it, from the middle, or lower case
+    const parts = sold.number!.split('-');
+    for (const typed of [
+      sold.number!,
+      sold.number!.toLowerCase(),
+      parts.slice(1).join('-'),
+      parts.slice(-2).join('-'),
+    ]) {
+      const part = await search(owner.device.authorization, typed);
+      expect(part.json<{ invoices: { number: string }[] }>().invoices.map((i) => i.number)).toContain(
+        sold.number,
+      );
+    }
+    // Nothing typed: the newest invoices of the store, for the return screen's first view
+    const recent = await search(owner.device.authorization, '');
+    expect(recent.statusCode).toBe(200);
+    expect(recent.json<{ invoices: { number: string }[] }>().invoices.map((i) => i.number)).toContain(
+      sold.number,
+    );
+    // By the customer's phone however it is typed, and by name
+    for (const typed of ['0955123456', '0955 123 456', '+963 955 123 456', '955123', 'ريم']) {
+      const found = await search(owner.device.authorization, typed);
+      expect(found.json<{ invoices: { number: string; customerPhone: string | null }[] }>().invoices).toEqual(
+        [expect.objectContaining({ number: sold.number, customerPhone: '+963955123456' })],
+      );
+    }
+    const other = await registerStore(app, { phone: '0944444455' });
+    const stranger = await createDevice(other.body.tenant.id as string);
+    expect(
+      (await search(stranger.authorization, sold.number!.slice(-4))).json<{ invoices: unknown[] }>().invoices,
+    ).toEqual([]);
+  },
+  // A till is told about its own store's subscription: A's lapse never reaches B's till
+  'GET /v1/device/subscription': async (app, { a, b }) => {
+    await ownerDb()`update subscriptions set status = 'suspended' where tenant_id = ${a.tenantId}`;
+    const read = async (tenantId: string) =>
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/v1/device/subscription',
+          headers: { authorization: (await createDevice(tenantId)).authorization },
+        })
+      ).json<{ readOnly: boolean }>().readOnly;
+    expect(await read(a.tenantId)).toBe(true);
+    expect(await read(b.tenantId)).toBe(false);
+    await ownerDb()`update subscriptions set status = 'active' where tenant_id = ${a.tenantId}`;
+  },
+  // The hall: store B's devices see none of store A's orders and cannot touch them by id
+  'GET /v1/device/hall': async (app, { a, b }) => {
+    const { orderId, deviceA } = await hallFixtureOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/hall',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ orders: unknown[] }>().orders).toEqual([]);
+    const own = await app.inject({
+      method: 'GET',
+      url: '/v1/device/hall',
+      headers: { authorization: deviceA.authorization },
+    });
+    expect(own.json<{ orders: { id: string }[] }>().orders.map((o) => o.id)).toEqual([orderId]);
+  },
+  'POST /v1/device/hall': async (app, { a, b }) => {
+    const { orderId, userA } = await hallFixtureOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    // Another store's order id is as good as none, and another store's staff are unknown
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/hall',
+      headers: { authorization: deviceB.authorization },
+      payload: { type: 'send', userId: userA, orderId },
+    });
+    expect([403, 404]).toContain(res.statusCode);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from open_orders where id = ${orderId}`;
+    expect(row!.status).toBe('open');
+  },
+  'GET /v1/device/kitchen': async (app, { a, b }) => {
+    const { deviceA } = await hallFixtureOf(app, a, true);
+    const deviceB = await createDevice(b.tenantId);
+    await ownerDb()`update devices set kind = 'kitchen_screen' where id = ${deviceB.deviceId}`;
+    const seen = async (device: { authorization: string }) =>
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/v1/device/kitchen',
+          headers: { authorization: device.authorization },
+        })
+      ).json<{ tickets: unknown[] }>().tickets.length;
+    expect(await seen(deviceB)).toBe(0);
+    expect(await seen(deviceA)).toBe(1);
+  },
+  'POST /v1/device/kitchen': async (app, { a, b }) => {
+    const { lineId } = await hallFixtureOf(app, a, true);
+    const deviceB = await createDevice(b.tenantId);
+    await ownerDb()`update devices set kind = 'kitchen_screen' where id = ${deviceB.deviceId}`;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/kitchen',
+      headers: { authorization: deviceB.authorization },
+      payload: { type: 'status', lineIds: [lineId], status: 'preparing' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { status: string }[]
+    >`select status from open_order_lines where id = ${lineId}`;
+    expect(row!.status).toBe('sent');
+  },
+  'GET /v1/device/menu': async (app, { a, b }) => {
+    await hallFixtureOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/menu',
+      headers: { authorization: deviceB.authorization },
+    });
+    const menu = res.json<{ items: unknown[]; staff: { id: string }[] }>();
+    expect(menu.items).toEqual([]);
+    const usersA = await ownerDb()<{ id: string }[]>`select id from users where tenant_id = ${a.tenantId}`;
+    const idsA = new Set(usersA.map((u) => u.id));
+    expect(menu.staff.every((p) => !idsA.has(p.id))).toBe(true);
+  },
   // Store B's till lists none of store A's tickets, and its new one is its own
+  // Store B's till lists none of store A's quotations, and its new one is its own
+  'GET /v1/device/quotations': async (app, { a, b }) => {
+    await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: { ...QUOTATION, status: 'sent' },
+    });
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/quotations',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'POST /v1/device/quotations': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/device/quotations',
+      headers: { authorization: deviceB.authorization },
+      payload: QUOTATION,
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const [row] = await ownerDb()<{ tenant_id: string }[]>`
+      select tenant_id from quotations where id = ${made.json<{ id: string }>().id}`;
+    expect(row!.tenant_id).toBe(b.tenantId);
+    expect(row!.tenant_id).not.toBe(a.tenantId);
+  },
+  // Store B's rep phone reads store B's rules, never store A's; a till is not a rep phone
+  'GET /v1/device/distribution/settings': async (app, { a, b }) => {
+    await ownerDb()`update plans set limits = limits || '{"reps": null}'::jsonb`;
+    try {
+      await ownerDb()`update tenant_settings set distribution = '{"orderHoldDays": 30}'::jsonb where tenant_id = ${a.tenantId}`;
+      const phone = await distributionPhone(b);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/device/distribution/settings',
+        headers: { authorization: phone.authorization },
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.json<{ orderHoldDays: number }>().orderHoldDays).toBe(7);
+      const till = await createDevice(b.tenantId);
+      const refused = await app.inject({
+        method: 'GET',
+        url: '/v1/device/distribution/settings',
+        headers: { authorization: till.authorization },
+      });
+      expect(refused.statusCode).toBe(403);
+    } finally {
+      await ownerDb()`update plans set limits = limits || '{"reps": 0}'::jsonb`;
+    }
+  },
+  // Store B's rep phone cannot order for store A's customer or fill from store A's branch; its own order is its own
+  'POST /v1/device/sales-orders': async (app, { a, b }) => {
+    await ownerDb()`update plans set limits = limits || '{"reps": null}'::jsonb`;
+    try {
+      const phone = await distributionPhone(b);
+      const theirCustomer = await distributionRows.customer(a);
+      const [theirBranch] = await ownerDb()<{ id: string }[]>`
+        select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+      const ownBranch = await firstBranch(b.tenantId);
+      const ownCustomer = await distributionRows.customer(b);
+      const product = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: owner(b),
+        payload: { nameAr: 'صنف', variants: [{ price: { currency: 'SYP', priceMinor: 100 } }] },
+      });
+      const variant = { id: product.json<{ variants: { id: string }[] }>().variants[0]!.id };
+      const order = (customerId: string, warehouseBranchId: string) =>
+        app.inject({
+          method: 'POST',
+          url: '/v1/device/sales-orders',
+          headers: { authorization: phone.authorization },
+          payload: {
+            customerId,
+            warehouseBranchId,
+            repId: null,
+            currency: 'SYP',
+            lines: [{ variantId: variant.id, qty: 1000, unitPriceMinor: 100 }],
+          },
+        });
+      expect((await order(theirCustomer, ownBranch)).statusCode).toBe(400);
+      expect((await order(ownCustomer, theirBranch!.id)).statusCode).toBe(400);
+      const made = await order(ownCustomer, ownBranch);
+      expect(made.statusCode, made.body).toBe(201);
+      const [row] = await ownerDb()<{ tenant_id: string }[]>`
+        select tenant_id from sales_orders where id = ${made.json<{ id: string }>().id}`;
+      expect(row!.tenant_id).toBe(b.tenantId);
+    } finally {
+      await ownerDb()`update plans set limits = limits || '{"reps": 0}'::jsonb`;
+    }
+  },
   'GET /v1/device/alterations': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);
     await app.inject({
@@ -938,6 +3096,32 @@ describe('route registry', () => {
     }
   });
 
+  it('agent routes refuse a missing token, a forged one, a store owner’s and a platform member’s', async () => {
+    const { body } = await registerStore(app);
+    const admin = await hashSecret('platform-pass-1');
+    await ownerDb()`insert into platform_users (full_name, email, password_hash, role)
+      values ('مدير', 'routes-admin@serva.test', ${admin}, 'super_admin')`;
+    const login = await app.inject({
+      method: 'POST',
+      url: '/v1/platform/login',
+      payload: { email: 'routes-admin@serva.test', password: 'platform-pass-1' },
+    });
+    for (const [route, access] of Object.entries(ROUTES)) {
+      if (access !== 'agent') continue;
+      const [method, rawUrl] = route.split(' ') as ['GET', string];
+      const url = rawUrl.replace(':id', '0192a000-0000-7000-8000-000000000001');
+      for (const authorization of [
+        undefined,
+        'Bearer forged',
+        `Bearer ${body.accessToken}`,
+        `Bearer ${login.json<{ token: string }>().token}`,
+      ]) {
+        const res = await app.inject({ method, url, headers: authorization ? { authorization } : {} });
+        expect(res.statusCode, `${route} ${authorization?.slice(0, 20) ?? 'no token'}`).toBe(401);
+      }
+    }
+  });
+
   it('every device route has a cross-store probe', () => {
     const deviceRoutes = Object.entries(ROUTES)
       .filter(([, access]) => access === 'device')
@@ -959,7 +3143,7 @@ describe('route registry', () => {
   it('IDOR probes: another store’s ids answer 404', async () => {
     const stores = await twoStores();
     for (const probe of Object.values(IDOR_PROBES)) await probe(app, stores);
-  });
+  }, 90_000);
 
   it('the activation poll refuses a missing, malformed or unknown secret', async () => {
     for (const authorization of [

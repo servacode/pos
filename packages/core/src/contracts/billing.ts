@@ -85,6 +85,8 @@ export interface SubscriptionPage {
   payments: SubscriptionPayment[];
   paymentMethods: PaymentMethodInfo[];
   sypPerUsd: string;
+  /** The agent who brought the store, when one did: his name and phone for the owner to call */
+  agent: { fullName: string; phone: string | null } | null;
 }
 
 export const openInvoiceInput = z.object({
@@ -129,6 +131,8 @@ export interface PlatformStore {
   graceEndsAt: string | null;
   pendingPayments: number;
   lastSale: string | null;
+  /** The agent the store belongs to (agents program); null when it came straight to the platform */
+  agent: { id: string; code: string; fullName: string } | null;
 }
 
 export interface PlatformPayment {

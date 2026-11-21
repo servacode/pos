@@ -1,0 +1,1 @@
+ALTER TABLE "shortage_requests" ALTER COLUMN "id" SET DEFAULT uuid_generate_v7();

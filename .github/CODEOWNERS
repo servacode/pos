@@ -31,9 +31,14 @@
 /apps/api/src/services/reprocess.ts @servacode
 /apps/api/src/services/rebuild.ts @servacode
 /apps/api/src/services/costing.ts @servacode
+/apps/api/src/services/batches.ts @servacode
+/apps/api/src/services/damaged-stock.ts @servacode
 /apps/api/src/services/expiry.ts @servacode
 /apps/api/src/services/serials.ts @servacode
+/apps/api/src/services/sales-orders.ts @servacode
 /apps/api/src/services/purchases.ts @servacode
+/apps/api/src/services/purchase-order-receipt.ts @servacode
+/apps/api/src/services/purchase-usd.ts @servacode
 
 # Schema, migrations (append-only triggers, balance trigger, RLS) and the migrator
 /packages/db/drizzle/ @servacode
@@ -69,6 +74,13 @@
 # shared shapes of the document and accounting contracts
 /packages/core/src/contracts/common.ts @servacode
 /packages/core/src/contracts/customers.ts @servacode
+/packages/core/src/contracts/cheques.ts @servacode
+/packages/core/src/contracts/installments.ts @servacode
+# the instalment fee line sale-return.ts takes back with the goods (round 37, decision 18)
+/packages/core/src/installments.ts @servacode
+/apps/api/src/services/installments.ts @servacode
+# the drawers a cash refund came out of (the dollar's, round 36)
+/apps/api/src/services/refund-drawers.ts @servacode
 # the document types the protocol and the local store accept
 /packages/sync/src/doc-types.ts @servacode
 # identifiers the protocol deduplicates on
@@ -95,6 +107,8 @@
 /apps/api/src/services/sync-state.ts @servacode
 # the database connection and withTenant(), which the maintenance steps sit beside
 /packages/db/src/client.ts @servacode
+# the read-only rule sync push applies to a lapsed subscription
+/apps/api/src/services/subscription-gate.ts @servacode
 # what the posting tests assert against
 /apps/api/test/accounting-fixtures.ts @servacode
 # the shared harness of the financial tests
@@ -106,3 +120,8 @@
 # the staff the golden day posts as
 /apps/api/test/staff.ts @servacode
 
+# the period close the posting door reads (round 37, decision 17)
+/apps/api/src/services/period-close.ts @servacode
+
+# a product the till made offline, written by the document processor (round 38)
+/apps/api/src/services/till-products.ts @servacode

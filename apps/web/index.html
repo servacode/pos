@@ -4,14 +4,70 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#F6FAF8" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0B1210" media="(prefers-color-scheme: dark)" />
-    <meta name="description" content="Serva POS — كاشير سحابي بسيط لمحلك" />
+    <!-- The page colour of each theme (canvas) for the browser bar; data-scheme lets a saved choice pick one. -->
+    <meta name="theme-color" content="#F3F6FC" media="(prefers-color-scheme: light)" data-scheme="light" />
+    <meta name="theme-color" content="#080D1A" media="(prefers-color-scheme: dark)" data-scheme="dark" />
+    <!--
+      The theme saved on this device (serva.theme: THEME_STORAGE_KEY of @serva/ui › themePreference.ts),
+      set before any style or script loads so a dark choice never flashes light. With none, the page
+      follows the device. Inside a function, so nothing it names lands on window.
+    -->
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('serva.theme');
+          if (theme !== 'light' && theme !== 'dark') return;
+          document.documentElement.setAttribute('data-theme', theme);
+          var metas = document.querySelectorAll('meta[name="theme-color"][data-scheme]');
+          for (var i = 0; i < metas.length; i += 1) {
+            metas[i].setAttribute(
+              'media',
+              metas[i].getAttribute('data-scheme') === theme ? 'all' : 'not all',
+            );
+          }
+        } catch (error) {
+          // No storage (private mode, blocked): the page follows the device.
+        }
+      })();
+    </script>
+    <meta name="description" content="SERVA سيرفا — كاشير سحابي بسيط لمحلك" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>Serva POS</title>
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/boot.css" />
+    <title>SERVA</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!--
+        The store admin's frame (sidebar, top bar, a few grey blocks) painted by the HTML alone, so a
+        reload shows the page's shape while the code and the session load; React replaces it on its
+        first render. A device's own app, a public page and sign-in get none (the script below).
+      -->
+      <div id="boot" aria-hidden="true">
+        <aside>
+          <div><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </aside>
+        <section>
+          <header><i style="width: 10rem; height: 1.5rem"></i></header>
+          <i style="width: 12rem; height: 2rem"></i>
+          <i style="height: 6rem"></i>
+          <i style="height: 16rem"></i>
+        </section>
+      </div>
+    </div>
+    <script>
+      (function () {
+        if (
+          /^\/(pos|kitchen|waiter|link|platform|shop|terms|privacy|dev|login|register|forgot-password)(\/|$)/.test(
+            location.pathname,
+          )
+        ) {
+          var boot = document.getElementById('boot');
+          if (boot) boot.remove();
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

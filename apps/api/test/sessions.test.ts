@@ -160,33 +160,50 @@ describe('session lifetime and store status', () => {
 });
 
 describe('refresh token rotation', () => {
-  it('two tabs refreshing at once: one rotates, the other gets 409 and no cookie change', async () => {
+  it('two tabs refreshing at once: neither signs the user out, and the last cookie works', async () => {
     const { cookie } = await registerStore(app);
     const [a, b] = await Promise.all([refresh(cookie), refresh(cookie)]);
     const results = [a, b].sort((x, y) => x.statusCode - y.statusCode);
 
-    expect(results.map((r) => r.statusCode)).toEqual([200, 409]);
-    expect(setsCookie(results[0]!)).toBe(true);
-    expect(setsCookie(results[1]!)).toBe(false);
-    expect(results[1]!.json().error.code).toBe('conflict');
-    expect((await refresh(refreshCookie(results[0]!)!)).statusCode).toBe(200);
+    // Either both rotate (the second recovers from the first) or one gets 409 and keeps its cookie
+    for (const r of results) expect([200, 409]).toContain(r.statusCode);
+    expect(results.some((r) => r.statusCode === 200)).toBe(true);
+    for (const r of results) if (r.statusCode === 409) expect(setsCookie(r)).toBe(false);
+    const last = results.filter((r) => r.statusCode === 200).at(-1)!;
+    expect((await refresh(refreshCookie(last)!)).statusCode).toBe(200);
   });
 
-  it('reusing a rotated token within the grace window is a race, not theft', async () => {
-    const { cookie } = await registerStore(app);
-    const rotated = refreshCookie(await refresh(cookie))!;
+  it('a refresh whose answer was lost: the old token inside the grace window gets a new one', async () => {
+    const { body, cookie } = await registerStore(app);
+    // The browser never received this answer, so it still holds `cookie`
+    await refresh(cookie);
 
     clock.advance(10 * SECOND_MS);
-    const late = await refresh(cookie);
-    expect(late.statusCode).toBe(409);
-    expect(setsCookie(late)).toBe(false);
-    expect((await refresh(rotated)).statusCode).toBe(200);
+    const retry = await refresh(cookie);
+    expect(retry.statusCode).toBe(200);
+    expect(setsCookie(retry)).toBe(true);
+    const recovered = refreshCookie(retry)!;
+    expect((await refresh(recovered)).statusCode).toBe(200);
+    expect((await me(body.accessToken)).statusCode).toBe(200);
   });
 
-  it('reusing a rotated token after the grace window ends every session of the user', async () => {
+  it('a lost answer does not reopen a signed-out session', async () => {
+    const { cookie } = await registerStore(app);
+    const rotated = refreshCookie(await refresh(cookie))!;
+    const out = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/logout',
+      cookies: { [REFRESH_COOKIE]: rotated },
+    });
+    expect(out.statusCode).toBeLessThan(300);
+
+    clock.advance(5 * SECOND_MS);
+    expect((await refresh(cookie)).statusCode).toBe(401);
+  });
+
+  it('reusing a rotated token after the grace window ends only that session family', async () => {
     const { body, cookie } = await registerStore(app);
     const rotated = refreshCookie(await refresh(cookie))!;
-    const otherDevice = refreshCookie(await login())!;
 
     clock.advance(31 * SECOND_MS);
     const stolen = await refresh(cookie);
@@ -194,7 +211,21 @@ describe('refresh token rotation', () => {
     expect(stolen.cookies.find((c) => c.name === REFRESH_COOKIE)?.value).toBe('');
 
     expect((await refresh(rotated)).statusCode).toBe(401);
-    expect((await refresh(otherDevice)).statusCode).toBe(401);
     expect((await me(body.accessToken)).statusCode).toBe(401);
+  });
+
+  it('reusing a rotated token keeps the other devices of the same user signed in', async () => {
+    const { cookie } = await registerStore(app);
+    const rotated = refreshCookie(await refresh(cookie))!;
+    const otherLogin = await login();
+    const otherDevice = refreshCookie(otherLogin)!;
+    const otherAccess = otherLogin.json().accessToken as string;
+
+    clock.advance(31 * SECOND_MS);
+    expect((await refresh(cookie)).statusCode).toBe(401);
+
+    expect((await refresh(rotated)).statusCode).toBe(401);
+    expect((await me(otherAccess)).statusCode).toBe(200);
+    expect((await refresh(otherDevice)).statusCode).toBe(200);
   });
 });

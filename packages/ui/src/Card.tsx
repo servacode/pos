@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react';
+import { useId, type ComponentProps, type ReactNode } from 'react';
 import { cn } from './cn';
 import { TrendDownIcon, TrendUpIcon } from './icons';
 
@@ -9,15 +9,19 @@ export interface CardProps extends ComponentProps<'div'> {
   selected?: boolean;
 }
 
-/** Groups content (tab 14 › البطاقة): normal, clickable, selected. */
+/**
+ * Groups content (هوية 4 › Card): a surface on a hairline border with a soft lift, corner 16,
+ * padding 20 (24 from 640 px). Normal, clickable (raised on hover) or selected (brand-soft, brand edge).
+ */
 export function Card({ className, interactive = false, selected = false, ...rest }: CardProps) {
   return (
     <div
       className={cn(
-        'rounded-card p-5 shadow-e1 sm:p-6',
-        selected ? 'bg-brand-soft ring-2 ring-brand' : 'bg-surface ring-1 ring-line/70',
+        'rounded-card border p-5 shadow-e1 sm:p-6',
+        selected ? 'border-brand bg-brand-soft ring-1 ring-brand' : 'border-line bg-surface',
         interactive &&
-          'transition-[box-shadow,transform] duration-120 ease-standard hover:-translate-y-0.5 hover:shadow-e2',
+          'transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:shadow-e2 motion-safe:hover:-translate-y-0.5',
+        interactive && !selected && 'hover:border-line-control/50',
         className,
       )}
       {...rest}
@@ -25,7 +29,10 @@ export function Card({ className, interactive = false, selected = false, ...rest
   );
 }
 
-/** A card's title row: the title at the start, an action at the end. */
+/**
+ * A card's title row (هوية 4 › CardHeader): an optional 36 icon tile, the title and a line of
+ * description at the start, the action at the end.
+ */
 export function CardHeader({
   title,
   action,
@@ -41,15 +48,20 @@ export function CardHeader({
   className?: string;
 }) {
   return (
-    <div className={cn('mb-4 flex items-center justify-between gap-3', className)}>
-      <div className="flex min-w-0 items-center gap-3">
+    <div className={cn('mb-4 flex items-center justify-between gap-4', className)}>
+      <div
+        className={cn(
+          'flex min-w-0 flex-1 gap-3 [.flex-wrap>&]:min-w-40',
+          description ? 'items-start' : 'items-center',
+        )}
+      >
         {icon ? <IconChip>{icon}</IconChip> : null}
-        <div className="flex min-w-0 flex-col">
-          <h3 className="text-base font-bold text-ink">{title}</h3>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h3 className="text-lg font-semibold text-ink">{title}</h3>
           {description ? <p className="text-sm text-ink-muted">{description}</p> : null}
         </div>
       </div>
-      {action}
+      {action ? <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
     </div>
   );
 }
@@ -63,7 +75,16 @@ const CHIP_TONES = {
   neutral: 'bg-surface-muted text-ink-muted',
 } as const;
 
-/** A picture in a soft rounded square: card titles, stat tiles, list rows (هوية 3). */
+const CHIP_SIZES = {
+  sm: 'size-8 rounded-small',
+  md: 'size-9 rounded-small',
+  lg: 'size-12 rounded-card',
+} as const;
+
+/**
+ * A picture in a soft square: card titles, stat tiles, list rows (هوية 4): 32 or 36 with corner 8,
+ * 48 with corner 16.
+ */
 export function IconChip({
   tone = 'brand',
   size = 'md',
@@ -71,23 +92,14 @@ export function IconChip({
   children,
 }: {
   tone?: keyof typeof CHIP_TONES;
-  size?: 'sm' | 'md' | 'lg';
+  size?: keyof typeof CHIP_SIZES;
   className?: string;
   children: ReactNode;
 }) {
   return (
     <span
       aria-hidden="true"
-      className={cn(
-        'grid shrink-0 place-items-center',
-        size === 'sm'
-          ? 'size-8 rounded-[0.625rem]'
-          : size === 'lg'
-            ? 'size-12 rounded-2xl'
-            : 'size-10 rounded-xl',
-        CHIP_TONES[tone],
-        className,
-      )}
+      className={cn('grid shrink-0 place-items-center', CHIP_SIZES[size], CHIP_TONES[tone], className)}
     >
       {children}
     </span>
@@ -99,59 +111,202 @@ export interface StatTileProps {
   /** The number, usually a <Money> or a count in a `num` span. */
   value: ReactNode;
   /** The change against the previous period, e.g. «+12%», with its comparison text. */
-  trend?: { direction: 'up' | 'down'; value: ReactNode; comparison?: ReactNode };
+  trend?: {
+    direction: 'up' | 'down';
+    value: ReactNode;
+    comparison?: ReactNode;
+    /** `neutral`: a plain grey pill, for a change on thin data or a jump too big to be a trend. */
+    tone?: 'neutral';
+  };
   /** A small note under the number, e.g. «مؤقت» or the dollar amount. */
   footnote?: ReactNode;
+  /** Let a long footnote wrap on a phone instead of ending in «…» (a sentence, not a tag) */
+  wrapFootnote?: boolean;
   /** The hero tile at the top of the dashboard: a bigger number (tab 14 › لوحات المؤشرات). */
   hero?: boolean;
   /** A picture beside the label, in a soft square. */
   icon?: ReactNode;
   iconTone?: keyof typeof CHIP_TONES;
+  /**
+   * The recent values, oldest first, drawn as a small line under the number. Time runs from the
+   * right in Arabic (tab 14 › محور الزمن: the oldest on the right, like the trend arrows, which are
+   * mirrored too), so the line is mirrored there. Decorative: the number and the trend say it.
+   */
+  sparkline?: readonly number[];
   className?: string;
 }
 
+// The symbol of a <Money> in the number (its data-money-unit span): smaller and softer (هوية 4).
+const VALUE_UNIT =
+  '[&_[data-money-unit]]:text-sm [&_[data-money-unit]]:font-semibold [&_[data-money-unit]]:text-ink-subtle';
+const HERO_UNIT =
+  '[&_[data-money-unit]]:text-base [&_[data-money-unit]]:font-semibold [&_[data-money-unit]]:text-ink-subtle';
+
 /**
- * A KPI on the owner's dashboard (tab 14 › بطاقة المؤشر): the label, the number in equal-width
- * digits, and the change with an arrow, a colour and words, never colour alone.
+ * The row of figure tiles at the top of a page: on a phone two compact tiles across (an odd last one
+ * takes the row), three or four across from 640 px. The home page's tiles follow the same rule. One
+ * pattern for every page, whole tiles with their text never cut off at the edge.
+ */
+export function KpiStrip({
+  columns = 3,
+  className,
+  children,
+  ...rest
+}: {
+  /** Tiles across from 640 px */
+  columns?: 2 | 3 | 4;
+  className?: string;
+  children: ReactNode;
+} & Omit<ComponentProps<'div'>, 'children' | 'className'>) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div
+        {...rest}
+        className={cn(
+          // Two tiles across on a phone, whole (a tile is never cut in the middle of its figure, so no
+          // sideways strip); an odd last tile takes the full row. Three or four across from 640 px.
+          'grid max-w-full min-w-0 grid-cols-2 gap-2 max-sm:*:last:odd:col-span-2 sm:gap-4',
+          columns === 2 ? 'sm:grid-cols-2' : columns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4',
+          className,
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A KPI on the owner's dashboard (هوية 4 › StatTile): the label with the change in a pill at its
+ * end, then the number in equal-width digits with its unit smaller and softer. The change has an
+ * arrow, a colour and words, never colour alone, and what it is measured against sits just under
+ * the pill.
+ *
+ * The DOM keeps the reading order: the label, its number right after it, the footnote, then the
+ * change and its comparison together («مبيعات اليوم، 1,284,500 ل.س، ارتفاع 12%، عن الخميس الماضي»).
+ * The grid draws the pill beside the label and the comparison under the pill.
  */
 export function StatTile({
   label,
   value,
   trend,
   footnote,
+  wrapFootnote: _wrapFootnote = false,
   hero = false,
   icon,
   iconTone = 'brand',
+  sparkline,
   className,
 }: StatTileProps) {
   const TrendIcon = trend?.direction === 'down' ? TrendDownIcon : TrendUpIcon;
   return (
-    <Card className={cn('relative flex flex-col gap-2', className)}>
-      {icon ? (
-        <IconChip tone={iconTone} size="sm" className="absolute end-5 top-5 sm:end-6 sm:top-6">
-          {icon}
-        </IconChip>
+    <Card
+      className={cn(
+        // On a phone every figure tile is the same compact block: less padding, a smaller number
+        'grid content-start gap-x-3 gap-y-3 max-sm:gap-y-0 max-sm:p-2',
+        trend ? 'grid-cols-[minmax(0,1fr)_auto]' : 'grid-cols-1',
+        className,
+      )}
+    >
+      <p
+        className={cn(
+          'min-w-0 text-sm text-ink-muted max-sm:text-xs max-sm:leading-4',
+          icon ? 'flex items-center gap-2.5 max-sm:gap-1.5' : null,
+        )}
+      >
+        {icon ? (
+          <IconChip tone={iconTone} size="sm">
+            {icon}
+          </IconChip>
+        ) : null}
+        {label}
+      </p>
+      <p
+        className={cn(
+          'col-span-full num font-bold tracking-tight text-ink',
+          hero
+            ? cn('text-total', HERO_UNIT)
+            : cn('text-kpi max-sm:text-base max-sm:leading-6 [&>bdi]:whitespace-normal', VALUE_UNIT),
+        )}
+      >
+        {value}
+      </p>
+      {sparkline && sparkline.length > 1 ? <Sparkline values={sparkline} /> : null}
+      {footnote ? (
+        <p className="col-span-full text-sm text-ink-muted max-sm:text-xs max-sm:leading-4">{footnote}</p>
       ) : null}
-      <p className={cn('text-sm font-medium text-ink-muted', icon ? 'pe-10' : null)}>{label}</p>
-      <p className={cn('num font-bold tracking-tight text-ink', hero ? 'text-total' : 'text-kpi')}>{value}</p>
-      {footnote ? <p className="text-sm text-ink-muted">{footnote}</p> : null}
       {trend ? (
-        <p className="flex flex-wrap items-center gap-x-2 text-[0.8125rem]">
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold',
-              trend.direction === 'up'
+        <span
+          className={cn(
+            'col-start-2 row-start-1 inline-flex items-center gap-1 self-center rounded-full px-2 py-0.5 text-xs font-semibold',
+            trend.tone === 'neutral'
+              ? 'bg-surface-muted text-ink-muted max-sm:col-start-1 max-sm:row-start-3 max-sm:mt-0.5 max-sm:justify-self-start max-sm:py-0 max-sm:text-[0.6875rem]'
+              : trend.direction === 'up'
                 ? 'bg-success-soft text-success-ink'
                 : 'bg-danger-soft text-danger-ink',
-            )}
-          >
-            <TrendIcon size={16} />
-            <span className="sr-only">{trend.direction === 'up' ? 'ارتفاع' : 'انخفاض'}</span>
-            <bdi className="num">{trend.value}</bdi>
-          </span>
-          {trend.comparison ? <span className="text-ink-muted">{trend.comparison}</span> : null}
+          )}
+        >
+          {trend.tone === 'neutral' ? null : <TrendIcon size={16} />}
+          <span className="sr-only">{trend.direction === 'up' ? 'ارتفاع' : 'انخفاض'}</span>
+          <bdi className="num whitespace-nowrap">{trend.value}</bdi>
+        </span>
+      ) : null}
+      {trend?.comparison ? (
+        // Its own row across the tile, so a long comparison never squeezes the label; pulled up
+        // to 4 under the pill and aligned to its edge, so it reads as the pill's.
+        // On a phone only a screen reader gets it: the tile stays one short block.
+        <p className="col-span-full row-start-2 -mt-2 text-end text-xs text-ink-muted max-sm:sr-only">
+          {trend.comparison}
         </p>
       ) : null}
     </Card>
+  );
+}
+
+const SPARK_WIDTH = 200;
+const SPARK_HEIGHT = 40;
+
+/** The small brand line of a StatTile, with a soft fill fading to nothing under it. */
+function Sparkline({ values }: { values: readonly number[] }) {
+  const fill = `spark-${useId().replace(/[^\w-]/g, '')}`;
+  const low = Math.min(...values);
+  const range = Math.max(...values) - low || 1;
+  // Nothing before the latest day: a line climbing from zero to it is only the jump between two
+  // days, not a trend. A level dashed baseline says «no history».
+  const flat = values.slice(0, -1).every((v) => v === 0) && (values.at(-1) ?? 0) > 0;
+  const points = values.map((v, index) => {
+    const x = (index / (values.length - 1)) * SPARK_WIDTH;
+    const y = flat ? SPARK_HEIGHT / 2 : 2 + (1 - (v - low) / range) * (SPARK_HEIGHT - 4);
+    return `${x.toFixed(1)} ${y.toFixed(1)}`;
+  });
+  const line = `M${points.join(' L')}`;
+  return (
+    <svg
+      viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      focusable="false"
+      className="col-span-full h-9 w-full text-brand max-sm:hidden rtl:-scale-x-100"
+    >
+      <defs>
+        <linearGradient id={fill} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor="currentColor" stopOpacity="0.22" />
+          <stop offset="1" stopColor="currentColor" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {flat ? null : (
+        <path d={`${line} L${SPARK_WIDTH} ${SPARK_HEIGHT} L0 ${SPARK_HEIGHT} Z`} fill={`url(#${fill})`} />
+      )}
+      <path
+        d={line}
+        fill="none"
+        stroke={flat ? 'var(--color-line-control)' : 'currentColor'}
+        strokeDasharray={flat ? '4 5' : undefined}
+        strokeWidth={flat ? '1.5' : '2'}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   );
 }

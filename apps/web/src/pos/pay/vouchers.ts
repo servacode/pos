@@ -2,6 +2,8 @@ import type { CurrencyCode } from '@serva/core/currencies';
 import type { VoucherRow } from '@serva/core/contracts/catalog';
 import type { GiftVoucherPayload, ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
 import type { OutboxEntry } from '@serva/sync';
+import type { SyncStore } from '@serva/sync/client';
+import { deviceDocuments } from '../shift/shift';
 
 /** An exchange voucher as this till sees it, with what is left on it. */
 export interface TillVoucher {
@@ -49,7 +51,11 @@ export function tillVouchers(
         .filter((r) => r.method === 'voucher')
         .reduce((sum, r) => sum + r.amountMinor, 0);
       if (amountMinor > 0) issued.set(doc.number, { currency: ret.currency, amountMinor, redeemedMinor: 0 });
-    } else if (doc.type === 'gift_voucher' && doc.number && !issued.has(doc.number)) {
+    } else if (
+      (doc.type === 'gift_voucher' || doc.type === 'deposit') &&
+      doc.number &&
+      !issued.has(doc.number)
+    ) {
       const g = doc.payload as unknown as GiftVoucherPayload;
       issued.set(doc.number, { currency: g.currency, amountMinor: g.amountMinor, redeemedMinor: 0 });
     } else if (doc.type === 'sale') {
@@ -91,4 +97,28 @@ export function findVoucher(vouchers: ReadonlyMap<string, TillVoucher>, typed: s
     return digits.length > 7 ? own.endsWith(digits) : Number(own.slice(-7)) === Number(digits);
   });
   return hits.length === 1 ? hits[0]! : null;
+}
+
+/**
+ * What is left on each voucher the given sale paid with, counting that sale (it is in the outbox
+ * by now): printed on the receipt so the customer knows what they still hold.
+ */
+export async function voucherBalancesAfter(
+  store: SyncStore,
+  rows: readonly VoucherRow[],
+  doc: { id: string; payload: unknown },
+): Promise<{ code: string; balanceMinor: number; currency: CurrencyCode }[]> {
+  const codes = [
+    ...new Set(
+      ((doc.payload as SalePayload).payments ?? [])
+        .filter((p) => p.method === 'voucher' && p.reference)
+        .map((p) => p.reference!),
+    ),
+  ];
+  if (codes.length === 0) return [];
+  const all = tillVouchers(rows, await deviceDocuments(store));
+  return codes.flatMap((code) => {
+    const v = all.get(code);
+    return v ? [{ code, balanceMinor: v.balanceMinor, currency: v.currency }] : [];
+  });
 }

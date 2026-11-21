@@ -8,7 +8,7 @@ const ISSUER = 'serva-pos';
  * another. Only the store gate exists today; device, platform, agent and accountant gates add
  * their realm here (their keys derive the same way, with no new secret to manage).
  */
-export const REALMS = { store: 'serva-store', platform: 'serva-platform' } as const;
+export const REALMS = { store: 'serva-store', platform: 'serva-platform', agent: 'serva-agent' } as const;
 export type Realm = keyof typeof REALMS;
 
 interface SigningKey {
@@ -145,6 +145,96 @@ export async function verifyPlatformToken(
       return null;
     }
     return { platformUserId: payload.sub, role };
+  } catch {
+    return null;
+  }
+}
+
+/** The agents' sign-in (07 › برنامج الوكلاء): its own realm, a short session, no refresh. */
+export interface AgentClaims {
+  agentId: string;
+}
+
+export const AGENT_TOKEN_TTL_SECONDS = 8 * 60 * 60;
+
+export function signAgentToken(claims: AgentClaims, keys: TokenKeys, now: Date): Promise<string> {
+  const issuedAt = Math.floor(now.getTime() / 1000);
+  const { kid, key } = keys.signingKey('agent');
+  return new SignJWT({ rol: 'agent' })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT', kid })
+    .setSubject(claims.agentId)
+    .setIssuer(ISSUER)
+    .setAudience(REALMS.agent)
+    .setIssuedAt(issuedAt)
+    .setExpirationTime(issuedAt + AGENT_TOKEN_TTL_SECONDS)
+    .sign(key);
+}
+
+export async function verifyAgentToken(
+  token: string,
+  keys: TokenKeys,
+  now: Date,
+): Promise<AgentClaims | null> {
+  try {
+    const { kid } = decodeProtectedHeader(token);
+    const key = typeof kid === 'string' ? keys.verificationKey('agent', kid) : undefined;
+    if (!key) return null;
+    const { payload } = await jwtVerify(token, key, {
+      issuer: ISSUER,
+      audience: REALMS.agent,
+      algorithms: ['HS256'],
+      currentDate: now,
+    });
+    if (typeof payload.sub !== 'string' || payload.rol !== 'agent') return null;
+    return { agentId: payload.sub };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * «تذكّر هالجهاز 30 يوم» (round 38): what an agent's device keeps after the code step. It is signed like his session
+ * token but says it is a device token, so it opens nothing by itself: it only lets the sign-in skip the code, after the
+ * password, while the agent's device_epoch is still the number it carries (a suspension or a new password moves it).
+ */
+export const AGENT_DEVICE_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+export function signAgentDeviceToken(
+  claims: AgentClaims & { epoch: number },
+  keys: TokenKeys,
+  now: Date,
+): Promise<string> {
+  const issuedAt = Math.floor(now.getTime() / 1000);
+  const { kid, key } = keys.signingKey('agent');
+  return new SignJWT({ rol: 'agent-device', ep: claims.epoch })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT', kid })
+    .setSubject(claims.agentId)
+    .setIssuer(ISSUER)
+    .setAudience(REALMS.agent)
+    .setIssuedAt(issuedAt)
+    .setExpirationTime(issuedAt + AGENT_DEVICE_TTL_SECONDS)
+    .sign(key);
+}
+
+export async function verifyAgentDeviceToken(
+  token: string,
+  keys: TokenKeys,
+  now: Date,
+): Promise<(AgentClaims & { epoch: number }) | null> {
+  try {
+    const { kid } = decodeProtectedHeader(token);
+    const key = typeof kid === 'string' ? keys.verificationKey('agent', kid) : undefined;
+    if (!key) return null;
+    const { payload } = await jwtVerify(token, key, {
+      issuer: ISSUER,
+      audience: REALMS.agent,
+      algorithms: ['HS256'],
+      currentDate: now,
+    });
+    if (typeof payload.sub !== 'string' || payload.rol !== 'agent-device' || typeof payload.ep !== 'number') {
+      return null;
+    }
+    return { agentId: payload.sub, epoch: payload.ep };
   } catch {
     return null;
   }

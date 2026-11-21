@@ -1,6 +1,6 @@
 /*
- * The Serva theme for Tailwind v4 (tab 14 › مصدر واحد): every colour, type size, radius, shadow and
- * motion token of the apps lives here, once. An app's stylesheet is only:
+ * The SERVA theme for Tailwind v4 (the blue and green identity; tab 14 › مصدر واحد): every colour, type size,
+ * radius, shadow and motion token of the apps lives here, once. An app's stylesheet is only:
  *
  *   @import 'tailwindcss';
  *   @import '@serva/ui/theme.css';
@@ -16,15 +16,19 @@
 /*
  * Dark mode follows the user's setting, written on the root as data-theme="light" | "dark"; with no
  * attribute it follows the device (tab 14 › الوضع الداكن). `dark:` utilities use the same rule.
+ * On screens only: paper is white, so a receipt, a label or a report prints in the light colours
+ * (dark ink) whatever the theme on the screen.
  */
 @custom-variant dark {
-  @media (prefers-color-scheme: dark) {
+  @media screen and (prefers-color-scheme: dark) {
     &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
       @slot;
     }
   }
-  &:where([data-theme='dark'], [data-theme='dark'] *) {
-    @slot;
+  @media screen {
+    &:where([data-theme='dark'], [data-theme='dark'] *) {
+      @slot;
+    }
   }
 }
 
@@ -52,10 +56,16 @@
   --text-display: 3.5rem;
   --text-display--line-height: calc(64 / 56);
 
-  /* Radii (هوية 2): 8 small, 12 fields, 20 cards and dialogs; buttons and chips are pills. */
+  /*
+   * Radii (هوية 4): 5 for the boxes of checkboxes and toggle chips (8 on a 16–20 box reads as a
+   * radio's circle), 8 small (chips, tags, menu items), 10 controls (buttons and fields), 16 cards,
+   * 20 panels (dialogs, sheets, the sidebar). Pills only for status badges and counts.
+   */
+  --radius-box: 0.3125rem;
   --radius-small: 0.5rem;
-  --radius-control: 0.75rem;
-  --radius-card: 1.25rem;
+  --radius-control: 0.625rem;
+  --radius-card: 1rem;
+  --radius-panel: 1.25rem;
 
   /* Motion, tab 14 › الحركة: durations are used as duration-80/120/200/320/600. */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
@@ -107,94 +117,148 @@
 }
 
 /*
- * Colour tokens: identity A «زمرّدي», the exact tab-14 values from docs/design/kit/serva-ui.css
- * (light) and addon-dark.css (dark), written in oklch. Each value converts back to the kit's hex
- * exactly, and src/theme.test.ts checks that and the contrast of every allowed pair.
+ * Colour tokens, the blue and green identity: the logo blue for the brand, the logo green as a sparing accent, and cool
+ * navy-tinted neutrals. The exact values of docs/design/kit/serva-ui.css (light) and
+ * addon-dark.css (dark), written in oklch; each converts back to the kit's hex exactly, and
+ * src/theme.test.ts checks that and the contrast of every allowed pair.
  * Screens use these names only (bg-surface, text-ink-muted, border-line-control…), never a palette
- * shade or a raw colour; status colours stay separate from brand even while their values match.
+ * shade or a raw colour. The sidebar has its own deep-navy set in both modes: SERVA's signature.
  */
 @theme static {
   --color-*: initial;
 
-  --color-canvas: oklch(0.967 0.0029 264.54);
-  --color-surface: oklch(1 0 0);
-  --color-surface-muted: oklch(0.9665 0.0045 258.32);
-  --color-surface-total: oklch(0.9683 0.0109 167.8);
-  --color-line: oklch(0.9427 0.0058 264.53);
-  --color-line-control: oklch(0.6408 0.0202 258.37);
-  --color-ink: oklch(0.2099 0.0341 263.44);
-  --color-ink-muted: oklch(0.4422 0.0355 257.79);
-  --color-ink-subtle: oklch(0.5045 0.0298 261.06);
+  --color-canvas: oklch(0.9726 0.0086 264.52);
+  --color-surface: oklch(1 0 89.88);
+  --color-surface-muted: oklch(0.9452 0.0145 264.5);
+  --color-surface-total: oklch(0.9543 0.0215 265.76);
+  --color-line: oklch(0.9113 0.0193 263);
+  --color-line-control: oklch(0.5681 0.0432 264.14);
+  --color-ink: oklch(0.1904 0.0406 265.49);
+  --color-ink-muted: oklch(0.4041 0.0404 262.37);
+  --color-ink-subtle: oklch(0.4464 0.0491 265.16);
+  --color-brand: oklch(0.4059 0.199 262.71);
+  --color-brand-hover: oklch(0.3419 0.1658 262.59);
+  --color-on-brand: oklch(1 0 89.88);
+  --color-brand-soft: oklch(0.9462 0.0254 268.85);
+  --color-brand-ink: oklch(0.3379 0.1644 262.63);
+  --color-ring: oklch(0.5461 0.1954 263.17);
+  --color-success: oklch(0.5174 0.0977 173.24);
+  --color-success-soft: oklch(0.9524 0.0244 177.64);
+  --color-success-ink: oklch(0.4152 0.0763 175.84);
+  --color-warning: oklch(0.5553 0.1455 49);
+  --color-warning-soft: oklch(0.9737 0.0237 79.75);
+  --color-warning-ink: oklch(0.4665 0.1237 47.72);
+  --color-danger: oklch(0.5498 0.1885 27.41);
+  --color-on-danger: oklch(1 0 89.88);
+  --color-danger-soft: oklch(0.9607 0.0163 22.08);
+  --color-danger-ink: oklch(0.4823 0.1663 27.7);
+  --color-info: oklch(0.5359 0.1303 244.49);
+  --color-info-soft: oklch(0.9492 0.0217 234.99);
+  --color-info-ink: oklch(0.4458 0.1108 245.77);
+  --color-accent: oklch(0.5446 0.1694 140.28);
+  --color-on-accent: oklch(1 0 89.88);
+  --color-accent-soft: oklch(0.9565 0.0338 132.94);
+  --color-accent-ink: oklch(0.436 0.1354 140.16);
+  --color-sidebar: oklch(0.2297 0.0741 263.9);
+  --color-sidebar-hover: oklch(0.2677 0.0879 264.91);
+  --color-sidebar-active: oklch(0.3287 0.1089 264.64);
+  --color-sidebar-line: oklch(0.3056 0.0859 265.53);
+  --color-sidebar-ink: oklch(0.8786 0.0365 266.68);
+  --color-sidebar-muted: oklch(0.7445 0.0614 265.94);
+  --color-sidebar-strong: oklch(1 0 89.88);
+  --color-sidebar-brand: oklch(0.7198 0.2253 140.45);
 
-  --color-brand: oklch(0.5212 0.1058 165.17);
-  --color-brand-hover: oklch(0.4414 0.0887 165.57);
-  --color-on-brand: oklch(1 0 0);
-  --color-brand-soft: oklch(0.9645 0.0118 170.27);
-  --color-brand-ink: oklch(0.4414 0.0887 165.57);
-  --color-ring: oklch(0.5924 0.1209 164.51);
+  /*
+   * The same in both modes, as the specimen draws them on any background: the SERVA mark colours (its
+   * blue and green) and the light along the top edge of a raised button. The
+   * primary button's small shadow takes the mark's blue too.
+   */
+  --color-mark-from: oklch(0.4059 0.199 262.71);
+  --color-mark-to: oklch(0.616 0.1924 140.91);
+  --color-on-mark: oklch(1 0 89.88);
+  --color-highlight: oklch(1 0 89.88);
 
-  --color-success: oklch(0.5212 0.1058 165.17);
-  --color-success-soft: oklch(0.9788 0.0221 160.24);
-  --color-success-ink: oklch(0.4987 0.1168 157.07);
-  --color-warning: oklch(0.5394 0.1562 42.99);
-  --color-warning-soft: oklch(0.9849 0.0204 91.58);
-  --color-warning-ink: oklch(0.4615 0.1337 40.94);
-  --color-danger: oklch(0.5758 0.2088 29.48);
-  --color-on-danger: oklch(1 0 0);
-  --color-danger-soft: oklch(0.9725 0.0119 23.7);
-  --color-danger-ink: oklch(0.5003 0.1821 29.51);
-  --color-info: oklch(0.572 0.2076 258.93);
-  --color-info-soft: oklch(0.9744 0.0134 240.95);
-  --color-info-ink: oklch(0.5093 0.1955 260.89);
+  /*
+   * Chart series (validated with the data-viz palette checker, هوية 4): fixed order, never cycled;
+   * slot 1 is the brand blue. Slots 5 and 6 sit under 3:1 on white, so every chart labels its
+   * values or offers a table (the relief rule).
+   */
+  --color-chart-1: oklch(0.5239 0.2095 262.56);
+  --color-chart-2: oklch(0.616 0.1924 140.91);
+  --color-chart-3: oklch(0.6708 0.175 40.64);
+  --color-chart-4: oklch(0.5271 0.1968 283.44);
+  --color-chart-5: oklch(0.7163 0.1412 357.39);
+  --color-chart-6: oklch(0.7644 0.1612 75.12);
 
   /* tab 14 › overlay: black at 40% (light) and 60% (dark), behind dialogs and sheets. */
   --color-overlay: oklch(0 0 0 / 0.4);
 
   --shadow-*: initial;
-  --shadow-e1: 0 1px 3px rgb(16 24 40 / 0.06), 0 1px 2px rgb(16 24 40 / 0.04);
-  --shadow-e2: 0 12px 24px -6px rgb(16 24 40 / 0.1), 0 4px 8px -4px rgb(16 24 40 / 0.06);
-  --shadow-e3: 0 20px 24px -4px rgb(16 24 40 / 0.12), 0 8px 8px -4px rgb(16 24 40 / 0.04);
+  --shadow-e1: 0 1px 2px rgb(11 19 38 / 0.06);
+  --shadow-e2: 0 4px 16px -4px rgb(11 19 38 / 0.1), 0 1px 3px rgb(11 19 38 / 0.06);
+  --shadow-e3: 0 24px 48px -12px rgb(11 19 38 / 0.22), 0 4px 12px -4px rgb(11 19 38 / 0.08);
 }
 
 @layer base {
   :root {
     @variant dark {
-      --color-canvas: oklch(0.179 0.0261 266.47);
-      --color-surface: oklch(0.2224 0.0229 265.58);
-      --color-surface-muted: oklch(0.2603 0.022 265.75);
-      --color-surface-total: oklch(0.2616 0.0358 167.9);
-      --color-line: oklch(0.3086 0.0232 264.15);
-      --color-line-control: oklch(0.551 0.0234 264.36);
-      --color-ink: oklch(0.9704 0.0013 286.38);
-      --color-ink-muted: oklch(0.8546 0.0043 271.36);
-      --color-ink-subtle: oklch(0.7249 0.0106 267.33);
+      --color-canvas: oklch(0.1614 0.0289 266.83);
+      --color-surface: oklch(0.2028 0.0358 266.26);
+      --color-surface-muted: oklch(0.24 0.0458 268.31);
+      --color-surface-total: oklch(0.2722 0.0787 265.45);
+      --color-line: oklch(0.2929 0.0518 266.41);
+      --color-line-control: oklch(0.5072 0.0632 268.53);
+      --color-ink: oklch(0.9607 0.0128 266.7);
+      --color-ink-muted: oklch(0.7691 0.0365 265.92);
+      --color-ink-subtle: oklch(0.7083 0.0436 265.58);
+      --color-brand: oklch(0.6623 0.1786 264.64);
+      --color-brand-hover: oklch(0.7263 0.1411 265.63);
+      --color-on-brand: oklch(0.1907 0.0591 263.56);
+      --color-brand-soft: oklch(0.2904 0.0951 265.43);
+      --color-brand-ink: oklch(0.82 0.0893 266.91);
+      --color-ring: oklch(0.6623 0.1786 264.64);
+      --color-success: oklch(0.7683 0.1403 171.19);
+      --color-success-soft: oklch(0.2642 0.0379 183.86);
+      --color-success-ink: oklch(0.8568 0.0963 177.28);
+      --color-warning: oklch(0.8107 0.1398 78.29);
+      --color-warning-soft: oklch(0.2535 0.0317 82.37);
+      --color-warning-ink: oklch(0.8681 0.1075 82.01);
+      --color-danger: oklch(0.6994 0.1615 24.77);
+      --color-on-danger: oklch(0.202 0.0523 26.53);
+      --color-danger-soft: oklch(0.228 0.0381 25.74);
+      --color-danger-ink: oklch(0.7816 0.1111 23.28);
+      --color-info: oklch(0.7604 0.1224 219.32);
+      --color-info-soft: oklch(0.2718 0.0412 224.96);
+      --color-info-ink: oklch(0.8519 0.0799 216.21);
+      --color-accent: oklch(0.7347 0.2188 140.1);
+      --color-on-accent: oklch(0.197 0.0458 138.06);
+      --color-accent-soft: oklch(0.2561 0.0528 138.86);
+      --color-accent-ink: oklch(0.8501 0.1524 137.79);
+      --color-sidebar: oklch(0.1642 0.0417 265.62);
+      --color-sidebar-hover: oklch(0.2099 0.059 266.96);
+      --color-sidebar-active: oklch(0.2742 0.0839 265.34);
+      --color-sidebar-line: oklch(0.2396 0.0613 267.04);
+      --color-sidebar-ink: oklch(0.8566 0.0385 265.82);
+      --color-sidebar-muted: oklch(0.7225 0.0601 266.46);
+      --color-sidebar-strong: oklch(1 0 89.88);
+      --color-sidebar-brand: oklch(0.7347 0.2188 140.1);
+      --color-mark-from: oklch(0.4059 0.199 262.71);
+      --color-mark-to: oklch(0.616 0.1924 140.91);
+      --color-on-mark: oklch(1 0 89.88);
+      --color-highlight: oklch(1 0 89.88);
 
-      --color-brand: oklch(0.7216 0.1403 163.32);
-      --color-brand-hover: oklch(0.7872 0.1254 165.29);
-      --color-on-brand: oklch(0.241 0.0438 166.93);
-      --color-brand-soft: oklch(0.2633 0.04 167.93);
-      --color-brand-ink: oklch(0.8308 0.1179 165.34);
-      --color-ring: oklch(0.7216 0.1403 163.32);
-
-      --color-success: oklch(0.7216 0.1403 163.32);
-      --color-success-soft: oklch(0.2633 0.04 167.93);
-      --color-success-ink: oklch(0.8308 0.1179 165.34);
-      --color-warning: oklch(0.7469 0.1701 62.11);
-      --color-warning-soft: oklch(0.2406 0.0397 71.84);
-      --color-warning-ink: oklch(0.8594 0.1499 84.74);
-      --color-danger: oklch(0.7086 0.1699 26.47);
-      --color-on-danger: oklch(0.2019 0.0557 28.68);
-      --color-danger-soft: oklch(0.2123 0.0471 25.97);
-      --color-danger-ink: oklch(0.8014 0.1094 24.57);
-      --color-info: oklch(0.7363 0.1418 245.85);
-      --color-info-soft: oklch(0.2576 0.0612 253.43);
-      --color-info-ink: oklch(0.8784 0.0652 242.31);
+      --color-chart-1: oklch(0.6623 0.1786 264.64);
+      --color-chart-2: oklch(0.7347 0.2188 140.1);
+      --color-chart-3: oklch(0.6221 0.1726 40.11);
+      --color-chart-4: oklch(0.6696 0.1452 286.83);
+      --color-chart-5: oklch(0.6224 0.1712 0.84);
+      --color-chart-6: oklch(0.6699 0.1425 73.23);
 
       --color-overlay: oklch(0 0 0 / 0.6);
 
-      --shadow-e1: none;
-      --shadow-e2: 0 4px 12px rgb(0 0 0 / 0.4);
-      --shadow-e3: 0 12px 32px rgb(0 0 0 / 0.5);
+      --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.4);
+      --shadow-e2: 0 8px 24px -8px rgb(0 0 0 / 0.6), 0 1px 2px rgb(0 0 0 / 0.4);
+      --shadow-e3: 0 24px 48px -12px rgb(0 0 0 / 0.7), 0 4px 12px -4px rgb(0 0 0 / 0.5);
     }
   }
 
@@ -207,8 +271,17 @@
     color-scheme: light;
   }
 
-  :root[data-theme='dark'] {
-    color-scheme: dark;
+  @media screen {
+    :root[data-theme='dark'] {
+      color-scheme: dark;
+    }
+  }
+
+  /* Paper is light: printing never takes the dark theme (the dark variant is for screens only). */
+  @media print {
+    :root {
+      color-scheme: light;
+    }
   }
 
   *,

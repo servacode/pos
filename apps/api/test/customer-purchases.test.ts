@@ -100,6 +100,21 @@ describe('a customer’s purchases', () => {
     ]);
     expect([got.pieces, got.spentMinor]).toEqual([3000, 300_000]);
 
+    // The customers list carries the same facts, read-only
+    const listed = (
+      await app.inject({ method: 'GET', url: '/v1/customers?limit=50', headers: as(store) })
+    ).json<{
+      items: {
+        id: string;
+        lastPurchaseDate: string | null;
+        spentMinor: number;
+        favouriteSize: string | null;
+      }[];
+    }>();
+    const row = listed.items.find((c) => c.id === reem.id)!;
+    expect([row.spentMinor, row.favouriteSize]).toEqual([300_000, 'M']);
+    expect(row.lastPurchaseDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
     // The till sees the same
     const onTill = await app.inject({
       method: 'GET',

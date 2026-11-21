@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { CustomerDetail, CustomerListResponse, MeResponse } from '@serva/core';
 import { apiError, mockFetch, type MockRequest } from '../../test/fetchMock';
@@ -6,11 +6,21 @@ import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
 
-function owner(): MeResponse {
+function owner(branches?: MeResponse['branches']): MeResponse {
   const base = makeMe();
   return {
     ...base,
-    user: { ...base.user, permissions: [...base.user.permissions, 'customers.view', 'customers.manage'] },
+    ...(branches ? { branches } : {}),
+    user: {
+      ...base.user,
+      permissions: [
+        ...base.user.permissions,
+        'customers.view',
+        'customers.manage',
+        'receipt.create',
+        'accounting.post',
+      ],
+    },
   };
 }
 
@@ -23,6 +33,9 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   priceTier: 'retail',
   noMessages: false,
   archived: false,
+  kind: null,
+  contactName: null,
+  contactPhone: null,
   taxNumber: null,
   address: null,
   notes: null,
@@ -53,17 +66,36 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   ...over,
 });
 
-function open(path: string) {
-  let current = detail();
+function open(
+  path: string,
+  start: CustomerDetail = detail(),
+  twin = false,
+  branches?: MeResponse['branches'],
+) {
+  let current = start;
   const list = (): CustomerListResponse => ({
-    items: [current],
+    // The same person typed twice: «أرشف هذا الزبون المكرر» shows only then
+    items: twin ? [current, { ...current, id: 'c-2', balanceMinor: 0 }] : [current],
     totalOwedMinor: Math.max(0, current.balanceMinor),
+    totalCount: twin ? 2 : 1,
+    allCount: twin ? 2 : 1,
+    owingCount: current.balanceMinor > 0 ? 1 : 0,
+    pendingCount: 0,
+    nextCursor: null,
     baseCurrency: 'SYP',
   });
   const mock = mockFetch({
     'POST /v1/auth/refresh': signedInRefresh,
-    'GET /v1/me': () => ({ status: 200, body: owner() }),
-    'GET /v1/customers': () => ({ status: 200, body: list() }),
+    'GET /v1/me': () => ({ status: 200, body: owner(branches) }),
+    'GET /v1/customers?limit=50': () => ({ status: 200, body: list() }),
+    // The customer page asks whether another customer has the same name
+    [`GET /v1/customers?${new URLSearchParams({ q: start.name })}`]: () => ({ status: 200, body: list() }),
+    // The new-customer form looks the typed name and phone up once the typing pauses
+    [`GET /v1/customers?${new URLSearchParams({ q: 'ابو خالد' })}`]: () => ({ status: 200, body: list() }),
+    [`GET /v1/customers?${new URLSearchParams({ q: '٠٩٣٣-١١١-٢٢٢' })}`]: () => ({
+      status: 200,
+      body: list(),
+    }),
     'GET /v1/customers/c-1': () => ({ status: 200, body: current }),
     'POST /v1/customers': (r: MockRequest) => {
       const body = r.body as { name: string };
@@ -71,6 +103,54 @@ function open(path: string) {
         return apiError(400, 'validation_failed', 'تحقّق من الحقول', { name: 'اكتب اسم الزبون' });
       current = detail({ name: body.name, balanceMinor: 0, statement: [] });
       return { status: 201, body: current };
+    },
+    'POST /v1/customers/c-1/payments': (r: MockRequest) => {
+      const body = r.body as { amountMinor: number; method: string; reference: string | null };
+      current = { ...current, balanceMinor: current.balanceMinor - body.amountMinor };
+      return {
+        status: 201,
+        body: {
+          kind: 'payment',
+          number: 'RCA-2026-000001',
+          date: '2026-11-13',
+          customerId: 'c-1',
+          customerName: 'أبو خالد',
+          amountMinor: body.amountMinor,
+          method: body.method,
+          reference: body.reference,
+          note: null,
+          balanceBeforeMinor: current.balanceMinor + body.amountMinor,
+          balanceAfterMinor: current.balanceMinor,
+          baseCurrency: 'SYP',
+        },
+      };
+    },
+    'POST /v1/customers/c-1/opening-debt': (r: MockRequest) => {
+      const body = r.body as { amountMinor: number };
+      current = { ...current, balanceMinor: current.balanceMinor + body.amountMinor };
+      return {
+        status: 201,
+        body: {
+          kind: 'opening_debt',
+          number: 'JE-2026-000009',
+          date: '2026-11-13',
+          customerId: 'c-1',
+          customerName: 'أبو خالد',
+          amountMinor: body.amountMinor,
+          method: null,
+          reference: null,
+          note: null,
+          balanceBeforeMinor: current.balanceMinor - body.amountMinor,
+          balanceAfterMinor: current.balanceMinor,
+          baseCurrency: 'SYP',
+        },
+      };
+    },
+    'POST /v1/customers/c-1/archive-duplicate': () => {
+      if (current.balanceMinor !== 0)
+        return apiError(409, 'conflict', 'عليه دين غير مسدّد. سدّد حسابه أو حوّله قبل الأرشفة.');
+      current = { ...current, archived: true };
+      return { status: 200, body: current };
     },
     'PUT /v1/customers/c-1': (r: MockRequest) => {
       current = { ...current, ...(r.body as Partial<CustomerDetail>) };
@@ -89,6 +169,7 @@ describe('«الزبائن»', () => {
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
 
     await user.click(screen.getByRole('link', { name: 'أبو خالد' }));
+    await user.click(await screen.findByRole('tab', { name: 'الكشف' }));
     expect(await screen.findByRole('table', { name: 'كشف الحساب' })).toBeInTheDocument();
     expect(screen.getByText('فاتورة آجل')).toBeInTheDocument();
     expect(screen.getByText('دفعة')).toBeInTheDocument();
@@ -109,5 +190,208 @@ describe('«الزبائن»', () => {
       name: 'مطعم الياسمين',
       creditLimitMinor: 5_000_000,
     });
+  });
+
+  it('receives a payment from the customer page, asks for the reference of a transfer, and shows the new balance', async () => {
+    const { user, requestsTo } = open('/customers/c-1');
+    await user.click(await screen.findByRole('button', { name: 'استلم دفعة' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/المبلغ/), '٥٠٠٠');
+    await user.selectOptions(within(dialog).getByLabelText('طريقة الدفع'), 'transfer');
+    expect(within(dialog).getByRole('button', { name: 'سجّل الدفعة' })).toBeDisabled();
+    await user.type(within(dialog).getByLabelText('رقم الحوالة أو العملية'), 'TR-1');
+    await user.click(within(dialog).getByRole('button', { name: 'سجّل الدفعة' }));
+    expect(await screen.findByText('سُجّلت الدفعة')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/customers/c-1/payments').at(-1)?.body).toMatchObject({
+      amountMinor: 500_000,
+      method: 'transfer',
+      reference: 'TR-1',
+    });
+    expect(screen.getByRole('button', { name: 'اطبع السند' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'تم' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('sends the only branch with a payment, and asks which branch when the store has two (round 36, X1)', async () => {
+    const one = open('/customers/c-1');
+    await one.user.click(await screen.findByRole('button', { name: 'استلم دفعة' }));
+    const dialog = await screen.findByRole('dialog');
+    // One branch: nothing to choose, the payment goes to it
+    expect(within(dialog).queryByLabelText('الفرع')).toBeNull();
+    await one.user.type(within(dialog).getByLabelText(/المبلغ/), '100');
+    await one.user.click(within(dialog).getByRole('button', { name: 'سجّل الدفعة' }));
+    await screen.findByText('سُجّلت الدفعة');
+    expect(one.requestsTo('POST', '/v1/customers/c-1/payments').at(-1)?.body).toMatchObject({
+      branchId: 'branch-1',
+    });
+  });
+
+  it('lets the owner of two branches pick the branch of the payment', async () => {
+    const { user, requestsTo } = open('/customers/c-1', detail(), false, [
+      { id: 'branch-1', code: '001', name: 'الفرع الرئيسي' },
+      { id: 'branch-2', code: '002', name: 'دوار النعيم' },
+    ]);
+    await user.click(await screen.findByRole('button', { name: 'استلم دفعة' }));
+    const dialog = await screen.findByRole('dialog');
+    const branch = within(dialog).getByLabelText('الفرع');
+    expect(branch).toHaveValue('branch-1');
+    await user.selectOptions(branch, 'branch-2');
+    await user.type(within(dialog).getByLabelText(/المبلغ/), '100');
+    await user.click(within(dialog).getByRole('button', { name: 'سجّل الدفعة' }));
+    await screen.findByText('سُجّلت الدفعة');
+    expect(requestsTo('POST', '/v1/customers/c-1/payments').at(-1)?.body).toMatchObject({
+      branchId: 'branch-2',
+    });
+  });
+
+  it('records an opening debt from the customer page', async () => {
+    const { user, requestsTo } = open('/customers/c-1');
+    await user.click(await screen.findByRole('tab', { name: 'الكشف' }));
+    await user.click(await screen.findByRole('button', { name: 'سجّل دين افتتاحي' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/المبلغ/), '120000');
+    await user.click(within(dialog).getByRole('button', { name: 'سجّل الدين' }));
+    expect(await screen.findByText('سُجّل الدين الافتتاحي')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/customers/c-1/opening-debt').at(-1)?.body).toMatchObject({
+      amountMinor: 12_000_000,
+    });
+  });
+
+  it('says why a duplicate that still owes is not archived', async () => {
+    const { user } = open('/customers/c-1', detail(), true);
+    await user.click(await screen.findByRole('button', { name: 'أرشف هذا الزبون المكرر' }));
+    expect(await screen.findByText(/عليه دين غير مسدّد/)).toBeInTheDocument();
+    expect(screen.queryByText('مؤرشف')).not.toBeInTheDocument();
+  });
+
+  it('offers «أرشف هذا الزبون المكرر» only when a duplicate exists', async () => {
+    open('/customers/c-1');
+    await screen.findByRole('button', { name: 'أرشفه' });
+    expect(screen.queryByRole('button', { name: 'أرشف هذا الزبون المكرر' })).not.toBeInTheDocument();
+  });
+
+  it('offers «أرشف هذا الزبون المكرر» only when a duplicate exists', async () => {
+    open('/customers/c-1');
+    await screen.findByRole('button', { name: 'أرشفه' });
+    expect(screen.queryByRole('button', { name: 'أرشف هذا الزبون المكرر' })).not.toBeInTheDocument();
+  });
+
+  it('archives a duplicate with nothing open on them', async () => {
+    const { user, requestsTo } = open('/customers/c-1', detail({ balanceMinor: 0, statement: [] }), true);
+    await user.click(await screen.findByRole('button', { name: 'أرشف هذا الزبون المكرر' }));
+    expect(await screen.findByText('مؤرشف')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/customers/c-1/archive-duplicate')).toHaveLength(1);
+  });
+
+  it('warns about a customer with the same phone or name, and offers to open them', async () => {
+    const { user } = open('/customers');
+    await user.click(await screen.findByRole('button', { name: 'زبون جديد' }));
+    await user.type(screen.getByLabelText('اسم الزبون'), 'ابو خالد');
+    expect(await screen.findByText('يوجد زبون بالاسم أو الرقم نفسه')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'افتح أبو خالد' })).toHaveAttribute('href', '/customers/c-1');
+    await user.clear(screen.getByLabelText('اسم الزبون'));
+    await user.type(screen.getByLabelText('الجوال'), '٠٩٣٣-١١١-٢٢٢');
+    expect(await screen.findByText('يوجد زبون بالاسم أو الرقم نفسه')).toBeInTheDocument();
+  });
+});
+
+/** The day 90 days back, as the page asks for it (the store's day in Damascus) */
+const cutoffDay = () => {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Damascus' }).format(new Date());
+  return new Date(Date.parse(`${today}T00:00:00Z`) - 90 * 86_400_000).toISOString().slice(0, 10);
+};
+
+describe('«الزبائن» by kind of store', () => {
+  const withSectors = (sectors: MeResponse['tenant']['sectors']): MeResponse => {
+    const me = owner();
+    return { ...me, tenant: { ...me.tenant, sectors } };
+  };
+  const list = (): CustomerListResponse => ({
+    items: [detail()],
+    totalOwedMinor: 0,
+    baseCurrency: 'SYP',
+  });
+
+  it('asks the kind of a new customer only where the shop sells to clinics and offices', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: withSectors(['clothing']) }),
+      'GET /v1/customers?limit=50': () => ({ status: 200, body: list() }),
+    });
+    const { user } = renderApp('/customers');
+    await user.click(await screen.findByRole('button', { name: 'زبون جديد' }));
+    await screen.findByLabelText('اسم الزبون');
+    expect(screen.queryByLabelText('نوع الزبون')).not.toBeInTheDocument();
+  });
+
+  it('offers the kinds to a medical supplies centre', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: withSectors(['medical_supplies']) }),
+      'GET /v1/customers?limit=50': () => ({ status: 200, body: list() }),
+    });
+    const { user } = renderApp('/customers');
+    await user.click(await screen.findByRole('button', { name: 'زبون جديد' }));
+    // The filter of the list and the field of the form
+    expect(await screen.findAllByLabelText('نوع الزبون')).toHaveLength(2);
+  });
+
+  it('asks the server for those away 90 days, and says the figures are theirs', async () => {
+    const near = {
+      ...detail(),
+      id: 'c-8',
+      name: 'حاضر',
+      balanceMinor: 900_000,
+      lastPurchaseDate: '2026-11-10',
+    };
+    const away = {
+      ...detail(),
+      id: 'c-9',
+      name: 'غائب',
+      balanceMinor: 100_000,
+      lastPurchaseDate: '2025-01-01',
+    };
+    const page = (items: unknown[], totalOwedMinor: number) => ({
+      items,
+      totalOwedMinor,
+      totalCount: items.length,
+      allCount: 2,
+      owingCount: items.length,
+      pendingCount: 0,
+      nextCursor: null,
+      baseCurrency: 'SYP',
+    });
+    const { requests } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: withSectors(['clothing']) }),
+      'GET /v1/customers?limit=50': () => ({ status: 200, body: page([away, near], 1_000_000) }),
+      [`GET /v1/customers?${new URLSearchParams({ lastBefore: cutoffDay(), limit: '50' })}`]: () => ({
+        status: 200,
+        body: page([away], 100_000),
+      }),
+    });
+    const { user } = renderApp('/customers');
+    await screen.findByText('حاضر');
+    await user.click(await screen.findByRole('checkbox', { name: 'لم يزر منذ 90 يوماً' }));
+    expect(await screen.findByText('الأرقام أدناه لمن لم يزر منذ 90 يوماً فقط.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('حاضر')).not.toBeInTheDocument());
+    expect(screen.getByText('غائب')).toBeInTheDocument();
+    expect(requests.some((r) => r.path.includes('lastBefore='))).toBe(true);
+  });
+
+  it('says so, not «لا زبائن بعد», when nobody has been away for 90 days', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: withSectors(['clothing']) }),
+      'GET /v1/customers?limit=50': () => ({ status: 200, body: { ...list(), items: [] } }),
+      [`GET /v1/customers?${new URLSearchParams({ lastBefore: cutoffDay(), limit: '50' })}`]: () => ({
+        status: 200,
+        body: { ...list(), items: [] },
+      }),
+    });
+    const { user } = renderApp('/customers');
+    await user.click(await screen.findByRole('checkbox', { name: 'لم يزر منذ 90 يوماً' }));
+    expect(await screen.findByText('لا زبون غاب أكثر من 90 يوماً.')).toBeInTheDocument();
+    expect(screen.queryByText('لا زبائن بعد.')).not.toBeInTheDocument();
   });
 });

@@ -44,3 +44,11 @@ does not edit this one.
 
 If the system and the sheet disagree, **neither is changed to match**: the difference goes to
 DISAGREEMENTS.md with the spec quote, and the coordinator decides.
+
+## Credit return case (golden/credit-return)
+
+A small second case, written by hand (not produced by the calculator): a credit sale of 300.00, one
+piece (100.00) returned to the customer's account, then a 50.00 cash collection, plus a cash sale
+returned in cash the same day. `expected.json` holds the journal, the customer statement and the
+balances (customer owes 150.00); `apps/api/test/golden-credit-return.test.ts` replays it through the
+real sync and compares. The 200-sale day1 has no returns, so its outputs are unchanged.

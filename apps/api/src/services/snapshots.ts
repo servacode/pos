@@ -15,7 +15,7 @@ import {
   type SnapshotLine,
 } from '@serva/sync';
 import type { DeviceClaims } from '../auth/device-guard';
-import { currentXmin, PULL_SET_NAMES, pullSetPage, unknownSets } from './sync-pull';
+import { currentXmin, pullSetPage, setsFor, unknownSets } from './sync-pull';
 import { readServerState } from './sync-state';
 
 /**
@@ -232,7 +232,8 @@ export async function bootstrapSnapshot(
   device: DeviceClaims,
   now: Date,
 ): Promise<BootstrapResponse> {
-  return answer(await store.snapshotFor(db, device, PULL_SET_NAMES, now), now);
+  const sets = await withTenant(db, device.tenantId, (tx) => setsFor(tx, device.deviceId));
+  return answer(await store.snapshotFor(db, device, sets, now), now);
 }
 
 /**
@@ -246,7 +247,7 @@ export async function resyncSnapshot(
   sets: string[],
   now: Date,
 ): Promise<ResyncResponse> {
-  unknownSets(sets);
+  unknownSets(sets, await withTenant(db, device.tenantId, (tx) => setsFor(tx, device.deviceId)));
   const meta = await store.snapshotFor(db, device, sets, now);
   return {
     ...answer(meta, now),

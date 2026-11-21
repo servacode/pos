@@ -60,7 +60,7 @@ describe('/pos (cashier)', () => {
     expect(await screen.findByRole('heading', { name: 'من يعمل الآن؟' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /سامر/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /مريم/ })).toBeInTheDocument();
-    expect(screen.getByText('مقهى الياسمين')).toBeInTheDocument();
+    expect(screen.getAllByText('مقهى الياسمين').length).toBeGreaterThan(0);
     expect(screen.getByText('الرقة · شارع تل أبيض · كاشير 3')).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });

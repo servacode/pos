@@ -21,7 +21,15 @@ import { EVIDENCE_ACCESS } from './access';
 import { getEvidence } from './api';
 import type { SyncEvidence } from './contracts';
 import { seriesLabel } from './labels';
-import { DayField, PageHead, ReportError, ReportLoading, ReportScreen, Section } from './parts';
+import {
+  DayField,
+  PageHead,
+  ReportFilters,
+  ReportError,
+  ReportLoading,
+  ReportScreen,
+  Section,
+} from './parts';
 import { useReport } from './useReport';
 
 interface SeriesRow {
@@ -167,7 +175,7 @@ export function EvidencePage() {
   return (
     <ReportScreen me={me} access={EVIDENCE_ACCESS} title="شاشة الدليل">
       <PageHead
-        crumbs={['المتجر', 'الأجهزة']}
+        icon={<ShieldCheckIcon />}
         title="شاشة الدليل"
         subtitle="ما لا تراه بعينك، بالأرقام: هل وصل كل ما باعه الجهاز، مرة واحدة؟"
       />
@@ -184,7 +192,7 @@ export function EvidencePage() {
       ) : null}
       {devices && devices.length > 0 ? (
         <>
-          <Card className="flex flex-wrap items-end gap-4">
+          <ReportFilters>
             <Select
               label="الجهاز"
               value={deviceId ?? ''}
@@ -198,7 +206,7 @@ export function EvidencePage() {
               ))}
             </Select>
             <DayField label="اليوم" value={date} max={today} onChange={setDate} />
-          </Card>
+          </ReportFilters>
           {report.loading ? <ReportLoading label="نحمّل أرقام الجهاز…" /> : null}
           {report.error ? <ReportError message={report.error} onRetry={report.retry} /> : null}
           {report.data ? <EvidenceBody evidence={report.data} /> : null}

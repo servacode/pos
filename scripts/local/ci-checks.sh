@@ -21,6 +21,9 @@
 #                                three; each pair of parts restores the off-site copy, one part
 #                                alone cannot open it (M0-6, ADR-0014)
 #   ci-checks.sh schedule        the daily backup line goes into crontab once, and out again
+#   ci-checks.sh cleanup         pnpm local:cleanup deletes an expired session and keeps a live one
+#   ci-checks.sh alerts          a failed backup, a stale-backup check and the test command each
+#                                reach a webhook (a local listener stands in for Slack/Telegram)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/local/lib.sh
@@ -297,14 +300,73 @@ schedule_check() {
   bash "$SCRIPT_DIR/schedule.sh" install
   bash "$SCRIPT_DIR/schedule.sh" install
   [[ "$(crontab -l | grep -c 'serva-daily-backup')" == 1 ]] || die "Installing twice must leave one line"
+  [[ "$(crontab -l | grep -c 'serva-daily-cleanup')" == 1 ]] || die "Installing twice must leave one cleanup line"
+  crontab -l | grep -q 'scripts/local/cleanup.sh' || die "The cron line does not run the cleanup"
+  # Without a webhook there are no watch jobs; with one, they are added once and removed with the rest
+  SERVA_ALERT_WEBHOOK_URL=http://127.0.0.1:1/x bash "$SCRIPT_DIR/schedule.sh" install
+  SERVA_ALERT_WEBHOOK_URL=http://127.0.0.1:1/x bash "$SCRIPT_DIR/schedule.sh" install
+  [[ "$(crontab -l | grep -c 'serva-backup-watch')" == 1 ]] || die "The stale-backup check must be scheduled once"
+  [[ "$(crontab -l | grep -c 'serva-health-watch')" == 1 ]] || die "The health check must be scheduled once"
+  bash "$SCRIPT_DIR/schedule.sh" install
   crontab -l | grep -q 'scripts/local/backup.sh --label daily' || die "The cron line does not run the backup"
   bash "$SCRIPT_DIR/schedule.sh" status || true
   bash "$SCRIPT_DIR/schedule.sh" remove
-  if crontab -l 2> /dev/null | grep -q 'serva-daily-backup'; then die "remove left the line"; fi
+  if crontab -l 2> /dev/null | grep -q 'serva-daily-backup\|serva-daily-cleanup\|serva-backup-watch\|serva-health-watch'; then die "remove left a line"; fi
   ok "The daily backup is scheduled once, and removed cleanly"
 }
 
+cleanup_check() {
+  local live_before gone
+  psql_live -c "select count(*) from sessions" > /dev/null
+  psql_live -c "insert into sessions (id, tenant_id, user_id, family_id, token_hash, expires_at, absolute_expires_at, revoked_at)
+    select gen_random_uuid(), tenant_id, user_id, family_id, 'ci-expired', now() - interval '10 days', now() + interval '30 days', now()
+    from sessions limit 1" > /dev/null
+  [[ "$(psql_live -c "select count(*) from sessions where token_hash = 'ci-expired'")" == 1 ]] ||
+    die "No session to copy: sign up a store first (ci-checks.sh signup)"
+  live_before="$(psql_live -c "select count(*) from sessions where token_hash <> 'ci-expired' and least(expires_at, absolute_expires_at) > now()")"
+  bash "$SCRIPT_DIR/cleanup.sh" || die "pnpm local:cleanup failed"
+  gone="$(psql_live -c "select count(*) from sessions where token_hash = 'ci-expired'")"
+  [[ "$gone" == 0 ]] || die "The expired session is still there after the cleanup"
+  [[ "$(psql_live -c "select count(*) from sessions where token_hash <> 'ci-expired' and least(expires_at, absolute_expires_at) > now()")" == "$live_before" ]] ||
+    die "The cleanup deleted a session that is still valid"
+  ok "Cleanup removed the expired session and kept the $live_before valid ones"
+}
+
+alerts_check() {
+  local dir port=18555 listener rc
+  dir="$(mktemp -d)"
+  python3 - "$port" "$dir/received.log" << 'PY' &
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("content-length") or 0)
+        open(sys.argv[2], "a").write(self.rfile.read(n).decode() + "\n")
+        self.send_response(200); self.end_headers()
+    def log_message(self, *a): pass
+HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+  listener=$!
+  trap 'kill "$listener" 2> /dev/null || true; rm -rf "$dir"' RETURN
+  sleep 1
+  export SERVA_ALERT_WEBHOOK_URL="http://127.0.0.1:$port/hook" SERVA_ALERT_NAME=ci
+  bash "$SCRIPT_DIR/alert.sh" test || die "pnpm local:alert test failed"
+  grep -q 'Test alert' "$dir/received.log" || die "The test alert did not reach the webhook"
+  # A backup that cannot start (passphrase too short) must alert
+  rc=0
+  SERVA_BACKUP_PASSPHRASE=short bash "$SCRIPT_DIR/backup.sh" --label alerttest > /dev/null 2>&1 || rc=$?
+  ((rc != 0)) || die "A backup without a proper passphrase succeeded"
+  grep -q 'BACKUP ALERT' "$dir/received.log" || die "The failed backup sent no alert"
+  # An empty backup folder is stale: the hourly check must alert
+  mkdir -p "$dir/empty"
+  SERVA_BACKUP_DIR="$dir/empty" bash "$SCRIPT_DIR/schedule.sh" check > /dev/null 2>&1 || true
+  grep -q 'BACKUPS NEED ATTENTION' "$dir/received.log" || die "The stale-backup check sent no alert"
+  ok "Alerts reach the webhook: test message, failed backup, stale backups"
+}
+
 case "${1:-}" in
+  cleanup) cleanup_check ;;
+  alerts) alerts_check ;;
   hardening) hardening ;;
   seed) seed ;;
   negative) negative "${2:-}" ;;

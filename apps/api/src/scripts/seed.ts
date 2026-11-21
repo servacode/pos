@@ -11,7 +11,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { and, eq, isNull } from 'drizzle-orm';
 import { createDb, plans, platformUsers, type PlanLimits } from '@serva/db';
-import { hashSecret } from '../auth/passwords';
+import { hashSecret, verifySecret } from '../auth/passwords';
 import { demoStore, seedDemoCatalog } from './demo-catalog';
 
 const args = process.argv.slice(2);
@@ -43,7 +43,7 @@ const paidPlans: {
     sortOrder: 1,
     priceMonthlyMinor: 1000,
     priceYearlyMinor: 10000,
-    limits: { branches: 1, registers: 1, users: 3, products: 2000 },
+    limits: { branches: 1, registers: 1, users: 3, products: 2000, reps: 0 },
     features: ['sales', 'inventory', 'customers', 'credit'],
   },
   {
@@ -52,7 +52,7 @@ const paidPlans: {
     sortOrder: 2,
     priceMonthlyMinor: 2500,
     priceYearlyMinor: 25000,
-    limits: { branches: 3, registers: 5, users: 15, products: null },
+    limits: { branches: 3, registers: 5, users: 15, products: null, reps: 2 },
     features: [
       'sales',
       'inventory',
@@ -70,7 +70,7 @@ const paidPlans: {
     sortOrder: 3,
     priceMonthlyMinor: 5000,
     priceYearlyMinor: 50000,
-    limits: { branches: null, registers: null, users: null, products: null },
+    limits: { branches: null, registers: null, users: null, products: null, reps: null },
     features: [
       'sales',
       'inventory',
@@ -111,8 +111,25 @@ try {
         email: email.toLowerCase(),
         passwordHash: await hashSecret(password),
         role: 'super_admin',
+        mustChangePassword: true,
       })
       .onConflictDoNothing({ target: platformUsers.email });
+    // An admin seeded earlier whose password still equals the bootstrap one must change it at the
+    // next sign-in. The plain value is only compared here, never stored.
+    const [existing] = await db
+      .select({
+        id: platformUsers.id,
+        hash: platformUsers.passwordHash,
+        flagged: platformUsers.mustChangePassword,
+      })
+      .from(platformUsers)
+      .where(eq(platformUsers.email, email.toLowerCase()));
+    if (existing && !existing.flagged && (await verifySecret(existing.hash, password))) {
+      await db
+        .update(platformUsers)
+        .set({ mustChangePassword: true })
+        .where(eq(platformUsers.id, existing.id));
+    }
     console.log(`Platform admin ready: ${email}`);
   } else {
     console.log('PLATFORM_ADMIN_EMAIL / PLATFORM_ADMIN_PASSWORD not set; skipped platform admin.');

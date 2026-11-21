@@ -1,15 +1,34 @@
-import type { CurrencyCode } from '@serva/core/currencies';
+import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import type {
   GiftVoucherPayload,
   ReceiptPayload,
   ReturnPayload,
   SalePayload,
 } from '@serva/core/contracts/documents';
+import { oldPoundText, showOldPoundOn } from '@serva/core/contracts/till';
 import { formatMoney } from '@serva/core/money';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
 import { clockText, dateText } from '../format';
-import { methodLabel, type ReceiptData } from '../receipt/Receipt';
+import { dayText } from '../../lib/dates';
+import {
+  giftNote,
+  isDepositCode,
+  methodLabel,
+  needsThanks,
+  paymentLabel,
+  single,
+  type ReceiptData,
+} from '../receipt/Receipt';
+import { serialText, warrantyText } from '../receipt/warranty';
+import { INSTALMENT_TITLE, instalmentRows, rowLabel } from './instalmentLines';
+import { packPiecesNote } from '../sale/packText';
+
+/** « (200 قطعة)» after the packs of a line sold by the box, nothing for single units. */
+const packNote = (l: { qty: number; packQty?: number }) => {
+  const note = packPiecesNote(l, (q) => formatQuantity(q));
+  return note === null ? '' : ` ${note}`;
+};
 
 /**
  * What a thermal printer prints, line by line (21 › إيصال 80 مم): the same receipt as the screen's,
@@ -53,7 +72,9 @@ function header(data: ReceiptData, title: string, number: string | null, at: num
 const footer = (data: ReceiptData, thanks = true): PrintLine[] => [
   { kind: 'rule' },
   ...(data.settings.receiptFooter ? [{ kind: 'center' as const, text: data.settings.receiptFooter }] : []),
-  ...(thanks ? [{ kind: 'center' as const, text: 'شكراً لزيارتكم' }] : []),
+  ...(thanks && needsThanks(data.settings.receiptFooter)
+    ? [{ kind: 'center' as const, text: 'شكراً لزيارتكم' }]
+    : []),
   { kind: 'center', text: 'سيرفا · Serva' },
 ];
 
@@ -75,7 +96,30 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       end: money(r.totals.totalMinor, r.currency),
       bold: true,
     });
+    // A cash refund rounded to the cash step: what the drawer paid, and the difference
+    const cashRefund = r.refunds.find((x) => x.method === 'cash' && x.roundingMinor);
+    if (cashRefund) {
+      lines.push({
+        kind: 'pair',
+        start: 'تقريب النقد',
+        end: `${cashRefund.roundingMinor! < 0 ? '−' : '+'}${money(Math.abs(cashRefund.roundingMinor!), r.currency)}`,
+      });
+      lines.push({
+        kind: 'pair',
+        start: 'رُدّ نقداً',
+        end: money(cashRefund.amountMinor, r.currency),
+        bold: true,
+      });
+    }
+    // Round 36: what of the cash refund left the dollar drawer
+    for (const f of r.refunds.find((x) => x.method === 'cash')?.foreign ?? []) {
+      lines.push({ kind: 'pair', start: 'منه من درج الدولار', end: money(f.amountMinor, f.currency) });
+    }
     lines.push({ kind: 'pair', start: 'السبب', end: r.reason });
+    // A cash exchange is two documents: this return in cash, then the sale of the other piece in cash
+    if (r.reason === 'تبديل' && r.refunds.length === 1 && r.refunds[0]!.method === 'cash') {
+      lines.push({ kind: 'center', text: 'استبدال: يُحسب هذا المبلغ مقابل ثمن القطعة البديلة' });
+    }
     const voucher = r.refunds.find((x) => x.method === 'voucher');
     if (voucher && data.doc.number) {
       lines.push({ kind: 'rule' });
@@ -92,9 +136,9 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     }
     return [...lines, ...footer(data, false)];
   }
-  if (data.kind === 'gift') {
+  if (data.kind === 'gift' || data.kind === 'deposit') {
     const g = data.doc.payload as unknown as GiftVoucherPayload;
-    lines.push(...header(data, 'قسيمة هدية', data.doc.number, at));
+    lines.push(...header(data, data.kind === 'deposit' ? 'عربون' : 'قسيمة هدية', data.doc.number, at));
     if (g.forName) lines.push({ kind: 'center', text: `إلى ${g.forName}`, bold: true });
     lines.push({ kind: 'center', text: money(g.amountMinor, g.currency), bold: true, big: true });
     if (data.doc.number) {
@@ -116,15 +160,37 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
   }
   const sale = data.doc.payload as unknown as SalePayload;
   const base = sale.currency;
+  if (data.giftReceipt) {
+    // «إيصال هدية»: the pieces and their count, no price or payment; the invoice barcode stays for the exchange
+    lines.push(...header(data, 'إيصال هدية', data.doc.number, at));
+    for (const l of sale.lines) {
+      lines.push({ kind: 'pair', start: l.name, end: formatQuantity(l.baseQty), bold: true });
+    }
+    lines.push({ kind: 'rule' });
+    lines.push({ kind: 'center', text: giftNote(data) });
+    if (data.doc.number) {
+      lines.push({ kind: 'barcode', code: data.doc.number });
+      lines.push({ kind: 'center', text: data.doc.number });
+    }
+    return [...lines, { kind: 'rule' }, { kind: 'center', text: 'سيرفا · Serva' }];
+  }
   lines.push(...header(data, 'فاتورة مبيعات', data.doc.number, at));
+  if (data.sellerName && data.sellerName !== data.cashierName) {
+    lines.push({ kind: 'center', text: `البائع: ${data.sellerName}` });
+  }
+  if (sale.customerName) lines.push({ kind: 'center', text: `الزبون: ${sale.customerName}` });
   lines.push(...serviceLines(sale));
   for (const l of sale.lines) {
-    lines.push({ kind: 'text', text: l.name, bold: true });
-    lines.push({
-      kind: 'pair',
-      start: `${formatQuantity(l.qty)}${l.unitName ? ` ${l.unitName}` : ''} × ${money(l.unitPriceMinor, base)}`,
-      end: money(l.priced.grossMinor, base),
-    });
+    if (single(l) && l.name.length <= 20) {
+      lines.push({ kind: 'pair', start: l.name, end: money(l.priced.grossMinor, base), bold: true });
+    } else {
+      lines.push({ kind: 'text', text: l.name, bold: true });
+      lines.push({
+        kind: 'pair',
+        start: `${formatQuantity(l.qty)}${l.unitName ? ` ${l.unitName}` : ''}${packNote(l)} × ${money(l.unitPriceMinor, base)}`,
+        end: money(l.priced.grossMinor, base),
+      });
+    }
     if (l.priced.lineDiscountMinor > 0) {
       lines.push({
         kind: 'pair',
@@ -132,10 +198,33 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
         end: `−${money(l.priced.lineDiscountMinor, base)}`,
       });
     }
-    if (l.serials?.length) lines.push({ kind: 'text', text: `IMEI ${l.serials.join('، ')}` });
+    // A piece a «اشترِ وخذ مجاناً» promotion gave: price 0, and the promotion's name
+    if (l.unitPriceMinor === 0 && l.discount?.source === 'promotion') {
+      lines.push({ kind: 'text', text: `مجاناً · ${l.discount.reason ?? 'عرض'}` });
+    }
+    if (l.serials?.length) lines.push({ kind: 'text', text: serialText(l, data.settings) ?? '' });
+    const until = warrantyText(l, data.doc.deviceTime, data.settings);
+    if (until) lines.push({ kind: 'text', text: until });
+    if (l.batches && l.batches.length > 0) {
+      // A line split over batches prints each with what it took (03 › الصيدليات)
+      for (const b of l.batches) {
+        lines.push({
+          kind: 'text',
+          text: `دفعة ${b.batchNo ?? '—'}${b.expiry ? ` · تنتهي ${dayText(b.expiry)}` : ''} × ${formatQuantity(b.qty)}`,
+        });
+      }
+    } else if (l.batchNo) {
+      lines.push({
+        kind: 'text',
+        text: `دفعة ${l.batchNo}${l.batchExpiry ? ` · تنتهي ${dayText(l.batchExpiry)}` : ''}`,
+      });
+    }
   }
   lines.push({ kind: 'rule' });
   const t = sale.totals;
+  if (t.discountMinor > 0) {
+    lines.push({ kind: 'pair', start: 'المجموع', end: money(t.grossMinor - t.lineDiscountMinor, base) });
+  }
   if (t.invoiceDiscountMinor > 0) {
     lines.push({ kind: 'pair', start: 'خصم الفاتورة', end: `−${money(t.invoiceDiscountMinor, base)}` });
   }
@@ -147,14 +236,32 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     });
   }
   lines.push({ kind: 'pair', start: 'الإجمالي', end: money(t.totalMinor, base), bold: true });
+  const oldPound = showOldPoundOn(data.settings.till, data.doc.deviceTime) && base === 'SYP';
+  if (oldPound) lines.push({ kind: 'pair', start: 'بالقديم', end: oldPoundText(t.totalMinor) });
   lines.push({ kind: 'rule' });
   for (const p of sale.payments) {
     lines.push({
       kind: 'pair',
-      start: methodLabel(p.method, p.currency, base),
+      start: paymentLabel(p, base),
       end: money(p.amountMinor, p.currency),
     });
     if (p.reference) lines.push({ kind: 'pair', start: 'المرجع', end: p.reference });
+  }
+  const rate = foreignRateText(sale);
+  if (rate) lines.push({ kind: 'pair', start: 'سعر الصرف', end: rate });
+  if (sale.installmentPlan) {
+    lines.push({ kind: 'rule' }, { kind: 'center', text: INSTALMENT_TITLE, bold: true });
+    for (const r of instalmentRows(sale.installmentPlan, (m) => money(m, base))) {
+      lines.push({ kind: 'pair', start: rowLabel(r), end: r.value, ...(r.bold ? { bold: true } : {}) });
+    }
+  }
+  for (const v of data.vouchersAfter ?? []) {
+    if (isDepositCode(v.code) && v.balanceMinor <= 0) continue;
+    lines.push({
+      kind: 'pair',
+      start: isDepositCode(v.code) ? 'الباقي من العربون' : 'الباقي على القسيمة',
+      end: money(v.balanceMinor, v.currency),
+    });
   }
   if (sale.change) {
     lines.push({
@@ -164,7 +271,42 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       bold: true,
     });
   }
+  if (sale.change && oldPound && sale.change.currency === base) {
+    lines.push({ kind: 'pair', start: 'الباقي بالقديم', end: oldPoundText(sale.change.amountMinor) });
+  }
+  const rx = sale.prescription;
+  if (rx && (rx.ref || rx.doctor)) {
+    lines.push({ kind: 'rule' });
+    if (rx.ref) lines.push({ kind: 'pair', start: 'رقم الوصفة', end: rx.ref });
+    if (rx.doctor) lines.push({ kind: 'pair', start: 'الطبيب', end: rx.doctor });
+    if (rx.patientName) lines.push({ kind: 'pair', start: 'المريض', end: rx.patientName });
+  }
+  if (data.doc.number) {
+    // The return screen scans this to find the invoice, from any till of the store
+    lines.push({ kind: 'rule' });
+    lines.push({ kind: 'barcode', code: data.doc.number });
+    lines.push({ kind: 'center', text: data.doc.number });
+  }
   return [...lines, ...footer(data)];
+}
+
+/**
+ * «1$ = 120 ل.س» when the sale involved a foreign currency (a payment, the change or a foreign-priced
+ * line), from the rate stamped on the invoice; null for a pound-only sale. Display only.
+ */
+export function foreignRateText(
+  sale: Pick<SalePayload, 'currency' | 'exchangeRates' | 'payments' | 'change'>,
+): string | null {
+  const base = sale.currency;
+  const rate = sale.exchangeRates?.[0];
+  if (!rate) return null;
+  const foreign = rate.unit === base ? rate.quote : rate.unit;
+  const involved =
+    (sale.payments ?? []).some((p) => p.currency === foreign) || sale.change?.currency === foreign;
+  if (!involved || rate.unit === base) return null;
+  return stripBidiControls(
+    `1${CURRENCIES[foreign as CurrencyCode].symbolAr} = ${rate.rate} ${CURRENCIES[base].symbolAr}`,
+  );
 }
 
 /** What a line's discount is called on the receipt: a promotion by its name. */

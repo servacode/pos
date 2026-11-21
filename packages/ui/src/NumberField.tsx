@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ChangeEvent } from 'react';
 import { getCurrency, stripBidiControls, toLatinDigits, toMinor, type CurrencyId } from '@serva/core';
 import { cn } from './cn';
-import { useDigits, type Digits } from './context';
-import { TextField, type TextFieldProps } from './TextField';
+import { useDensity, useDigits, type Digits } from './context';
+import { ADORNMENT_INSET, TextField, type TextFieldProps } from './TextField';
 
 const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
 
@@ -23,8 +23,24 @@ export function canonicalNumber(raw: string, decimals: number, allowNegative = f
   return `${negative ? '-' : ''}${text}`;
 }
 
-/** Shows a canonical number with thousands separators in the store's digits: "1250.5" → «1,250.5». */
-export function displayNumber(canonical: string, digits: Digits): string {
+/** Anything but a digit, a separator, a minus, a space or a bidi mark: a letter or a symbol typed into a number */
+const NOT_NUMERIC = /[^0-9\u0660-\u0669.,\u066b\u066c\-\u2212\s\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/;
+
+const LRI = '\u2066';
+const PDI = '\u2069';
+
+/**
+ * A negative number kept as one left-to-right unit: alone in an Arabic line a leading minus jumps to
+ * the far side («1-», «5-»). Wraps the true minus «−» and its digits in a bidi isolate. Text that does
+ * not start with a minus is returned as is. The one place every screen gets a negative from.
+ */
+export function isolateNegative(text: string): string {
+  if (!text.startsWith('-') && !text.startsWith('−')) return text;
+  return `${LRI}−${text.slice(1)}${PDI}`;
+}
+
+/** The text of a canonical number as typed: grouped, in the store's digits, minus kept bare for the caret. */
+function groupedNumber(canonical: string, digits: Digits): string {
   const [int = '', fraction] = canonical.split('.');
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const text = fraction === undefined ? grouped : `${grouped}.${fraction}`;
@@ -32,6 +48,16 @@ export function displayNumber(canonical: string, digits: Digits): string {
   return text.replace(/[\d,.-]/g, (ch) =>
     ch === ',' ? '٬' : ch === '.' ? '٫' : ch === '-' ? '−' : ARABIC_DIGITS.charAt(Number(ch)),
   );
+}
+
+/**
+ * Shows a canonical number with thousands separators in the store's digits: "1250.5" → «1,250.5».
+ * A negative gets a true minus inside a bidi isolate («−1,250»), so it reads right in an Arabic line.
+ */
+export function displayNumber(canonical: string, digits: Digits): string {
+  return canonical.startsWith('-')
+    ? isolateNegative(`-${groupedNumber(canonical.slice(1), digits)}`)
+    : groupedNumber(canonical, digits);
 }
 
 /** How many digits, separators-free, sit before `position`: what the caret keeps across reformatting. */
@@ -64,6 +90,14 @@ export interface NumberFieldProps extends Omit<
   allowNegative?: boolean;
   /** A unit or currency symbol shown inside the field, at its end. */
   unit?: string;
+  /** Called when the typed text had a fraction the field cannot keep (the currency has none). */
+  onFractionDropped?: () => void;
+  /**
+   * When given, a typed or pasted text that would be silently changed (a minus where none is allowed,
+   * more fraction digits than `decimals`) is refused whole instead: the number stays as it was and
+   * this is told why.
+   */
+  onRefuse?: (reason: 'minus' | 'fraction') => void;
 }
 
 /**
@@ -77,13 +111,20 @@ export function NumberField({
   decimals = 0,
   allowNegative = false,
   unit,
+  onFractionDropped,
+  onRefuse,
   inputClassName,
   ...rest
 }: NumberFieldProps) {
   const digits = useDigits();
+  const density = useDensity();
   const inputRef = useRef<HTMLInputElement>(null);
   const caret = useRef<number | null>(null);
-  const shown = displayNumber(value, digits);
+  const [junk, setJunk] = useState(false);
+  // After a refused character the field ignores the digits typed next (a refused «.» in «2500.5» must
+  // not turn the price into 25005); a deletion or leaving the field lifts it.
+  const frozen = useRef(false);
+  const shown = groupedNumber(value, digits);
 
   useLayoutEffect(() => {
     const input = inputRef.current;
@@ -95,13 +136,42 @@ export function NumberField({
 
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     const { value: typed, selectionStart } = event.target;
+    // Letters and symbols are refused with a message (the number stays as it was), never silently stripped
+    if (NOT_NUMERIC.test(typed)) {
+      setJunk(true);
+      return;
+    }
+    if (frozen.current) {
+      if (typed.length === shown.length + 1) return;
+      frozen.current = false;
+    }
+    if (onRefuse) {
+      const latin = stripBidiControls(toLatinDigits(typed));
+      if (!allowNegative && /[-−]/.test(typed)) {
+        frozen.current = true;
+        return onRefuse('minus');
+      }
+      const dot = latin.indexOf('.');
+      if (dot !== -1 && (decimals === 0 || latin.slice(dot + 1).replace(/[^0-9]/g, '').length > decimals)) {
+        frozen.current = true;
+        return onRefuse('fraction');
+      }
+    }
+    setJunk(false);
     caret.current = significantBefore(typed, selectionStart ?? typed.length);
+    if (onFractionDropped && decimals === 0 && /[.٫]/.test(typed)) onFractionDropped();
     onValueChange(canonicalNumber(typed, decimals, allowNegative));
   }
 
   return (
     <TextField
       {...rest}
+      error={junk ? 'اكتب أرقاماً فقط' : rest.error}
+      onBlur={(e) => {
+        setJunk(false);
+        frozen.current = false;
+        rest.onBlur?.(e);
+      }}
       ref={inputRef}
       type="text"
       inputMode="decimal"
@@ -112,7 +182,15 @@ export function NumberField({
       inputClassName={cn('num', inputClassName)}
       endAdornment={
         unit ? (
-          <span aria-hidden="true" className="pe-3.5 text-sm text-ink-muted">
+          // At the end of the box, in the subtle ink the box gives its icons and units.
+          <span
+            aria-hidden="true"
+            className={cn(
+              'shrink-0 whitespace-nowrap select-none',
+              density === 'touch' ? 'text-base' : 'text-sm',
+              ADORNMENT_INSET[density].end,
+            )}
+          >
             {unit}
           </span>
         ) : undefined
@@ -138,6 +216,9 @@ function minorToCanonical(minor: number | null, currency: CurrencyId, shown: num
   return `${negative ? '-' : ''}${int}${fraction ? `.${fraction}` : ''}`;
 }
 
+/** The largest amount a field accepts: above it is almost surely a typo (extra zeros). */
+const MAX_MINOR = 9_999_999_999_999;
+
 function canonicalToMinor(canonical: string, currency: CurrencyId): number | null {
   if (![...canonical].some((c) => c >= '0' && c <= '9')) return null;
   return toMinor(canonical.replace(/\.$/, ''), currency);
@@ -154,8 +235,18 @@ export interface MoneyFieldProps extends Omit<NumberFieldProps, 'value' | 'onVal
  * Prices and payments: the currency symbol inside, fraction digits by currency (none for the new
  * pound, two for the dollar) and the value as integer minor units.
  */
-export function MoneyField({ currency, valueMinor, onValueChange, decimals, ...rest }: MoneyFieldProps) {
+export function MoneyField({
+  currency,
+  valueMinor,
+  onValueChange,
+  decimals,
+  hint,
+  ...rest
+}: MoneyFieldProps) {
   const info = getCurrency(currency);
+  const [noFraction, setNoFraction] = useState(false);
+  const [tooLarge, setTooLarge] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
   const shown = decimals ?? info.displayDecimals;
   const [text, setText] = useState(() => minorToCanonical(valueMinor, currency, shown));
   const [lastMinor, setLastMinor] = useState(valueMinor);
@@ -173,9 +264,46 @@ export function MoneyField({ currency, valueMinor, onValueChange, decimals, ...r
       value={text}
       decimals={shown}
       unit={info.symbolAr}
+      error={refusal ?? rest.error}
+      onRefuse={(reason) =>
+        setRefusal(
+          reason === 'minus'
+            ? 'لا يُقبل مبلغ سالب'
+            : info.decimals === 0 || shown === 0
+              ? 'هذه العملة تُعرض بلا كسور: اكتب المبلغ كاملاً بلا جزء عشري'
+              : `أكثر من ${String(shown)} خانات بعد الفاصلة غير مقبول`,
+        )
+      }
+      onBlur={(e) => {
+        setRefusal(null);
+        rest.onBlur?.(e);
+      }}
+      hint={
+        tooLarge
+          ? 'المبلغ كبير جداً: تحقّق من الأصفار'
+          : noFraction
+            ? 'هذه العملة تُعرض بلا كسور: النقطة تُحذف. اكتب المبلغ كاملاً بلا جزء عشري.'
+            : hint
+      }
+      onFractionDropped={() => setNoFraction(true)}
       onValueChange={(next) => {
+        // The reason stays while more is typed (the next digit would otherwise hide that a point was
+        // refused); it goes on blur or when something is deleted.
+        if (next.length < text.length) setRefusal(null);
         setText(next);
-        const minor = canonicalToMinor(next, currency);
+        let minor: number | null = null;
+        try {
+          minor = canonicalToMinor(next, currency);
+          setTooLarge(false);
+        } catch {
+          setTooLarge(true);
+          return;
+        }
+        if (minor !== null && minor > MAX_MINOR) {
+          setTooLarge(true);
+          return;
+        }
+        setTooLarge(false);
         setLastMinor(minor);
         onValueChange(minor);
       }}

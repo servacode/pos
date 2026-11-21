@@ -37,6 +37,8 @@ const ticketOf = (r: typeof alterationTickets.$inferSelect): AlterationTicket =>
   priceMinor: r.priceMinor,
   dueDate: r.dueDate,
   note: r.note,
+  depositMinor: r.depositMinor,
+  depositVoucher: r.depositVoucher,
   createdAt: r.createdAt.toISOString(),
   readyAt: r.readyAt?.toISOString() ?? null,
   deliveredAt: r.deliveredAt?.toISOString() ?? null,
@@ -76,6 +78,8 @@ export function createAlteration(
         priceMinor: input.priceMinor,
         dueDate: input.dueDate,
         note: input.note || null,
+        depositMinor: input.depositMinor,
+        depositVoucher: input.depositMinor > 0 ? (input.depositVoucher ?? null) : null,
       })
       .returning();
     return ticketOf(made!);

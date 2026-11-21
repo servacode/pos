@@ -83,6 +83,22 @@ describe('the golden first sale (23 › المرحلة 1 › أول بيع)', ()
     line(5, 27500, { name: 'سكر' }),
   ];
 
+  it('keeps a cheque payment bank, number and due date, and only that payment carries them', () => {
+    const cheque = { bank: 'بنك سورية', number: '000123', dueDate: '2026-12-01', drawer: null };
+    const tender: SaleTender = {
+      method: 'cheque',
+      currency: 'SYP',
+      amountMinor: 129000,
+      reference: 'بنك سورية · 000123 · 2026-12-01',
+      cheque,
+    };
+    const sale = buildSalePayload(cart(lines, [tender], { customerId: CUSTOMER, customerName: 'زبون' }));
+    expect(sale.payments[0]!.cheque).toEqual(cheque);
+    expect(salePayloadSchema.safeParse(sale).success).toBe(true);
+    const plain = buildSalePayload(cart(lines, [cash('SYP', 129000)]));
+    expect('cheque' in plain.payments[0]!).toBe(false);
+  });
+
   it('totals 1,290.00 ل.س, takes 9 $ then 200 ل.س and gives back 80.00 ل.س', () => {
     const sale = buildSalePayload(cart(lines, [cash('USD', 900), cash('SYP', 20000)]));
     expect(sale.totals.totalMinor).toBe(129000);

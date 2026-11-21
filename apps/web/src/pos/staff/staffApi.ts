@@ -11,7 +11,7 @@ export type StaffSessionAnswer =
   /** 429 locked: the server's lockout, retry after this many seconds */
   | { kind: 'locked'; retryAfterSeconds: number }
   /** Another refusal: not this branch's staff, a disabled user, a revoked device */
-  | { kind: 'refused'; code: string | null }
+  | { kind: 'refused'; code: string | null; message?: string }
   /** No answer, or a server error: the device checks offline instead */
   | { kind: 'network' };
 
@@ -37,7 +37,7 @@ export async function postStaffSession(
     return { kind: 'network' };
   }
   const body = (await res.json().catch(() => null)) as {
-    error?: { code?: string; retryAfter?: number };
+    error?: { code?: string; retryAfter?: number; message?: string };
   } | null;
   if (res.ok)
     return body ? { kind: 'ok', body: body as unknown as StaffSessionResponse } : { kind: 'network' };
@@ -49,5 +49,7 @@ export async function postStaffSession(
     const seconds = body?.error?.retryAfter ?? (Number.isFinite(header) && header > 0 ? header : 60);
     return { kind: 'locked', retryAfterSeconds: seconds };
   }
-  return { kind: 'refused', code };
+  // The server's own words when it gives them for a refusal it decided (a rep's phone, round 35 › D3)
+  const message = res.status === 403 && body?.error?.message ? body.error.message : undefined;
+  return message ? { kind: 'refused', code, message } : { kind: 'refused', code };
 }

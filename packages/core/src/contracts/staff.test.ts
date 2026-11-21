@@ -71,6 +71,9 @@ describe('requiredPinLength', () => {
     expect(requiredPinLength(['cashier'], ['sale.create', 'sale.discount', 'shift.close_own'])).toBe(4);
     expect(requiredPinLength(['supervisor'], ['sale.create', 'sale.discount_over_limit'])).toBe(6);
     expect(requiredPinLength(['custom'], ['cash.move'])).toBe(6);
+    // 03 › وضع النادل: the waiter has 4 digits, whoever approves a cancellation after the kitchen has 6
+    expect(requiredPinLength(['waiter'], ['hall.order'])).toBe(4);
+    expect(requiredPinLength(['head_waiter'], ['hall.order', 'hall.cancel_approve'])).toBe(6);
   });
 });
 

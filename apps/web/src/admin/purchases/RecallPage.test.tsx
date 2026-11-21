@@ -1,0 +1,288 @@
+import { screen, waitFor, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import type { MeResponse, RecallResponse, RecallSale } from '@serva/core';
+import { mockFetch } from '../../test/fetchMock';
+import { makeMe, signedInRefresh } from '../../test/fixtures';
+import { bannedWordsIn, userFacingText } from '../../test/glossary';
+import { renderApp } from '../../test/renderApp';
+import { buyerList } from './RecallPage';
+
+function owner(): MeResponse {
+  const base = makeMe();
+  return { ...base, user: { ...base.user, permissions: [...base.user.permissions, 'purchases.manage'] } };
+}
+
+const found = (blocked: boolean): RecallResponse => ({
+  batchNo: 'C-09',
+  batches: [
+    {
+      variantId: 'v-1',
+      name: 'بانادول 500',
+      batchNo: 'C-09',
+      expiryDate: '2027-03-01',
+      blocked,
+      blockReason: blocked ? 'سحب' : null,
+      receipts: [
+        { purchaseNumber: 'PUR-0003', supplierName: 'مستودع الشفاء', receivedOn: '2026-10-20', qty: 20_000 },
+      ],
+      branches: [{ branchId: 'br-1', branchName: 'الفرع الرئيسي', qty: 17_000 }],
+      soldQty: 3_000,
+      returnedQty: 1_000,
+    },
+  ],
+  sales: [
+    {
+      invoiceId: 'i-1',
+      invoiceNumber: 'INV-0001',
+      date: '2026-10-29',
+      branchName: 'الفرع الرئيسي',
+      variantId: 'v-1',
+      name: 'بانادول 500',
+      qty: 2_000,
+      customerName: 'مستشفى الأمل',
+      customerPhone: '0955123456',
+    },
+    {
+      invoiceId: 'i-2',
+      invoiceNumber: 'INV-0002',
+      date: '2026-10-30',
+      branchName: 'الفرع الرئيسي',
+      variantId: 'v-1',
+      name: 'بانادول 500',
+      qty: 1_000,
+      customerName: null,
+      customerPhone: null,
+    },
+  ],
+});
+
+describe('buyerList', () => {
+  const sale = (invoiceId: string, qty: number, name: string | null, phone: string | null) =>
+    ({ invoiceId, qty, customerName: name, customerPhone: phone }) as RecallSale;
+  it('groups known buyers by phone and counts what went to nobody', () => {
+    const { people, anonymous } = buyerList([
+      sale('a', 2000, 'مستشفى الأمل', '0955'),
+      sale('b', 3000, 'مستشفى الأمل', '0955'),
+      sale('c', 5000, null, null),
+    ]);
+    expect(people).toEqual([{ name: 'مستشفى الأمل', phone: '0955', invoices: 2, qty: 5000 }]);
+    expect(anonymous).toEqual({ invoices: 1, qty: 5000 });
+  });
+});
+
+describe('«استدعاء دفعة»', () => {
+  it('finds a batch by its number: its product, supplier, what is left and who bought it', async () => {
+    let blocked = false;
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/batches/recall?batchNo=C-09': () => ({ status: 200, body: found(blocked) }),
+      'POST /v1/batches/block': () => {
+        blocked = true;
+        return { status: 200, body: { count: 1 } };
+      },
+    });
+    const { user } = renderApp('/recall');
+    await user.type(await screen.findByLabelText('رقم الدفعة'), 'C-09');
+    await user.click(screen.getByRole('button', { name: 'ابحث' }));
+    const batch = await screen.findByRole('table', { name: 'الدفعة وأصلها' });
+    expect(batch).toHaveTextContent('بانادول 500');
+    expect(batch).toHaveTextContent('مستودع الشفاء');
+    expect(batch).toHaveTextContent('PUR-0003');
+    expect(batch).toHaveTextContent('الفرع الرئيسي');
+    const sales = await screen.findByRole('table', { name: 'فواتير الدفعة' });
+    expect(sales).toHaveTextContent('INV-0001');
+    expect(sales).toHaveTextContent('مستشفى الأمل');
+    expect(sales).toHaveTextContent('0955123456');
+    expect(sales).toHaveTextContent('INV-0002');
+    expect(screen.getByTestId('recall-buyers-summary')).toHaveTextContent(
+      'زبون واحد مسجَّل في الفواتير · فاتورة واحدة بلا زبون',
+    );
+    // an invoice with no customer is a risk line, and the buyers can be exported
+    expect(screen.getByTestId('recall-anonymous')).toHaveTextContent('لا يمكن الوصول إلى مشتريها');
+    // grammar: one piece, not «1 قطعة»
+    expect(screen.getByTestId('recall-anonymous')).toHaveTextContent('قطعة واحدة');
+    expect(screen.getByRole('button', { name: 'صدّر الزبائن' })).toBeInTheDocument();
+    // one line on top, and «بِيع» is net of the customer's return (3 sold, 1 taken back: 2)
+    expect(screen.getByTestId('recall-headline')).toHaveTextContent(
+      'بِيع منها 2 بعد المرتجع · لـ زبون واحد · وبقي في الفروع 17',
+    );
+    expect(within(batch).getByRole('columnheader', { name: 'بِيع (بعد المرتجع)' })).toBeInTheDocument();
+    // «راسل الزبائن»: a WhatsApp link per known buyer with the batch in the message
+    await user.click(screen.getByRole('button', { name: 'راسل الزبائن' }));
+    const chat = within(await screen.findByRole('list', { name: 'زبائن الدفعة' })).getByRole('link', {
+      name: 'واتساب',
+    });
+    expect(chat.getAttribute('href')).toContain('https://wa.me/963955123456?text=');
+    expect(decodeURIComponent(chat.getAttribute('href') ?? '')).toContain('الدفعة C-09');
+    // the whole note sits in an editable box; the edit goes into the link, and the tick shows once it is pressed
+    const box = screen.getByRole('textbox', { name: /الرسالة/ });
+    expect((box as HTMLTextAreaElement).value).toContain('الدفعة C-09');
+    await user.type(box, ' شكراً');
+    expect(screen.queryByText('أُرسلت ✓')).not.toBeInTheDocument();
+    chat.addEventListener('click', (e) => e.preventDefault());
+    expect(decodeURIComponent(chat.getAttribute('href') ?? '')).toContain('شكراً');
+    await user.click(chat);
+    expect(screen.getByText('أُرسلت ✓')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
+
+    await user.click(screen.getByRole('button', { name: 'أوقف بيعها في كل الفروع' }));
+    // Blocking waits for a confirmation: nothing is sent before it
+    const sure = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/batches/block')).toHaveLength(0);
+    await user.click(within(sure).getByRole('button', { name: 'أوقف البيع' }));
+    expect(await screen.findByText(/أُوقف بيع الدفعة C-09 في كل الفروع/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/batches/block').at(-1)?.body).toEqual({ batchNo: 'C-09' });
+    expect(await screen.findByRole('button', { name: 'ارفع الإيقاف' })).toBeInTheDocument();
+  });
+
+  it('disables «راسل الزبائن» with the reason when no buyer has a phone', async () => {
+    const noPhones = found(false);
+    noPhones.sales = noPhones.sales.map((x) => ({ ...x, customerPhone: null }));
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/batches/recall?batchNo=C-09': () => ({ status: 200, body: noPhones }),
+    });
+    const { user } = renderApp('/recall');
+    await user.type(await screen.findByLabelText('رقم الدفعة'), 'C-09');
+    await user.click(screen.getByRole('button', { name: 'ابحث' }));
+    expect(await screen.findByRole('button', { name: 'راسل الزبائن' })).toBeDisabled();
+    expect(screen.getByTestId('recall-no-phones')).toHaveTextContent('لا رقم هاتف');
+  });
+
+  it('offers the batches the stores hold to pick from, and asks before lifting a stop without resetting the page', async () => {
+    let blocked = true;
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory/expiry?days=3650': () => ({
+        status: 200,
+        body: {
+          today: '2026-11-14',
+          items: [
+            {
+              variantId: 'v-1',
+              name: 'بانادول 500',
+              branchId: 'br-1',
+              branchName: 'الفرع الرئيسي',
+              batchNo: 'C-09',
+              expiryDate: '2027-03-01',
+              purchaseNumber: null,
+              supplierId: null,
+              supplierName: null,
+              receivedOn: null,
+              qty: 17_000,
+              daysLeft: 107,
+              blocked,
+              blockReason: null,
+            },
+          ],
+        },
+      }),
+      'GET /v1/batches/recall?batchNo=C-09': () => ({ status: 200, body: found(blocked) }),
+      'POST /v1/batches/unblock': () => {
+        blocked = false;
+        return { status: 200, body: { count: 1 } };
+      },
+    });
+    const { user } = renderApp('/recall');
+    const list = await screen.findByRole('list', { name: 'دفعات مقترحة' });
+    expect(within(list).getByRole('button', { name: /C-09/ })).toHaveTextContent('موقوفة');
+    // The pre-filters: 107 days left is not «قريباً»; the stopped one shows under «الموقوفة»
+    await user.click(screen.getByRole('radio', { name: 'تنتهي قريباً' }));
+    expect(screen.queryByRole('list', { name: 'دفعات مقترحة' })).not.toBeInTheDocument();
+    // …nor already past its date
+    await user.click(screen.getByRole('radio', { name: 'منتهية' }));
+    expect(screen.queryByRole('list', { name: 'دفعات مقترحة' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'الموقوفة' }));
+    expect(await screen.findByRole('list', { name: 'دفعات مقترحة' })).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole('list', { name: 'دفعات مقترحة' })).getByRole('button', { name: /C-09/ }),
+    );
+    await screen.findByRole('table', { name: 'الدفعة وأصلها' });
+    expect(screen.getByLabelText('رقم الدفعة')).toHaveValue('C-09');
+
+    await user.click(screen.getByRole('button', { name: 'ارفع الإيقاف' }));
+    const sure = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/batches/unblock')).toHaveLength(0);
+    await user.click(within(sure).getByRole('button', { name: 'ارفع الإيقاف' }));
+    expect(await screen.findByText('رُفع الإيقاف عن الدفعة C-09.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/batches/unblock')).toHaveLength(1);
+    // The page stays: the batch and its tables are still there
+    expect(screen.getByRole('table', { name: 'الدفعة وأصلها' })).toBeInTheDocument();
+    expect(screen.getByLabelText('رقم الدفعة')).toHaveValue('C-09');
+    // the suggestion chip no longer says «موقوفة» once the stop is lifted
+    await user.click(screen.getByRole('radio', { name: 'كل الدفعات' }));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('list', { name: 'دفعات مقترحة' })).getByRole('button', { name: /C-09/ }),
+      ).not.toHaveTextContent('موقوفة'),
+    );
+  });
+
+  it('prints and downloads the list of invoices', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/batches/recall?batchNo=C-09': () => ({ status: 200, body: found(false) }),
+    });
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+    const create = vi.fn(() => 'blob:x');
+    URL.createObjectURL = create;
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const { user } = renderApp('/recall');
+    await user.type(await screen.findByLabelText('رقم الدفعة'), 'C-09{Enter}');
+    await screen.findByRole('table', { name: 'فواتير الدفعة' });
+    await user.click(screen.getByRole('button', { name: 'اطبع' }));
+    expect(print).toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'حمّل الجدول' }));
+    expect(create).toHaveBeenCalled();
+    expect(click).toHaveBeenCalled();
+    print.mockRestore();
+    click.mockRestore();
+  });
+
+  it('says so when no batch has that number, or when the search fails', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/batches/recall?batchNo=ZZ-9': () => ({
+        status: 200,
+        body: { batchNo: 'ZZ-9', batches: [], sales: [] },
+      }),
+      'GET /v1/batches/recall?batchNo=ERR': () => ({
+        status: 500,
+        body: { error: { code: 'internal', message: 'تعذّر البحث.' } },
+      }),
+    });
+    const { user } = renderApp('/recall');
+    const field = await screen.findByLabelText('رقم الدفعة');
+    await user.type(field, 'ZZ-9{Enter}');
+    expect(await screen.findByText('لا دفعة بالرقم ZZ-9.')).toBeInTheDocument();
+    await user.clear(field);
+    await user.type(field, 'ERR{Enter}');
+    expect(await within(document.body).findByText('تعذّر البحث.')).toBeInTheDocument();
+  });
+});
+
+describe('«استدعاء» from a batch row', () => {
+  it('opens with the batch number searched by itself, and calls an expired batch «منتهية»', async () => {
+    const expired = found(false);
+    expired.batches[0]!.expiryDate = '2020-01-01';
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/batches/recall?batchNo=C-09': () => ({ status: 200, body: expired }),
+    });
+    renderApp('/recall?batch=C-09');
+    const batch = await screen.findByRole('table', { name: 'الدفعة وأصلها' });
+    expect(within(batch).getByText('منتهية')).toBeInTheDocument();
+    expect(within(batch).queryByText('تُباع')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'استدعاء دفعة (سحب من السوق)', level: 1 }),
+    ).toBeInTheDocument();
+  });
+});

@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Button } from '../Button';
 import { HomeIcon, InboxIcon } from '../icons';
 import { renderUi } from '../test/render';
@@ -36,15 +36,116 @@ describe('AdminShell', () => {
 
     const [aside, column] = [...screen.getByRole('complementary').parentElement!.children];
     expect(aside).toHaveClass('sticky');
-    expect(aside!.firstElementChild).toHaveClass('rounded-[1.5rem]', 'bg-surface');
+    // هوية 4: the deep-emerald panel, floating on the page.
+    expect(aside!.firstElementChild).toHaveClass('rounded-panel', 'bg-sidebar', 'text-sidebar-ink');
     expect(within(column as HTMLElement).getByRole('banner')).toHaveTextContent('بقالية أبو خليل');
-    expect(screen.getByRole('main')).toHaveClass('max-w-7xl');
+    expect(screen.getByRole('main')).toHaveClass('max-w-330');
 
     const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
     const home = within(nav).getByRole('link', { name: 'الرئيسية' });
     expect(home).toHaveAttribute('aria-current', 'page');
-    expect(home).toHaveClass('min-h-12', 'bg-brand', 'text-on-brand');
+    // 40 with a mouse, 48 under a finger; the open page on sidebar-active, in white.
+    expect(home).toHaveClass(
+      'min-h-10',
+      'pointer-coarse:min-h-12',
+      'bg-sidebar-active',
+      'text-sidebar-strong',
+    );
     expect(within(nav).getByRole('link', { name: /بانتظارك/ })).toHaveTextContent('3');
+    expect(within(nav).getByRole('list', { name: 'اليوم' })).toBeInTheDocument();
+  });
+
+  it('folds to a rail of icons: the words stay for screen readers and show in a hint', async () => {
+    const { user } = renderUi(
+      <AdminShell
+        collapsed
+        sidebar={({ collapsed }) => (
+          <nav aria-label="القائمة الرئيسية" data-collapsed={collapsed}>
+            <NavGroup label="اليوم">
+              <li>
+                <NavItem href="/" active icon={<HomeIcon />}>
+                  الرئيسية
+                </NavItem>
+              </li>
+              <li>
+                <NavItem href="/inbox" icon={<InboxIcon />} count={3}>
+                  بانتظارك
+                </NavItem>
+              </li>
+            </NavGroup>
+          </nav>
+        )}
+        topBar={<p>بقالية أبو خليل</p>}
+      >
+        <h1>الرئيسية</h1>
+      </AdminShell>,
+    );
+
+    expect(screen.getByRole('complementary')).toHaveClass('w-18');
+    const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
+    expect(nav).toHaveAttribute('data-collapsed', 'true');
+    const inbox = within(nav).getByRole('link', { name: /بانتظارك/ });
+    expect(inbox).toHaveTextContent('3');
+    expect(within(inbox).getByText('بانتظارك')).toHaveClass('sr-only');
+    expect(within(nav).getByText('اليوم')).toHaveClass('sr-only');
+
+    await user.tab();
+    await user.tab();
+    expect(inbox).toHaveFocus();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('بانتظارك');
+  });
+
+  it('opens the sidebar as a drawer from the start side, and closes it with Esc', async () => {
+    const onDrawerOpenChange = vi.fn();
+    const { user } = renderUi(
+      <AdminShell
+        collapsed
+        drawerOpen
+        onDrawerOpenChange={onDrawerOpenChange}
+        drawerLabel="القائمة"
+        sidebar={({ collapsed }) => (
+          <nav aria-label="القائمة الرئيسية" data-collapsed={collapsed}>
+            <NavGroup>
+              <li>
+                <NavItem href="/" active icon={<HomeIcon />}>
+                  الرئيسية
+                </NavItem>
+              </li>
+            </NavGroup>
+          </nav>
+        )}
+        topBar={<p>بقالية أبو خليل</p>}
+      >
+        <h1>الرئيسية</h1>
+      </AdminShell>,
+    );
+
+    const drawer = screen.getByRole('dialog', { name: 'القائمة' });
+    expect(drawer).toHaveClass('start-0', 'bg-sidebar');
+    // Never folded in the drawer, whatever the desktop rail is.
+    const nav = within(drawer).getByRole('navigation', { name: 'القائمة الرئيسية' });
+    expect(nav).toHaveAttribute('data-collapsed', 'false');
+    expect(within(nav).getByText('الرئيسية')).not.toHaveClass('sr-only');
+    expect(within(drawer).getByRole('button', { name: 'أغلق القائمة' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(onDrawerOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('puts the section bar under the top bar, inside the sticky header', () => {
+    renderUi(
+      <AdminShell
+        sidebar={<nav aria-label="القائمة الرئيسية" />}
+        topBar={<p>بقالية أبو خليل</p>}
+        subBar={<nav aria-label="صفحات المنتجات" />}
+      >
+        <h1>المنتجات</h1>
+      </AdminShell>,
+    );
+
+    const header = screen.getByRole('banner');
+    expect(header).toHaveClass('sticky', 'backdrop-blur-xl');
+    expect(within(header).getByRole('navigation', { name: 'صفحات المنتجات' })).toBeInTheDocument();
   });
 });
 

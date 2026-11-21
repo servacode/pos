@@ -2,6 +2,8 @@ import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import {
   cashMovementPayloadSchema,
   customerPayloadSchema,
+  depositPayloadSchema,
+  distributionSettingsOf,
   giftVoucherPayloadSchema,
   receiptPayloadSchema,
   returnPayloadSchema,
@@ -36,6 +38,7 @@ import {
 import type { SyncFlag } from '@serva/sync';
 import {
   postCashMovement,
+  postDeposit,
   postGiftVoucher,
   postReceipt,
   postReturn,
@@ -43,7 +46,14 @@ import {
   postShiftClose,
 } from './posting';
 import type { DocumentContext, SyncProcessors } from './sync-push';
+import { damagedLocationOf } from './damaged-stock';
 import { returnSerials, sellSerials } from './serials';
+import { refreshExpiry } from './expiry';
+import { deliverSalesOrder } from './sales-orders';
+import { applyAllocations, reconcilePlanAfterReturn, recordPlanFromSale } from './installments';
+import { auditExpiredSale, recordReturnBatches, recordSaleBatches } from './batches';
+import { processTempItem } from './till-products';
+import { inScope, permissionScope } from '../auth/permissions';
 
 /**
  * What the server does with the phase-1 documents once they are accepted (17 › الإرسال), inside
@@ -79,8 +89,11 @@ async function moveStock(
   kind: 'sale' | 'return',
   lines: readonly { lineNo: number; variantId: string; baseQty: number }[],
   sign: 1 | -1,
+  /** Round 35 (D7): damaged goods go to the branch's damaged location, priced at the branch they came back to */
+  damaged?: { branchId: string },
 ): Promise<boolean> {
   const { tenantId } = device;
+  const placeId = damaged?.branchId ?? device.branchId;
   const ids = [...new Set(lines.map((l) => l.variantId))];
   if (ids.length === 0) return false;
   const stocked = new Set(
@@ -103,20 +116,21 @@ async function moveStock(
       .insert(stockMovements)
       .values({
         tenantId,
-        branchId: device.branchId,
+        branchId: placeId,
         variantId: line.variantId,
         qty,
         kind,
         docId: doc.id,
         lineNo: line.lineNo,
         businessDate: doc.businessDate,
+        costBranchId: damaged ? device.branchId : null,
       })
       .onConflictDoNothing()
       .returning({ id: stockMovements.id });
     if (!moved) continue;
     const [level] = await tx
       .insert(stockLevels)
-      .values({ tenantId, branchId: device.branchId, variantId: line.variantId, qty })
+      .values({ tenantId, branchId: placeId, variantId: line.variantId, qty })
       .onConflictDoUpdate({
         target: [stockLevels.tenantId, stockLevels.branchId, stockLevels.variantId],
         set: { qty: sql`${stockLevels.qty} + excluded.qty` },
@@ -125,6 +139,45 @@ async function moveStock(
     if (level!.qty < 0) negative = true;
   }
   return negative;
+}
+
+/**
+ * Controlled drugs on a sale (03 › الصيدليات): sold by someone without the pharmacist's permission
+ * (permission_stale: the till checked, but the permission was withdrawn or the till is not to be
+ * trusted), or without the prescription, doctor and patient details (controlled_incomplete). The
+ * sale is kept and flagged, never refused (08 › قاعدة 8): it was printed and the drug is gone.
+ */
+async function controlledFlags(
+  tx: Transaction,
+  device: DocumentContext['device'],
+  sale: SalePayload,
+): Promise<SyncFlag[]> {
+  const ids = [...new Set(sale.lines.map((l) => l.productId))];
+  const controlled = await tx
+    .select({ id: products.id })
+    .from(products)
+    .where(and(inArray(products.id, ids), eq(products.controlled, true)))
+    .limit(1);
+  if (controlled.length === 0) return [];
+  const flags: SyncFlag[] = [];
+  const scope = await permissionScope(tx, sale.cashierId, 'pharmacy.controlled');
+  if (!inScope(scope, device.branchId)) flags.push('permission_stale');
+  const rx = sale.prescription;
+  if (!rx || !rx.ref || !rx.doctor || !rx.patientName || !rx.patientId) flags.push('controlled_incomplete');
+  return flags;
+}
+
+/** The shelf of items that carry expiry dates moves with the sale: the batches the till sees follow it. */
+async function refreshShelf(tx: Transaction, sale: SalePayload): Promise<void> {
+  const ids = [...new Set(sale.lines.map((l) => l.variantId))];
+  const dated = await tx
+    .select({ id: variants.id })
+    .from(variants)
+    .where(and(inArray(variants.id, ids), isNotNull(variants.nearestExpiry)));
+  await refreshExpiry(
+    tx,
+    dated.map((v) => v.id),
+  );
 }
 
 /** A sale: the invoice, its lines and payments, and stock out of the device's branch. */
@@ -138,7 +191,16 @@ async function processSale({ tx, device, doc }: DocumentContext) {
 
   const { tenantId } = device;
   if (await moveStock(tx, device, doc, 'sale', sale.lines, -1)) flags.push('negative_stock');
-  flags.push(...(await sellSerials(tx, tenantId, doc.id, doc.businessDate, sale.lines)));
+  flags.push(...(await controlledFlags(tx, device, sale)));
+  // The batch ledger follows the sale: what each line took from which batch (a parallel record)
+  flags.push(
+    ...(await recordSaleBatches(
+      tx,
+      { tenantId, branchId: device.branchId, docId: doc.id, date: doc.businessDate },
+      sale.lines,
+    )),
+  );
+  flags.push(...(await sellSerials(tx, tenantId, device.branchId, doc.id, doc.businessDate, sale.lines)));
 
   const [inserted] = await tx
     .insert(invoices)
@@ -154,6 +216,10 @@ async function processSale({ tx, device, doc }: DocumentContext) {
       shiftLinked: await shiftOpened(tx, sale.shiftId),
       cashierId: sale.cashierId,
       salespersonId: sale.salespersonId,
+      // The seller's rate as of now: a later rate change never re-prices this sale's commission
+      commissionBp: sql<
+        number | null
+      >`(select u.commission_bp from users u where u.tenant_id = ${tenantId} and u.id = ${sale.salespersonId ?? sale.cashierId})`,
       customerId: sale.customerId,
       customerName: sale.customerName,
       currency: sale.currency,
@@ -171,6 +237,21 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     .onConflictDoNothing()
     .returning({ id: invoices.id });
   if (!inserted) return { flags };
+  await refreshShelf(tx, sale);
+  // An expired batch sold is audited with whoever approved it (round 38); the sale itself stands
+  await auditExpiredSale(
+    tx,
+    {
+      tenantId,
+      deviceId: device.deviceId,
+      invoiceId: doc.id,
+      date: doc.businessDate,
+      cashierId: sale.cashierId,
+      branchId: device.branchId,
+    },
+    sale.lines,
+    sale.batchApproval,
+  );
 
   await tx.insert(invoiceLines).values(
     sale.lines.map((l) => ({
@@ -224,8 +305,19 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     },
     sale,
   );
+  // Instalments (الأقساط): the plan the sale carries is kept beside it, never changing how it posted
+  if (sale.installmentPlan) {
+    flags.push(
+      ...(await recordPlanFromSale(
+        tx,
+        { tenantId, branchId: device.branchId, userId: sale.cashierId },
+        { id: doc.id, number: doc.number!, businessDate: doc.businessDate },
+        sale,
+      )),
+    );
+  }
   // Vouchers spent (03 › قسيمة الاستبدال): never refused, flagged when unknown or overdrawn
-  flags.push(...(await redeemVouchers(tx, tenantId, sale)));
+  flags.push(...(await redeemVouchers(tx, tenantId, sale, doc.businessDate)));
   // Loyalty points (03 › نقاط الولاء): earned on what was not paid with points, spent at their value
   flags.push(...(await applyLoyalty(tx, tenantId, sale)));
   // An online order sold here (26 › حياة الطلب): it leaves the tills and its pieces their hold
@@ -247,6 +339,13 @@ async function processSale({ tx, device, doc }: DocumentContext) {
           eq(onlineOrders.status, 'accepted'),
         ),
       );
+  }
+  // A pre-sale order this sale delivers («المندوبون والتوزيع»): marked delivered, in part or whole; nothing else changes
+  if (sale.salesOrderId) {
+    await deliverSalesOrder(tx, tenantId, sale.salesOrderId, {
+      customerId: sale.customerId,
+      lines: sale.lines,
+    });
   }
   // A credit sale over the customer's limit is accepted and flagged (08 › قاعدة 8)
   if (sale.customerId && sale.payments.some((p) => p.method === 'credit')) {
@@ -287,6 +386,20 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     const left = new Map(sold.map((l) => [l.lineNo, l.qty]));
     for (const e of earlier) left.set(e.saleLineNo, (left.get(e.saleLineNo) ?? 0) - Number(e.qty));
     if (ret.lines.some((l) => l.qty > (left.get(l.saleLineNo) ?? 0))) flags.push('over_return');
+  }
+
+  const [original] = await tx
+    .select({ payload: invoices.payload, customerId: invoices.customerId })
+    .from(invoices)
+    .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, ret.saleId)));
+  // A refund «على حساب الزبون» can only credit the customer of the sale it returns. A till that
+  // names another customer (or the sale had none) is accepted, flagged for the owner, and posted
+  // to the sale's own customer: the money stays with the account that owed it, and no one else's
+  // account is credited. A sale not yet arrived cannot be checked; it is posted as it came.
+  let postedAs = ret;
+  if (original && ret.refunds.some((r) => r.method === 'account') && ret.customerId !== original.customerId) {
+    flags.push('refund_customer_mismatch');
+    postedAs = { ...ret, customerId: original.customerId };
   }
 
   const [inserted] = await tx
@@ -338,11 +451,28 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
       totalMinor: l.refund.totalMinor,
     })),
   );
-  await moveStock(tx, device, doc, 'return', ret.lines, 1);
-  const [original] = await tx
-    .select({ payload: invoices.payload })
-    .from(invoices)
-    .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, ret.saleId)));
+  // A damaged return does not go back on the shelf: it waits in the branch's damaged location
+  const damagedAt = ret.damaged ? await damagedLocationOf(tx, tenantId, device.branchId) : null;
+  await moveStock(
+    tx,
+    device,
+    doc,
+    'return',
+    ret.lines,
+    1,
+    damagedAt ? { branchId: damagedAt.id } : undefined,
+  );
+  await recordReturnBatches(
+    tx,
+    {
+      tenantId,
+      branchId: damagedAt?.id ?? device.branchId,
+      docId: doc.id,
+      date: doc.businessDate,
+      saleId: ret.saleId,
+    },
+    ret.lines,
+  );
   await returnSerials(
     tx,
     ret.saleId,
@@ -371,7 +501,21 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
       number: doc.number!,
       businessDate: doc.businessDate,
     },
-    ret,
+    postedAs,
+  );
+  // Loyalty: the points the returned part earned are taken back (never below zero)
+  await reverseLoyalty(
+    tx,
+    tenantId,
+    original?.customerId ?? ret.customerId ?? null,
+    original?.payload as SalePayload | undefined,
+    ret.totals.totalMinor,
+  );
+  // Instalments: what went back on the customer's account shortens the plan of that sale
+  await reconcilePlanAfterReturn(
+    tx,
+    ret.saleId,
+    ret.refunds.filter((r) => r.method === 'account').reduce((sum, r) => sum + r.amountMinor, 0),
   );
   return { flags };
 }
@@ -406,8 +550,46 @@ async function applyLoyalty(tx: Transaction, tenantId: string, sale: SalePayload
   return spent > 0 && (!row || row.points - earned < 0) ? ['points_overdrawn'] : [];
 }
 
+/**
+ * A return takes back the points its part of the sale earned: a point per `earnEveryMinor` of what
+ * went back, never more than the sale earned in all and never below zero points. Without it a
+ * customer could buy, return for cash and spend the points on the next sale.
+ */
+async function reverseLoyalty(
+  tx: Transaction,
+  tenantId: string,
+  customerId: string | null,
+  sale: SalePayload | undefined,
+  returnedMinor: number,
+): Promise<void> {
+  if (!customerId || returnedMinor <= 0) return;
+  const [settings] = await tx
+    .select({ loyalty: tenantSettings.loyalty })
+    .from(tenantSettings)
+    .where(eq(tenantSettings.tenantId, tenantId));
+  const loyalty = settings?.loyalty ?? null;
+  if (!loyalty) return;
+  const paidWithPoints = sale
+    ? sale.payments.filter((p) => p.method === 'points').reduce((n, p) => n + p.baseAmountMinor, 0)
+    : 0;
+  const earnedBySale = sale
+    ? Math.floor(Math.max(0, sale.totals.totalMinor - paidWithPoints) / loyalty.earnEveryMinor)
+    : Number.MAX_SAFE_INTEGER;
+  const back = Math.min(Math.floor(returnedMinor / loyalty.earnEveryMinor), earnedBySale);
+  if (back <= 0) return;
+  await tx
+    .update(customers)
+    .set({ loyaltyPoints: sql`greatest(0, ${customers.loyaltyPoints} - ${back})` })
+    .where(and(eq(customers.tenantId, tenantId), eq(customers.id, customerId)));
+}
+
 /** A sale's voucher payments against the vouchers they name: their redeemed amount grows. */
-async function redeemVouchers(tx: Transaction, tenantId: string, sale: SalePayload): Promise<SyncFlag[]> {
+async function redeemVouchers(
+  tx: Transaction,
+  tenantId: string,
+  sale: SalePayload,
+  businessDate: string,
+): Promise<SyncFlag[]> {
   const flags = new Set<SyncFlag>();
   for (const p of sale.payments) {
     if (p.method !== 'voucher' || !p.reference) continue;
@@ -415,9 +597,17 @@ async function redeemVouchers(tx: Transaction, tenantId: string, sale: SalePaylo
       .update(vouchers)
       .set({ redeemedMinor: sql`${vouchers.redeemedMinor} + ${p.baseAmountMinor}` })
       .where(and(eq(vouchers.tenantId, tenantId), eq(vouchers.code, p.reference)))
-      .returning({ amount: vouchers.amountMinor, redeemed: vouchers.redeemedMinor });
+      .returning({
+        amount: vouchers.amountMinor,
+        redeemed: vouchers.redeemedMinor,
+        voidedAt: vouchers.voidedAt,
+        expiresOn: vouchers.expiresOn,
+      });
     if (!row) flags.add('unknown_voucher');
-    else if (row.redeemed > row.amount) flags.add('voucher_overdrawn');
+    else if (row.voidedAt !== null || (row.expiresOn !== null && row.expiresOn < businessDate)) {
+      // Spent after the owner voided it or past its last day: the sale stands, the owner is told
+      flags.add('voucher_expired');
+    } else if (row.redeemed > row.amount) flags.add('voucher_overdrawn');
   }
   return [...flags];
 }
@@ -471,9 +661,27 @@ async function processCustomer({ tx, device, doc }: DocumentContext) {
       .where(and(eq(customers.tenantId, device.tenantId), eq(customers.phone, c.phone)));
     if (same) flags.push('duplicate_customer');
   }
+  // A customer a rep's phone added waits for the supervisor (cash only until then) when the store asks for it
+  let approvalStatus: 'pending' | undefined;
+  const [kind] = await tx.execute<{ kind: string }>(
+    sql`select kind from devices where id = ${device.deviceId}`,
+  );
+  if (kind?.kind === 'rep_phone') {
+    const [row] = await tx.execute<{ distribution: Record<string, unknown> | null }>(
+      sql`select distribution from tenant_settings where tenant_id = ${device.tenantId}`,
+    );
+    if (distributionSettingsOf(row?.distribution).requireCustomerApproval) approvalStatus = 'pending';
+  }
   await tx
     .insert(customers)
-    .values({ tenantId: device.tenantId, id: doc.id, name: c.name, phone: c.phone, createdByDoc: doc.id })
+    .values({
+      tenantId: device.tenantId,
+      id: doc.id,
+      name: c.name,
+      phone: c.phone,
+      createdByDoc: doc.id,
+      ...(approvalStatus ? { approvalStatus } : {}),
+    })
     .onConflictDoNothing();
   return { flags };
 }
@@ -503,6 +711,7 @@ async function processReceipt({ tx, device, doc }: DocumentContext) {
     })
     .onConflictDoNothing()
     .returning({ id: receipts.id });
+  const flags: SyncFlag[] = [];
   if (inserted) {
     await postReceipt(
       tx,
@@ -515,8 +724,19 @@ async function processReceipt({ tx, device, doc }: DocumentContext) {
       },
       r,
     );
+    // Instalments: what this payment settles of them (a record beside the posting, never part of it)
+    if (r.allocations?.length) {
+      flags.push(
+        ...(await applyAllocations(
+          tx,
+          { tenantId: device.tenantId },
+          { id: doc.id, businessDate: doc.businessDate, customerId: r.customerId },
+          r.allocations,
+        )),
+      );
+    }
   }
-  return { flags: [] };
+  return { flags };
 }
 
 /**
@@ -541,6 +761,42 @@ async function processGiftVoucher({ tx, device, doc }: DocumentContext) {
     .returning({ id: vouchers.id });
   if (inserted) {
     await postGiftVoucher(
+      tx,
+      {
+        tenantId: device.tenantId,
+        branchId: device.branchId,
+        docId: doc.id,
+        number: doc.number!,
+        businessDate: doc.businessDate,
+      },
+      g,
+    );
+  }
+  return { flags: [] };
+}
+
+/**
+ * deposit (DEP, «عربون»): an alteration or order deposit, the same money and the same 2310 as a gift
+ * voucher; its voucher row is kind 'deposit' so the drawer reports count it apart from gifts.
+ */
+async function processDeposit({ tx, device, doc }: DocumentContext) {
+  const g = depositPayloadSchema.parse(doc.payload);
+  const [inserted] = await tx
+    .insert(vouchers)
+    .values({
+      tenantId: device.tenantId,
+      code: doc.number!,
+      returnId: doc.id,
+      kind: 'deposit',
+      shiftId: g.shiftId,
+      method: g.method,
+      currency: g.currency,
+      amountMinor: g.amountMinor,
+    })
+    .onConflictDoNothing()
+    .returning({ id: vouchers.id });
+  if (inserted) {
+    await postDeposit(
       tx,
       {
         tenantId: device.tenantId,
@@ -695,7 +951,10 @@ export const DOCUMENT_PROCESSORS: SyncProcessors = {
   return: processReturn,
   receipt: processReceipt,
   gift_voucher: processGiftVoucher,
+  deposit: processDeposit,
   customer: processCustomer,
+  // A product the till made offline (round 38, dfix38)
+  temp_item: processTempItem,
   shift_open: processShiftOpen,
   shift_close: processShiftClose,
   cash_movement: processCashMovement,

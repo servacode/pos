@@ -1,7 +1,8 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import {
   convert,
   formatMoney,
+  holdExpiryDaysOf,
   promotionActive,
   promotionDiscount,
   rateFor,
@@ -16,6 +17,7 @@ import {
   type ShopOrderPlaced,
   type ShopOrderTrack,
   type ShopProduct,
+  type TillSettings,
   type TradeRate,
   type onlineOrderStatusInput,
   type holdInput,
@@ -29,6 +31,7 @@ import {
   uuidv7,
   withTenant,
   type Database,
+  type OnlineOrderCouponRule,
   type OnlineOrderLine,
   type Transaction,
 } from '@serva/db';
@@ -42,6 +45,7 @@ import { AppError, isUniqueViolation } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { imageUrl } from './catalog/images';
+import { liveReservation, reservedAtBranch } from './reservations';
 
 /**
  * The online shop (26 › المتجر الإلكتروني; contracts/shop.ts): the store's goods on its own link,
@@ -55,20 +59,24 @@ const CODE_TTL_SECONDS = 600;
 const MAX_CODE_ATTEMPTS = 5;
 
 const SHOP = 'هذا المتجر غير موجود أو غير مفعّل.';
-const notFound = (message: string) => new AppError(404, 'not_found', message);
-const fieldError = (field: string, message: string) =>
+export const notFound = (message: string) => new AppError(404, 'not_found', message);
+export const fieldError = (field: string, message: string) =>
   new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', { [field]: message });
+
+/** A refusal the customer reads as is: the alert carries the very sentence of its field */
+export const refusal = (field: string, message: string) =>
+  new AppError(400, 'validation_failed', message, { [field]: message });
 
 const money = (minor: number, currency: CurrencyCode) => stripBidiControls(formatMoney(minor, currency));
 
 /** The store behind a shop link, or 404 (also when its shop is off). */
-async function tenantOf(db: Database, slug: string): Promise<string> {
+export async function tenantOf(db: Database, slug: string): Promise<string> {
   const [row] = await db.execute<{ id: string | null }>(sql`select shop_find_by_slug(${slug}) as id`);
   if (!row?.id) throw notFound(SHOP);
   return row.id;
 }
 
-async function storeOf(tx: Transaction, tenantId: string) {
+export async function storeOf(tx: Transaction, tenantId: string) {
   const [row] = await tx.execute<{
     name: string;
     base: string;
@@ -79,12 +87,19 @@ async function storeOf(tx: Transaction, tenantId: string) {
     note: string | null;
     show_out_of_stock: boolean;
     order_mode: 'whatsapp' | 'shop';
+    show_prices: boolean;
     delivery_fee_minor: string;
+    free_delivery_over_minor: string | null;
     delivery_areas: { name: string; feeMinor: number }[];
+    tagline: string | null;
+    accent: 'emerald' | 'teal' | 'blue';
+    logo_upload_id: string | null;
+    cover_upload_id: string | null;
+    sectors: string[];
   }>(sql`
-    select t.name, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
-           o.show_out_of_stock, o.order_mode, o.delivery_fee_minor::text as delivery_fee_minor,
-           o.delivery_areas
+    select t.name, t.sectors, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
+           o.show_out_of_stock, o.order_mode, o.show_prices, o.delivery_fee_minor::text as delivery_fee_minor,
+           o.free_delivery_over_minor::text as free_delivery_over_minor, o.delivery_areas, o.tagline, o.accent, o.logo_upload_id, o.cover_upload_id
     from online_stores o
     join tenants t on t.id = o.tenant_id
     join tenant_settings s on s.tenant_id = o.tenant_id
@@ -126,6 +141,7 @@ interface Priced {
 async function pricerOf(
   tx: Transaction,
   base: CurrencyCode,
+  coupon: string | null = null,
 ): Promise<
   (row: {
     productId: string;
@@ -136,6 +152,31 @@ async function pricerOf(
   }) => Priced | null
 > {
   const rates = await ratesOf(tx);
+  const rules = await runningRules(tx, coupon, true);
+  const parent = new Map<string, string | null>();
+  if (rules.some((r) => r.scope === 'categories')) {
+    const cats = await tx.execute<{ id: string; parent_id: string | null }>(
+      sql`select id, parent_id from categories`,
+    );
+    for (const c of cats) parent.set(c.id, c.parent_id);
+  }
+  const pathOf = (id: string | null): string[] => {
+    const path: string[] = [];
+    for (let at = id; at && path.length < 10; at = parent.get(at) ?? null) path.push(at);
+    return path;
+  };
+  return pricing(rates, rules, pathOf, base);
+}
+
+/**
+ * The promotions running now: the ones without a code, and the one whose «كود الخصم» was typed.
+ * A coupon promotion is never in the public prices, only in an order that carries its code.
+ */
+export async function runningRules(
+  tx: Transaction,
+  coupon: string | null,
+  percentOnly: boolean,
+): Promise<PromotionRule[]> {
   const [tenant] = await tx.execute<{ timezone: string | null }>(sql`select timezone from tenants limit 1`);
   const rows = await tx.execute<{
     id: string;
@@ -149,21 +190,29 @@ async function pricerOf(
     days_of_week: number[] | null;
     from_time: string | null;
     to_time: string | null;
+    kind: PromotionRule['kind'];
+    buy_qty: number | null;
+    get_qty: number | null;
+    coupon_code: string | null;
   }>(sql`
     select id, name, percent_bp, scope, category_ids, product_ids,
            to_char(starts_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as starts_at,
            to_char(ends_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as ends_at,
-           days_of_week, from_time, to_time
-    from promotions where archived_at is null and kind = 'percent'`);
+           days_of_week, from_time, to_time, kind, buy_qty, get_qty, coupon_code
+    from promotions where archived_at is null
+      and not rep_only and customer_kinds = '{}' and price_tiers = '{}'
+      and (${percentOnly ? sql`kind = 'percent'` : sql`true`})
+      and (${coupon ? sql`coupon_code is null or lower(coupon_code) = lower(${coupon})` : sql`coupon_code is null`})`);
   const now = new Date();
-  const rules: PromotionRule[] = rows
+  return rows
     .map((r) => ({
       id: r.id,
       name: r.name,
-      kind: 'percent' as const,
+      kind: r.kind,
       percentBp: r.percent_bp,
-      buyQty: null,
-      getQty: null,
+      buyQty: r.buy_qty,
+      getQty: r.get_qty,
+      couponCode: r.coupon_code,
       scope: r.scope as PromotionRule['scope'],
       categoryIds: r.category_ids ?? [],
       productIds: r.product_ids ?? [],
@@ -175,18 +224,30 @@ async function pricerOf(
       archived: false,
     }))
     .filter((r) => promotionActive(r, now, tenant?.timezone ?? 'Asia/Damascus'));
-  const parent = new Map<string, string | null>();
-  if (rules.some((r) => r.scope === 'categories')) {
-    const cats = await tx.execute<{ id: string; parent_id: string | null }>(
-      sql`select id, parent_id from categories`,
-    );
-    for (const c of cats) parent.set(c.id, c.parent_id);
-  }
-  const pathOf = (id: string | null): string[] => {
-    const path: string[] = [];
-    for (let at = id; at && path.length < 10; at = parent.get(at) ?? null) path.push(at);
-    return path;
-  };
+}
+
+/** The offer a coupon code opens (running now), or null: the code is wrong, ended or not started */
+export async function couponRule(tx: Transaction, code: string): Promise<PromotionRule | null> {
+  const rules = await runningRules(tx, code, false);
+  return rules.find((r) => r.couponCode) ?? null;
+}
+
+/** The kinds of offer a code may open: the quote and the order agree on it */
+export const COUPON_KINDS: readonly PromotionRule['kind'][] = ['percent', 'buy_get'];
+export const COUPON_BAD = 'هذا الكود غير صحيح أو انتهت مدته.';
+
+function pricing(
+  rates: TradeRate[],
+  rules: PromotionRule[],
+  pathOf: (id: string | null) => string[],
+  base: CurrencyCode,
+): (row: {
+  productId: string;
+  categoryId: string | null;
+  currency: string;
+  price: string;
+  was: string | null;
+}) => Priced | null {
   return (row) => {
     const price = inBase(Number(row.price), row.currency as CurrencyCode, base, rates);
     if (price === null) return null;
@@ -210,14 +271,39 @@ async function pricerOf(
   };
 }
 
-const sellable = sql`p.archived_at is null and p.status = 'active' and p.sell_on_pos`;
+/** Active, for sale, and priced: an item at price 0 (a service, an unpriced piece) never reaches the public shop */
+const sellable = sql`p.archived_at is null and p.status = 'active' and p.sell_on_pos and pr.price_minor > 0`;
 const liveVariant = sql`v.archived_at is null`;
-/** Pieces held by accepted orders not sold yet, in stock units (a thousandth of a piece) */
+/** Pieces held by accepted orders not sold yet and not lapsed (reservations.ts), in stock units (a thousandth of a piece) */
 const heldSql = sql`coalesce((select sum((x->>'qty')::bigint) * 1000 from online_orders o
   cross join lateral jsonb_array_elements(o.lines) x
-  where o.status = 'accepted' and x->>'variantId' = v.id::text), 0)`;
+  where ${liveReservation} and x->>'variantId' = v.id::text), 0)`;
 /** On the shelf in any branch, less what accepted orders hold; or a service that has no stock */
-const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) - ${heldSql} > 0)`;
+const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) - ${heldSql} > 0)`;
+/** What is left of the piece, in stock units; null for a service. Only «بقي 2 فقط» comes out of it. */
+const unitsLeftSql = sql`(case when p.type = 'service' then null else coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) - ${heldSql} end)`;
+/**
+ * The same as availableSql for a list of many pieces: the held units are summed once per request in a
+ * `held` CTE (one scan of the live orders) instead of once for every variant.
+ */
+const heldCte = sql`with held as materialized (
+  select x->>'variantId' as vid, sum((x->>'qty')::bigint) * 1000 as units from online_orders o
+  cross join lateral jsonb_array_elements(o.lines) x
+  where ${liveReservation} group by 1)`;
+const availableListSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) - coalesce((select h.units from held h where h.vid = v.id::text), 0) > 0)`;
+/** At most this many pieces left shows «بقي 2 فقط» */
+const LOW_STOCK = 3;
+/** The most one order may hold of a piece: what is on the shelf, whole pieces, at most 50; null for a service */
+const maxQtyOf = (units: string | null): number | null =>
+  units === null ? null : Math.min(50, Math.max(0, Math.floor(Number(units) / 1000)));
+const leftOf = (units: string | null): number | null => {
+  if (units === null) return null;
+  const n = Number(units);
+  return n > 0 && n <= LOW_STOCK * 1000 ? Math.ceil(n / 1000) : null;
+};
+
+/** The most pieces (sizes and colours count each) the public page carries; the owner is told when he passes it */
+const SHOP_VARIANT_CAP = 5000;
 
 export function shopHome(db: Database, slug: string): Promise<ShopHome> {
   return tenantOf(db, slug).then((tenantId) =>
@@ -225,6 +311,7 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
       const store = await storeOf(tx, tenantId);
       const base = store.base as CurrencyCode;
       const priceOf = await pricerOf(tx, base);
+      const show = store.show_prices;
       const rows = await tx.execute<{
         id: string;
         name: string;
@@ -234,9 +321,13 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
         was: string | null;
         available: boolean;
         upload_id: string | null;
+        created_at: Date;
+        attributes: { name: string; value: string }[] | null;
       }>(sql`
+        ${heldCte}
         select p.id, p.name_ar as name, p.category_id, pr.currency, pr.price_minor::text as price,
-               pr.was_price_minor::text as was, ${availableSql} as available,
+               pr.was_price_minor::text as was, ${availableListSql} as available,
+               p.created_at, v.attributes,
                (select i.upload_id from product_images i where i.product_id = p.id
                 order by i.sort_order, i.created_at limit 1) as upload_id
         from products p
@@ -244,8 +335,10 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
         join prices pr on pr.id = v.id
         where ${sellable}
         order by p.name_ar, p.id
-        limit 5000`);
+        limit ${SHOP_VARIANT_CAP}`);
       const byProduct = new Map<string, ShopHome['products'][number]>();
+      // The page holds the first SHOP_VARIANT_CAP pieces by name: the customer is told when there are more
+      const truncated = rows.length >= SHOP_VARIANT_CAP;
       for (const r of rows) {
         const priced = priceOf({ productId: r.id, categoryId: r.category_id, ...r });
         if (priced === null) continue;
@@ -258,21 +351,34 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
             categoryId: r.category_id,
             imageUrl: r.upload_id ? imageUrl(tenantId, r.upload_id, true) : null,
             currency: base,
-            priceMinor: price,
-            maxPriceMinor: price,
-            wasPriceMinor: priced.wasPriceMinor,
-            offer: priced.offer,
+            priceMinor: show ? price : null,
+            maxPriceMinor: show ? price : null,
+            wasPriceMinor: show ? priced.wasPriceMinor : null,
+            offer: show ? priced.offer : null,
             available: r.available,
+            createdAt: new Date(r.created_at).toISOString(),
+            options: [],
           });
         } else {
           // The card shows the cheapest piece, and what that one was before
-          if (price < card.priceMinor) {
-            card.priceMinor = price;
-            card.wasPriceMinor = priced.wasPriceMinor;
+          if (show && card.priceMinor !== null && card.maxPriceMinor !== null) {
+            if (price < card.priceMinor) {
+              card.priceMinor = price;
+              card.wasPriceMinor = priced.wasPriceMinor;
+            }
+            card.maxPriceMinor = Math.max(card.maxPriceMinor, price);
+            card.offer ??= priced.offer;
           }
-          card.maxPriceMinor = Math.max(card.maxPriceMinor, price);
-          card.offer ??= priced.offer;
           card.available ||= r.available;
+        }
+        // The filters offer what is on the shelf: the values of the pieces that can be bought
+        if (r.available) {
+          const card = byProduct.get(r.id)!;
+          for (const a of r.attributes ?? []) {
+            let option = card.options.find((o) => o.name === a.name);
+            if (!option) card.options.push((option = { name: a.name, values: [] }));
+            if (!option.values.includes(a.value)) option.values.push(a.value);
+          }
         }
       }
       const products = [...byProduct.values()].filter((p) => p.available || store.show_out_of_stock);
@@ -299,13 +405,24 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
           pickup: store.pickup,
           note: store.note,
           orderMode: store.order_mode,
-          deliveryFeeMinor: Number(store.delivery_fee_minor),
-          deliveryAreas: store.delivery_areas,
+          showPrices: show,
+          deliveryFeeMinor: show ? Number(store.delivery_fee_minor) : 0,
+          freeDeliveryOverMinor:
+            show && store.free_delivery_over_minor !== null ? Number(store.free_delivery_over_minor) : null,
+          deliveryAreas: show
+            ? store.delivery_areas
+            : store.delivery_areas.map((a) => ({ name: a.name, feeMinor: 0 })),
+          tagline: store.tagline,
+          accent: store.accent,
+          logoUrl: store.logo_upload_id ? imageUrl(tenantId, store.logo_upload_id, true) : null,
+          coverUrl: store.cover_upload_id ? imageUrl(tenantId, store.cover_upload_id) : null,
+          sectors: store.sectors,
         },
         categories: categories
           .filter((c) => shown.has(c.id))
           .map((c) => ({ id: c.id, name: c.name, parentId: c.parent_id })),
         products,
+        ...(truncated ? { truncated: true } : {}),
       };
     }),
   );
@@ -327,9 +444,11 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
         price: string;
         was: string | null;
         available: boolean;
+        units: string | null;
       }>(sql`
         select p.name_ar as product_name, p.category_id, v.id, v.label, v.attributes, pr.currency,
-               pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available
+               pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available,
+               ${unitsLeftSql}::text as units
         from products p
         join variants v on v.product_id = p.id and ${liveVariant}
         join prices pr on pr.id = v.id
@@ -340,15 +459,17 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
       const variants = rows.flatMap((r) => {
         const priced = priceOf({ productId, categoryId: r.category_id, ...r });
         if (priced === null || (!r.available && !store.show_out_of_stock)) return [];
-        offer ??= priced.offer;
+        if (store.show_prices) offer ??= priced.offer;
         return [
           {
             id: r.id,
             label: r.label,
             attributes: r.attributes ?? [],
-            priceMinor: priced.priceMinor,
-            wasPriceMinor: priced.wasPriceMinor,
+            priceMinor: store.show_prices ? priced.priceMinor : null,
+            wasPriceMinor: store.show_prices ? priced.wasPriceMinor : null,
             available: r.available,
+            left: r.available ? leftOf(r.units) : null,
+            maxQty: r.available ? maxQtyOf(r.units) : 0,
           },
         ];
       });
@@ -364,11 +485,17 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
       const images = await tx.execute<{ upload_id: string; option_value: string | null }>(sql`
         select upload_id, option_value from product_images where product_id = ${productId}
         order by sort_order, created_at, id`);
+      const [texts] = await tx.execute<{ description: string | null; size_guide: string | null }>(
+        sql`select description, size_guide from product_texts where product_id = ${productId}`,
+      );
       return {
+        description: texts?.description ?? null,
+        sizeGuide: texts?.size_guide ?? null,
         id: productId,
         name: rows[0]!.product_name,
         categoryId: rows[0]!.category_id,
         currency: base,
+        showPrices: store.show_prices,
         images: images.map((i) => ({
           url: imageUrl(tenantId, i.upload_id),
           thumbUrl: imageUrl(tenantId, i.upload_id, true),
@@ -387,13 +514,14 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
  * line. A shop order needs each piece on the shelf (less what other orders hold); a hold at the
  * counter has the piece in hand.
  */
-async function priceLines(
+export async function priceLines(
   tx: Transaction,
   base: CurrencyCode,
   input: { variantId: string; qty: number }[],
   needOnShelf: boolean,
+  coupon: string | null = null,
 ): Promise<OnlineOrderLine[]> {
-  const priceOf = await pricerOf(tx, base);
+  const priceOf = await pricerOf(tx, base, coupon);
   const ids = [...new Set(input.map((l) => l.variantId))];
   const rows = await tx.execute<{
     id: string;
@@ -405,9 +533,11 @@ async function priceLines(
     price: string;
     was: string | null;
     available: boolean;
+    units: string | null;
   }>(sql`
     select v.id, p.id as product_id, p.category_id, p.name_ar as name, v.label, pr.currency,
-           pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available
+           pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available,
+           ${unitsLeftSql}::text as units
     from variants v
     join products p on p.id = v.product_id
     join prices pr on pr.id = v.id
@@ -424,7 +554,18 @@ async function priceLines(
       ? (priceOf({ productId: row.product_id, categoryId: row.category_id, ...row })?.priceMinor ?? null)
       : null;
     if (!row || price === null || (needOnShelf && !row.available)) {
-      throw fieldError(`lines.${index}`, 'قطعة في السلة لم تعد متوفرة. احذفها وأكمل الطلب.');
+      throw refusal(`lines.${index}`, 'قطعة في السلة لم تعد متوفرة. احذفها وأكمل الطلب.');
+    }
+    // More than the shelf holds is refused with the number that is there (the shop's cart already stops at it)
+    if (needOnShelf && row.units !== null) {
+      const wanted = input.filter((l) => l.variantId === line.variantId).reduce((n, l) => n + l.qty, 0);
+      const left = Math.max(0, Math.floor(Number(row.units) / 1000));
+      if (wanted > left) {
+        throw refusal(
+          `lines.${index}`,
+          `المتوفر من «${row.name}${row.label ? ` (${row.label})` : ''}» ${left} فقط. خفّض الكمية وأكمل الطلب.`,
+        );
+      }
     }
     const existing = lines.find((l) => l.variantId === line.variantId);
     if (existing) {
@@ -468,7 +609,28 @@ export function orderMessage(order: {
   deliveryFeeMinor: number;
   deliveryArea: string | null;
   lines: OnlineOrderLine[];
+  /** False: the store hides its prices, so the message is an inquiry with no price in it */
+  showPrices?: boolean;
+  /** «كود الخصم» the customer typed, for the store to see */
+  coupon?: string | null;
 }): string {
+  const couponLine = order.coupon ? [`كود الخصم: ${order.coupon}`] : [];
+  if (order.showPrices === false) {
+    return [
+      `طلب جديد من المتجر: ${order.number}`,
+      `الاسم: ${order.customerName}`,
+      `الجوال: ${order.phone}`,
+      '',
+      ...order.lines.map((l) => `• ${l.name}${l.label ? ` (${l.label})` : ''} × ${l.qty}`),
+      '',
+      'أرجو إعلامي بالسعر.',
+      ...couponLine,
+      order.fulfilment === 'delivery'
+        ? `التوصيل إلى: ${order.address ?? '—'}${order.deliveryArea ? ` (${order.deliveryArea})` : ''}`
+        : 'الاستلام من المحل',
+      ...(order.note ? [`ملاحظة: ${order.note}`] : []),
+    ].join('\n');
+  }
   return [
     `طلب جديد من المتجر: ${order.number}`,
     `الاسم: ${order.customerName}`,
@@ -480,6 +642,7 @@ export function orderMessage(order: {
     ),
     '',
     `المجموع: ${money(order.totalMinor, order.currency)}`,
+    ...couponLine,
     ...(order.deliveryFeeMinor > 0
       ? [
           `أجرة التوصيل${order.deliveryArea ? ` (${order.deliveryArea})` : ''}: ${money(order.deliveryFeeMinor, order.currency)}`,
@@ -554,6 +717,65 @@ async function checkShopCode(
   }
 }
 
+/** What an order is worth before it is written: the fee, the code's offer and the lines at the server's prices */
+async function draftShopOrder(tx: Transaction, tenantId: string, input: z.output<typeof shopOrderInput>) {
+  const store = await storeOf(tx, tenantId);
+  const base = store.base as CurrencyCode;
+  if (input.fulfilment === 'delivery' && !store.delivery)
+    throw refusal('fulfilment', 'هذا المحل لا يوصّل، الاستلام من المحل.');
+  if (input.fulfilment === 'pickup' && !store.pickup) throw refusal('fulfilment', 'هذا المحل يوصّل فقط.');
+  if (input.fulfilment === 'delivery' && !input.address) throw fieldError('address', 'اكتب عنوان التوصيل');
+  // The courier's fee: the area's when the store charges by area, else the flat one
+  let deliveryFeeMinor = 0;
+  let deliveryArea: string | null = null;
+  if (input.fulfilment === 'delivery') {
+    if (store.delivery_areas.length > 0) {
+      const area = store.delivery_areas.find((a) => a.name === input.area);
+      if (!area) throw fieldError('area', 'اختر منطقة التوصيل');
+      deliveryFeeMinor = area.feeMinor;
+      deliveryArea = area.name;
+    } else {
+      deliveryFeeMinor = Number(store.delivery_fee_minor);
+    }
+  }
+  // «كود الخصم»: a code of an offer running now, or the customer is told it is not
+  let coupon: string | null = null;
+  let couponSnapshot: OnlineOrderCouponRule | null = null;
+  if (input.coupon) {
+    const rule = await couponRule(tx, input.coupon);
+    if (!rule?.couponCode || (rule.kind !== 'percent' && rule.kind !== 'buy_get')) {
+      throw refusal('coupon', COUPON_BAD);
+    }
+    coupon = rule.couponCode;
+    couponSnapshot = {
+      id: rule.id,
+      name: rule.name,
+      kind: rule.kind,
+      percentBp: rule.percentBp,
+      buyQty: rule.buyQty,
+      getQty: rule.getQty,
+      scope: rule.scope,
+      categoryIds: rule.categoryIds,
+      productIds: rule.productIds,
+      couponCode: rule.couponCode,
+    };
+  }
+  const lines = await priceLines(tx, base, input.lines, true, coupon);
+  const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
+  // «توصيل مجاني فوق مبلغ»: the goods, after the code's offer, reach the store's line: no courier fee
+  if (
+    deliveryFeeMinor > 0 &&
+    store.free_delivery_over_minor !== null &&
+    totalMinor >= Number(store.free_delivery_over_minor)
+  ) {
+    deliveryFeeMinor = 0;
+  }
+  return { store, base, coupon, couponSnapshot, lines, totalMinor, deliveryFeeMinor, deliveryArea };
+}
+
+/** An identical order from the same phone this recent is the same tap sent twice (a timeout, a retry) */
+const DUPLICATE_WINDOW_SECONDS = 90;
+
 export function placeShopOrder(
   app: FastifyInstance,
   slug: string,
@@ -562,34 +784,15 @@ export function placeShopOrder(
   const { db } = app;
   return tenantOf(db, slug).then(async (tenantId) => {
     const mode = (await withTenant(db, tenantId, (tx) => storeOf(tx, tenantId))).order_mode;
-    if (mode === 'shop') await checkShopCode(app, tenantId, input);
-    return withTenant(db, tenantId, async (tx) => {
-      const store = await storeOf(tx, tenantId);
-      const base = store.base as CurrencyCode;
-      if (input.fulfilment === 'delivery' && !store.delivery)
-        throw fieldError('fulfilment', 'هذا المحل لا يوصّل، الاستلام من المحل.');
-      if (input.fulfilment === 'pickup' && !store.pickup)
-        throw fieldError('fulfilment', 'هذا المحل يوصّل فقط.');
-      if (input.fulfilment === 'delivery' && !input.address)
-        throw fieldError('address', 'اكتب عنوان التوصيل');
-      // The courier's fee: the area's when the store charges by area, else the flat one
-      let deliveryFeeMinor = 0;
-      let deliveryArea: string | null = null;
-      if (input.fulfilment === 'delivery') {
-        if (store.delivery_areas.length > 0) {
-          const area = store.delivery_areas.find((a) => a.name === input.area);
-          if (!area) throw fieldError('area', 'اختر منطقة التوصيل');
-          deliveryFeeMinor = area.feeMinor;
-          deliveryArea = area.name;
-        } else {
-          deliveryFeeMinor = Number(store.delivery_fee_minor);
-        }
-      }
-      const lines = await priceLines(tx, base, input.lines, true);
-      const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
-      const { seq, number } = await nextOrderNumber(tx, tenantId);
+    if (mode === 'shop') {
+      // Everything the form could get wrong is checked first: the code is used up only for an order that will be written
+      await withTenant(db, tenantId, (tx) => draftShopOrder(tx, tenantId, input));
+      await checkShopCode(app, tenantId, input);
+    }
+    const written = withTenant(db, tenantId, async (tx) => {
+      const { store, base, coupon, couponSnapshot, lines, totalMinor, deliveryFeeMinor, deliveryArea } =
+        await draftShopOrder(tx, tenantId, input);
       const order = {
-        number,
         customerName: input.name,
         phone: input.phone,
         fulfilment: input.fulfilment,
@@ -601,25 +804,110 @@ export function placeShopOrder(
         deliveryArea,
         lines,
       };
+      const reply = (made: { token: string; number: string }) => {
+        const message = orderMessage({
+          ...order,
+          number: made.number,
+          showPrices: store.show_prices,
+          coupon,
+        });
+        return {
+          trackPath: `/shop/${store.slug}/o/${made.token}`,
+          number: made.number,
+          currency: base,
+          showPrices: store.show_prices,
+          // The order keeps its server-side prices for the store; the customer is told none of them
+          totalMinor: store.show_prices ? totalMinor : null,
+          deliveryFeeMinor: store.show_prices ? deliveryFeeMinor : null,
+          message,
+          whatsappUrl:
+            mode === 'whatsapp' && store.whatsapp
+              ? `https://wa.me/${store.whatsapp.replace('+', '')}?text=${encodeURIComponent(message)}`
+              : null,
+        };
+      };
+      // The same order twice (a dropped answer, then a second tap): the first one is the answer, no second order
+      if (mode === 'whatsapp') {
+        // The numbering lock first: two taps at once queue here, so the second one sees the first one's order
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('online_orders'), hashtext(${tenantId}))`);
+        const [twin] = await tx
+          .select({ token: onlineOrders.trackToken, number: onlineOrders.number })
+          .from(onlineOrders)
+          .where(
+            and(
+              eq(onlineOrders.tenantId, tenantId),
+              eq(onlineOrders.phone, input.phone),
+              eq(onlineOrders.totalMinor, totalMinor),
+              eq(onlineOrders.status, 'pending'),
+              eq(onlineOrders.fulfilment, input.fulfilment),
+              eq(onlineOrders.deliveryFeeMinor, deliveryFeeMinor),
+              sql`${onlineOrders.deliveryArea} is not distinct from ${deliveryArea}`,
+              sql`${onlineOrders.address} is not distinct from ${order.address}`,
+              sql`${onlineOrders.note} is not distinct from ${order.note}`,
+              sql`${onlineOrders.lines} = ${JSON.stringify(lines)}::jsonb`,
+              sql`${onlineOrders.createdAt} > now() - make_interval(secs => ${DUPLICATE_WINDOW_SECONDS})`,
+            ),
+          )
+          .limit(1);
+        if (twin) return reply(twin);
+      }
+      const { seq, number } = await nextOrderNumber(tx, tenantId);
       const [made] = await tx
         .insert(onlineOrders)
-        .values({ tenantId, seq, source: mode, ...order })
+        .values({
+          tenantId,
+          seq,
+          source: mode,
+          couponCode: coupon,
+          couponRule: couponSnapshot,
+          number,
+          ...order,
+        })
         .returning({ token: onlineOrders.trackToken });
-      const message = orderMessage(order);
-      return {
-        trackPath: `/shop/${store.slug}/o/${made!.token}`,
-        number,
-        currency: base,
-        totalMinor,
-        deliveryFeeMinor,
-        message,
-        whatsappUrl:
-          mode === 'whatsapp' && store.whatsapp
-            ? `https://wa.me/${store.whatsapp.replace('+', '')}?text=${encodeURIComponent(message)}`
-            : null,
-      };
+      return reply({ token: made!.token, number });
+    });
+    if (mode !== 'shop') return written;
+    // The code is already used up: a refusal now (the last piece sold, an offer that ended) must say the code is gone
+    return written.catch((e: unknown) => {
+      if (!(e instanceof AppError) || e.statusCode >= 500) throw e;
+      throw new AppError(e.statusCode, e.code, `${e.message} اطلب رمزاً جديداً ثم أعد الإرسال.`, {
+        ...(e.fields ?? {}),
+        code: 'انتهت صلاحية الرمز. اطلب رمزاً جديداً.',
+      });
     });
   });
+}
+
+/**
+ * A hold may reserve only what is available at its branch: on hand there less what other holds and
+ * orders already reserve. Refused with the number that is left, in the words of the till's own check.
+ */
+async function checkHoldAvailable(
+  tx: Transaction,
+  branchId: string,
+  lines: OnlineOrderLine[],
+): Promise<void> {
+  const ids = lines.map((l) => l.variantId);
+  const reserved = await reservedAtBranch(tx, branchId, ids);
+  const onHand = await tx.execute<{ variant_id: string; qty: string; service: boolean }>(sql`
+    select v.id as variant_id, coalesce(l.qty, 0)::text as qty, (p.type = 'service') as service
+    from variants v join products p on p.id = v.product_id
+    left join stock_levels l on l.variant_id = v.id and l.branch_id = ${branchId}
+    where v.id in (${sql.join(
+      ids.map((id) => sql`${id}::uuid`),
+      sql`, `,
+    )})`);
+  for (const [index, line] of lines.entries()) {
+    const row = onHand.find((r) => r.variant_id === line.variantId);
+    if (!row || row.service) continue;
+    const free = Math.floor(Math.max(0, Number(row.qty) - (reserved.get(line.variantId) ?? 0)) / 1000);
+    if (line.qty > free) {
+      throw fieldError(
+        `lines.${index}`,
+        `المتاح من «${line.name}${line.label ? ` (${line.label})` : ''}» ${free} فقط، والباقي محجوز أو مباع. خفّض الكمية.`,
+      );
+    }
+  }
 }
 
 /**
@@ -637,6 +925,13 @@ export function placeHold(
     );
     const base = (settings?.base ?? 'SYP') as CurrencyCode;
     const lines = await priceLines(tx, base, input.lines, false);
+    // Decision 14: the pieces are reserved for the customer for the store's «مدة الحجز»; where the store
+    // forbids selling over the stock, a piece another hold or order already reserved cannot be held again
+    const [till] = await tx.execute<{ till: TillSettings | null }>(
+      sql`select till from tenant_settings where tenant_id = ${device.tenantId}`,
+    );
+    if (till?.till?.blockNegativeStock === true) await checkHoldAvailable(tx, device.branchId, lines);
+    const days = holdExpiryDaysOf(till?.till);
     const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
     const { seq, number } = await nextOrderNumber(tx, device.tenantId);
     const [made] = await tx
@@ -657,6 +952,7 @@ export function placeHold(
         lines,
         branchId: device.branchId,
         depositCode: input.depositCode,
+        reservedUntil: sql`now() + make_interval(days => ${days})`,
         decidedAt: sql`now()`,
       })
       .returning({ id: onlineOrders.id });
@@ -671,6 +967,39 @@ function isTrackToken(token: string): boolean {
   return true;
 }
 
+/** What the customer's page shows of an order; prices only when the store shows prices. */
+async function trackOf(
+  tx: Transaction,
+  tenantId: string,
+  row: typeof onlineOrders.$inferSelect,
+): Promise<ShopOrderTrack> {
+  const [shop] = await tx
+    .select({ show: onlineStores.showPrices })
+    .from(onlineStores)
+    .where(eq(onlineStores.tenantId, tenantId));
+  const show = shop?.show ?? true;
+  return {
+    number: row.number,
+    status: row.status as ShopOrderTrack['status'],
+    deliveryStage: row.deliveryStage as ShopOrderTrack['deliveryStage'],
+    coupon: row.couponCode,
+    customerName: row.customerName,
+    fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
+    area: row.deliveryArea,
+    currency: row.currency as CurrencyCode,
+    showPrices: show,
+    totalMinor: show ? row.totalMinor : null,
+    deliveryFeeMinor: show ? row.deliveryFeeMinor : null,
+    lines: row.lines.map((l) => ({
+      name: l.name,
+      label: l.label,
+      qty: l.qty,
+      totalMinor: show ? l.totalMinor : null,
+    })),
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 /** The customer's page for one order: its state and lines, by the unguessable token in its link. */
 export function shopOrderTrack(db: Database, slug: string, token: string): Promise<ShopOrderTrack> {
   const gone = () => notFound('هذا الطلب غير موجود.');
@@ -682,16 +1011,38 @@ export function shopOrderTrack(db: Database, slug: string, token: string): Promi
         .from(onlineOrders)
         .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.trackToken, token)));
       if (!row) throw gone();
-      return {
-        number: row.number,
-        status: row.status as ShopOrderTrack['status'],
-        fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
-        currency: row.currency as CurrencyCode,
-        totalMinor: row.totalMinor,
-        deliveryFeeMinor: row.deliveryFeeMinor,
-        lines: row.lines.map((l) => ({ name: l.name, label: l.label, qty: l.qty, totalMinor: l.totalMinor })),
-        createdAt: row.createdAt.toISOString(),
-      };
+      return trackOf(tx, tenantId, row);
+    }),
+  );
+}
+
+/**
+ * «اطلب إلغاء الطلب»: the customer asks, from the order's own page, to cancel an order the store has
+ * not decided yet. The order becomes cancel_requested and waits in the owner's box; asking twice is
+ * the same as once. An order the store already accepted, rejected or delivered is not the
+ * customer's to cancel here: they talk to the store.
+ */
+export function requestOrderCancel(db: Database, slug: string, token: string): Promise<ShopOrderTrack> {
+  const gone = () => notFound('هذا الطلب غير موجود.');
+  if (!isTrackToken(token)) return Promise.reject(gone());
+  return tenantOf(db, slug).then((tenantId) =>
+    withTenant(db, tenantId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(onlineOrders)
+        .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.trackToken, token)))
+        .for('update');
+      if (!row) throw gone();
+      if (row.status === 'cancel_requested') return trackOf(tx, tenantId, row);
+      if (row.status !== 'pending') {
+        throw new AppError(409, 'conflict', 'قرّر المحل في طلبك، فلم يعد الإلغاء من هنا. تواصل مع المحل.');
+      }
+      const [done] = await tx
+        .update(onlineOrders)
+        .set({ status: 'cancel_requested', updatedAt: sql`now()` })
+        .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.id, row.id)))
+        .returning();
+      return trackOf(tx, tenantId, done!);
     }),
   );
 }
@@ -708,8 +1059,14 @@ const DEFAULTS = (slug: string): OnlineStoreSettings => ({
   note: null,
   showOutOfStock: false,
   orderMode: 'whatsapp',
+  showPrices: true,
   deliveryFeeMinor: 0,
+  freeDeliveryOverMinor: null,
   deliveryAreas: [],
+  tagline: null,
+  accent: 'emerald',
+  logoUrl: null,
+  coverUrl: null,
 });
 
 export function getOnlineStore(db: Database, auth: AccessClaims): Promise<OnlineStoreSettings> {
@@ -732,10 +1089,28 @@ export function getOnlineStore(db: Database, auth: AccessClaims): Promise<Online
       note: row.note,
       showOutOfStock: row.showOutOfStock,
       orderMode: row.orderMode as OnlineStoreSettings['orderMode'],
+      showPrices: row.showPrices,
       deliveryFeeMinor: row.deliveryFeeMinor,
+      freeDeliveryOverMinor: row.freeDeliveryOverMinor,
       deliveryAreas: row.deliveryAreas,
+      tagline: row.tagline,
+      accent: row.accent as OnlineStoreSettings['accent'],
+      logoUrl: row.logoUploadId ? imageUrl(auth.tenantId, row.logoUploadId, true) : null,
+      coverUrl: row.coverUploadId ? imageUrl(auth.tenantId, row.coverUploadId) : null,
+      catalogueCut: await catalogueIsCut(tx),
     };
   });
+}
+
+/** True when the shop has more pieces for sale than its page carries: the rest never show to customers */
+async function catalogueIsCut(tx: Transaction): Promise<boolean> {
+  const [row] = await tx.execute<{ n: string }>(sql`
+    select count(*)::text as n from (
+      select 1 from variants v
+      join products p on p.id = v.product_id
+      join prices pr on pr.id = v.id
+      where ${liveVariant} and ${sellable} limit ${SHOP_VARIANT_CAP + 1}) x`);
+  return Number(row?.n ?? 0) > SHOP_VARIANT_CAP;
 }
 
 export async function saveOnlineStore(
@@ -760,8 +1135,12 @@ export async function saveOnlineStore(
         note: input.note || null,
         showOutOfStock: input.showOutOfStock,
         orderMode: input.orderMode,
+        showPrices: input.showPrices,
         deliveryFeeMinor: input.deliveryFeeMinor,
+        freeDeliveryOverMinor: input.freeDeliveryOverMinor,
         deliveryAreas: input.deliveryAreas,
+        tagline: input.tagline || null,
+        accent: input.accent,
       };
       if (input.version === null) {
         const made = await tx
@@ -792,10 +1171,12 @@ export async function saveOnlineStore(
   return getOnlineStore(db, auth);
 }
 
-const staleVersion = () =>
+export const staleVersion = () =>
   new AppError(409, 'stale_version', 'عدّل شخص آخر هذا السجل للتو. حدّثنا البيانات، راجعها ثم احفظ من جديد.');
 
-const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
+export const orderChanged = (message: string) => new AppError(409, 'stale_version', message);
+
+export const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   id: r.id,
   number: r.number,
   status: r.status as OnlineOrder['status'],
@@ -811,6 +1192,11 @@ const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   currency: r.currency as CurrencyCode,
   totalMinor: r.totalMinor,
   lines: r.lines,
+  deliveryStage: r.deliveryStage as OnlineOrder['deliveryStage'],
+  courierName: r.courierName,
+  outAt: r.outAt?.toISOString() ?? null,
+  deliveredAt: r.deliveredAt?.toISOString() ?? null,
+  couponCode: r.couponCode,
   createdAt: r.createdAt.toISOString(),
   decidedAt: r.decidedAt?.toISOString() ?? null,
   version: r.version,
@@ -819,24 +1205,82 @@ const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
 export function listOnlineOrders(
   db: Database,
   auth: AccessClaims,
-  status: OnlineOrder['status'] | undefined,
-): Promise<{ items: OnlineOrder[] }> {
+  query: {
+    status?: OnlineOrder['status'] | undefined;
+    cursor?: string | undefined;
+    limit?: number | undefined;
+  },
+): Promise<{
+  items: OnlineOrder[];
+  nextCursor: string | null;
+  /** What each tab holds: waiting (with the cancel requests), accepted, and every order */
+  counts: { pending: number; accepted: number; all: number };
+}> {
+  const status = query.status;
+  const limit = query.limit ?? 200;
+  // «s123»: the page after order 123 (a keyset, so an order decided meanwhile moves no other off its page); a bare number is the older offset form
+  const after = query.cursor?.startsWith('s') ? Number(query.cursor.slice(1)) : null;
+  const offset = after === null && query.cursor ? Number(query.cursor) : 0;
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.view');
     const rows = await tx
       .select()
       .from(onlineOrders)
       .where(
-        and(eq(onlineOrders.tenantId, auth.tenantId), ...(status ? [eq(onlineOrders.status, status)] : [])),
+        and(
+          eq(onlineOrders.tenantId, auth.tenantId),
+          // The box of orders waiting for the store also holds the ones their customer asked to cancel
+          ...(status === 'pending'
+            ? [inArray(onlineOrders.status, ['pending', 'cancel_requested'])]
+            : status
+              ? [eq(onlineOrders.status, status)]
+              : []),
+          ...(after !== null ? [lt(onlineOrders.seq, after)] : []),
+        ),
       )
       .orderBy(desc(onlineOrders.createdAt), desc(onlineOrders.seq))
-      .limit(200);
-    return { items: rows.map(orderOf) };
+      .limit(limit + 1)
+      .offset(offset);
+    const more = rows.length > limit;
+    const page = rows.slice(0, limit);
+    const tallies = await tx.execute<{ status: string; n: number }>(
+      sql`select status, count(*)::int as n from online_orders where tenant_id = ${auth.tenantId} group by status`,
+    );
+    const of = (...names: string[]) =>
+      tallies.filter((t) => names.includes(t.status)).reduce((n, t) => n + t.n, 0);
+    return {
+      items: page.map(orderOf),
+      nextCursor: more ? `s${page[page.length - 1]!.seq}` : null,
+      counts: {
+        pending: of('pending', 'cancel_requested'),
+        accepted: of('accepted'),
+        all: tallies.reduce((n, t) => n + t.n, 0),
+      },
+    };
   });
+}
+
+/** The lines of an order the shelf cannot cover now (on hand in any branch, less what accepted orders hold) */
+async function uncoveredLines(tx: Transaction, lines: OnlineOrderLine[]): Promise<string[]> {
+  const wanted = new Map<string, number>();
+  for (const l of lines) wanted.set(l.variantId, (wanted.get(l.variantId) ?? 0) + l.qty);
+  if (wanted.size === 0) return [];
+  const rows = await tx.execute<{ id: string; name: string; label: string | null; units: string | null }>(sql`
+    select v.id, p.name_ar as name, v.label, ${unitsLeftSql}::text as units
+    from variants v join products p on p.id = v.product_id
+    where v.id in (${sql.join(
+      [...wanted.keys()].map((id) => sql`${id}::uuid`),
+      sql`, `,
+    )})`);
+  return rows
+    .filter((r) => r.units !== null && Number(r.units) < (wanted.get(r.id) ?? 0) * 1000)
+    .map((r) => `«${r.name}${r.label ? ` (${r.label})` : ''}»`);
 }
 
 const NEXT: Record<OnlineOrder['status'], readonly OnlineOrder['status'][]> = {
   pending: ['accepted', 'rejected'],
+  // The customer asked to cancel: agree (rejected) or keep the order (accepted)
+  cancel_requested: ['accepted', 'rejected'],
   accepted: ['done', 'rejected'],
   rejected: [],
   done: [],
@@ -850,15 +1294,29 @@ export function setOnlineOrderStatus(
   meta: RequestMeta,
 ): Promise<OnlineOrder> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'customers.view');
+    // Deciding an order reserves stock and hands out the customer's data: a manager's act, not any viewer's
+    await requirePermission(tx, auth.userId, 'customers.manage');
     const [row] = await tx
       .select()
       .from(onlineOrders)
-      .where(and(eq(onlineOrders.tenantId, auth.tenantId), eq(onlineOrders.id, id)));
+      .where(and(eq(onlineOrders.tenantId, auth.tenantId), eq(onlineOrders.id, id)))
+      .for('update');
     if (!row) throw notFound('هذا الطلب غير موجود.');
-    if (row.version !== input.version) throw staleVersion();
+    if (row.version !== input.version) {
+      // The same order decided twice (a double click, or two people at the till and the desk): say so
+      if (row.status === input.status) throw orderChanged('تم هذا الإجراء على الطلب للتو.');
+      throw orderChanged('تغيّر هذا الطلب للتو. حدّث الصفحة وراجعه.');
+    }
     if (!NEXT[row.status as OnlineOrder['status']].includes(input.status)) {
       throw fieldError('status', 'لا يمكن نقل الطلب إلى هذه الحالة.');
+    }
+    // Accepting holds the pieces: refused when the shelf, less what other accepted orders hold, cannot cover them
+    if (input.status === 'accepted' && !input.force) {
+      const lacking = await uncoveredLines(tx, row.lines as OnlineOrderLine[]);
+      if (lacking.length > 0) {
+        const text = `لا يكفي المخزون لـ ${lacking.join('، ')}. اقبل الطلب مع ذلك إن كانت القطع ستصل.`;
+        throw new AppError(409, 'conflict', text, { stock: lacking.join('، ') });
+      }
     }
     const [done] = await tx
       .update(onlineOrders)

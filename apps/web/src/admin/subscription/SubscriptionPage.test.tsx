@@ -57,6 +57,7 @@ function page(over: Partial<SubscriptionPage> = {}): SubscriptionPage {
       },
     ],
     sypPerUsd: '13000',
+    agent: null,
     ...over,
   };
 }
@@ -98,7 +99,10 @@ describe('«الاشتراك»', () => {
       return { ...mock, ...renderApp('/subscription') };
     })();
     expect(await screen.findByRole('heading', { name: 'الاشتراك', level: 1 })).toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: 'سنوي (شهران مجاناً)' }));
+    // The cycle is a segmented control: one of two, always one chosen (هوية 4).
+    const yearly = await screen.findByRole('radio', { name: 'سنوي (شهران مجاناً)' });
+    await user.click(yearly);
+    expect(yearly).toHaveAttribute('aria-checked', 'true');
     await user.click(screen.getByRole('button', { name: 'اختر هذه الباقة' }));
     const section = await screen.findByRole('region', { name: 'فاتورة الاشتراك' });
     expect(section).toHaveTextContent('SUB-2026-000001');

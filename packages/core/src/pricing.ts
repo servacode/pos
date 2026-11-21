@@ -20,6 +20,12 @@ export interface PricingLineInput {
   qty: number;
   taxRateBp: number;
   discount?: Discount;
+  /**
+   * The invoice-level discount skips this line (a service: alteration fee, rent, maintenance
+   * contract). The line's own discount still applies. Left out = the line takes its share, as
+   * every sale priced before round 21 did.
+   */
+  noInvoiceDiscount?: boolean;
 }
 
 export interface PricingInput {
@@ -130,16 +136,24 @@ export function priceInvoice(input: PricingInput): PricedInvoice {
       lineDiscountMinor,
       netBefore: grossMinor - lineDiscountMinor,
       taxRateBp: line.taxRateBp,
+      takesInvoiceDiscount: line.noInvoiceDiscount !== true,
     };
   });
 
-  const weights = discounted.map((line) => line.netBefore);
-  const invoiceDiscountMinor = resolveDiscount(invoiceDiscount, sumMinor(weights), 'invoiceDiscount');
-  const shares = allocate(
-    invoiceDiscountMinor,
-    weights,
-    discounted.map((line) => line.lineNo),
+  // The invoice discount applies to, and spreads over, the lines that take it (services do not)
+  const eligible = discounted.filter((line) => line.takesInvoiceDiscount);
+  const invoiceDiscountMinor = resolveDiscount(
+    invoiceDiscount,
+    sumMinor(eligible.map((line) => line.netBefore)),
+    'invoiceDiscount',
   );
+  const eligibleShares = allocate(
+    invoiceDiscountMinor,
+    eligible.map((line) => line.netBefore),
+    eligible.map((line) => line.lineNo),
+  );
+  const shareOf = new Map(eligible.map((line, i) => [line.lineNo, eligibleShares[i] ?? 0]));
+  const shares = discounted.map((line) => shareOf.get(line.lineNo) ?? 0);
 
   const priced = discounted.map((line, i): PricedLine => {
     const share = shares[i] ?? 0;

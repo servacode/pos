@@ -36,3 +36,22 @@ export function normalizePhone(input: string): string | null {
   }
   return /^\d{8,15}$/.test(digits) ? `+${digits}` : null;
 }
+
+/**
+ * A phone for contact details (a store, a customer, a supplier): everything normalizePhone accepts,
+ * and a Syrian landline too — 011 2345678, +963 11 234 5678 — kept as +96311…
+ * An area code is two digits (11 Damascus, 21 Aleppo, 31 Homs, …) followed by six or seven digits.
+ * Logins and registration keep using normalizePhone: they need a mobile that can get a code.
+ */
+export function normalizeContactPhone(input: string): string | null {
+  const mobile = normalizePhone(input);
+  if (mobile) return mobile;
+  const raw = toLatinDigits(input).replace(/[\s\-().]/g, '');
+  let national: string;
+  if (raw.startsWith('+963')) national = `0${raw.slice(4)}`;
+  else if (raw.startsWith('00963')) national = `0${raw.slice(5)}`;
+  else if (raw.startsWith('963') && raw.length >= 11) national = `0${raw.slice(3)}`;
+  else national = raw;
+  const match = /^0([1-8]\d)(\d{6,7})$/.exec(national);
+  return match ? `+963${match[1]}${match[2]}` : null;
+}

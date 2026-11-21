@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { parsePairingQr, type ActivateDeviceInput, type ActivatedDevice } from '@serva/core';
+import { parsePairingQr, type ActivateDeviceInput, type ActivatedDevice, type DeviceKind } from '@serva/core';
 import type { SyncStore } from '@serva/sync/client';
-import { Alert } from '@serva/ui';
+import { Alert, DeviceIcon, IconChip } from '@serva/ui';
 import { errorMessage } from '../../lib/api';
+import { DEVICE_KIND_LABELS } from '../../lib/devices';
 import { deviceStore } from '../../offline/database';
 import {
   clearPendingLink,
@@ -33,13 +34,44 @@ interface DeviceLinkProps {
   onLinked: () => void;
   store?: SyncStore;
   helpers?: LinkHelpers;
+  /** What this device is for: a till by default; the kitchen and waiter screens link as theirs */
+  kind?: DeviceKind;
+  /** The way offered first; by default the owner's own sign-in, or the last way picked in this tab */
+  defaultMethod?: LinkMethod;
+}
+
+const METHOD_KEY = 'serva.link.method';
+const METHODS: readonly LinkMethod[] = ['qr', 'code', 'owner'];
+
+/** The way picked before a reload in this tab (never the typed codes): null when none or storage is closed */
+function savedMethod(): LinkMethod | null {
+  try {
+    const value = sessionStorage.getItem(METHOD_KEY);
+    return METHODS.find((m) => m === value) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberMethod(method: LinkMethod): void {
+  try {
+    sessionStorage.setItem(METHOD_KEY, method);
+  } catch {
+    // Storage is closed: the next reload starts on the default way
+  }
 }
 
 /**
  * «ربط الجهاز» (12, kit cashier/DeviceLink): shown by the cashier while this device has no
  * activated record. Nothing is asked of the server until the person picks a way and goes on.
  */
-export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelpers }: DeviceLinkProps) {
+export function DeviceLink({
+  onLinked,
+  store = deviceStore(),
+  helpers = linkHelpers,
+  kind = 'cashier',
+  defaultMethod,
+}: DeviceLinkProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [stage, setStage] = useState<Stage>({ step: 'loading' });
@@ -54,7 +86,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
       if (!alive) return;
       if (link) setStage({ step: 'waiting', link });
       else if (scanned) setStage({ step: 'name', credentials: { method: 'qr', qrToken: scanned } });
-      else setStage({ step: 'method', method: 'code' });
+      else setStage({ step: 'method', method: defaultMethod ?? savedMethod() ?? 'owner' });
     });
     if (scanned) void navigate({ pathname: location.pathname, hash: '' }, { replace: true });
     return () => {
@@ -65,12 +97,12 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
   }, []);
 
   const restart = useCallback(
-    async (method: LinkMethod = 'code') => {
+    async (method: LinkMethod = defaultMethod ?? 'owner') => {
       await clearPendingLink(store).catch(() => undefined);
       setError(null);
       setStage({ step: 'method', method });
     },
-    [store],
+    [store, defaultMethod],
   );
 
   async function activate(credentials: LinkCredentials, named: NamedDevice) {
@@ -80,7 +112,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
       const { publicKey } = await helpers.createDeviceKeys(store);
       const device = {
         name: named.name,
-        kind: 'cashier' as const,
+        kind,
         platform: 'browser' as const,
         publicKey,
         appVersion: APP_VERSION,
@@ -147,9 +179,15 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
     (stage.step === 'download' && stage.ownerSignedIn);
 
   return (
-    <div className="flex w-full flex-col items-center gap-8">
-      <div className="flex w-full max-w-6xl flex-wrap items-center justify-between gap-4">
-        <p className="text-lg font-semibold text-ink">إعداد جهاز الكاشير</p>
+    // my-auto: a wide screen centres the set-up in the page (it grows downward when it is taller)
+    <div className="my-auto flex w-full flex-col items-center gap-8">
+      <div className="flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-card border border-line bg-surface px-5 py-3 shadow-e1">
+        <p className="flex items-center gap-3 font-semibold text-ink">
+          <IconChip size="sm">
+            <DeviceIcon size={16} />
+          </IconChip>
+          {kind === 'cashier' ? 'إعداد جهاز الكاشير' : `إعداد ${DEVICE_KIND_LABELS[kind]}`}
+        </p>
         <LinkSteps current={stage.step} ownerSignedIn={ownerSignedIn} />
       </div>
 
@@ -163,7 +201,11 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
         <MethodStep
           method={stage.method}
           initialCode={stage.code}
-          onMethodChange={(method) => setStage({ step: 'method', method })}
+          kind={kind}
+          onMethodChange={(method) => {
+            rememberMethod(method);
+            setStage({ step: 'method', method });
+          }}
           onNext={(credentials) => {
             setError(null);
             setStage({ step: 'name', credentials });
@@ -178,6 +220,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
           error={error}
           onBack={() => leaveName(stage.credentials)}
           onSubmit={(named) => void activate(stage.credentials, named)}
+          kind={kind}
         />
       ) : null}
 
@@ -190,6 +233,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
             )
           }
           onRestart={(method) => void restart(method)}
+          kind={kind}
         />
       ) : null}
 

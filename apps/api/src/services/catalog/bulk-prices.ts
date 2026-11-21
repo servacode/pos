@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { BulkPriceResult, bulkPriceInput, CurrencyCode } from '@serva/core';
 import { withTenant, type Database } from '@serva/db';
 import type { z } from 'zod';
 import { audit } from '../audit';
+import { AppError } from '../../errors';
 import { notFound, requireCatalogManager, type CatalogContext } from './common';
 
 /**
@@ -55,7 +57,19 @@ export function bulkPrices(
       join prices pr on pr.id = v.id
       where p.category_id in (select id from tree) and p.archived_at is null
       order by p.name_ar, v.sort_order, v.id
-      limit 5000`);
+      limit 5001
+      ${input.apply ? sql`for update of pr` : sql``}`);
+    // More than 5,000 pieces in one category: never apply half of it silently
+    if (rows.length > 5000) {
+      if (input.apply) {
+        throw new AppError(
+          422,
+          'validation_failed',
+          'في هذا التصنيف أكثر من 5000 قطعة. غيّر الأسعار على تصنيفاته الفرعية كلاً على حدة.',
+        );
+      }
+      rows.length = 5000;
+    }
     const items = rows.flatMap((r) => {
       const step = r.currency === base ? input.roundToMinor : 1;
       const oldMinor = Number(r.price);
@@ -74,6 +88,8 @@ export function bulkPrices(
             newMinor: kept,
             wasMinor: null,
             min,
+            oldMin: r.min_price === null ? null : Number(r.min_price),
+            oldWas: kept,
           },
         ];
       }
@@ -94,10 +110,13 @@ export function bulkPrices(
           newMinor,
           wasMinor: was !== null && was > newMinor ? was : null,
           min,
+          oldMin: r.min_price === null ? null : Number(r.min_price),
+          oldWas: kept,
         },
       ];
     });
     const changed = items.filter((i) => i.newMinor !== i.oldMinor);
+    const batchId = randomUUID();
     if (input.apply && changed.length > 0) {
       for (const i of changed) {
         await tx.execute(sql`
@@ -127,6 +146,18 @@ export function bulkPrices(
             percentBp: input.percentBp,
             roundToMinor: input.roundToMinor,
             pieces: changed.length,
+            // One line per piece, for «سجل تغيير الأسعار» (the first thousand)
+            batchId,
+            // Every piece with what it had before, so «تراجع» can put it back (up to the 5,000 a change may hold)
+            moves: changed.map((i) => ({
+              id: i.variantId,
+              old: i.oldMinor,
+              new: i.newMinor,
+              oldMin: i.oldMin,
+              newMin: i.min,
+              oldWas: i.oldWas,
+              newWas: i.wasMinor,
+            })),
           },
         },
         ctx.meta,
@@ -134,7 +165,87 @@ export function bulkPrices(
     }
     return {
       applied: input.apply && changed.length > 0,
-      items: items.map(({ min: _min, ...rest }) => rest),
+      ...(input.apply && changed.length > 0 ? { changeId: batchId } : {}),
+      items: items.map(({ min: _min, oldMin: _oldMin, oldWas: _oldWas, ...rest }) => rest),
     };
+  });
+}
+
+interface Move {
+  id: string;
+  old: number;
+  new: number;
+  oldMin?: number | null;
+  newMin?: number | null;
+  oldWas?: number | null;
+  newWas?: number | null;
+}
+
+/**
+ * «تراجع» for a bulk price change: every piece still at the price that change gave it goes back to
+ * what it had (price, floor, struck-through price). A piece edited since is left as it is and counted.
+ * A change can be undone once.
+ */
+export function undoBulkPrices(
+  db: Database,
+  changeId: string,
+  ctx: CatalogContext,
+): Promise<{ restored: number; skipped: number }> {
+  const { tenantId, userId } = ctx.auth;
+  return withTenant(db, tenantId, async (tx) => {
+    await requireCatalogManager(tx, userId);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`bulk-undo:${tenantId}`}, 0))`);
+    const [row] = await tx.execute<{ data: { moves?: Move[]; mode?: string } | null }>(sql`
+      select data from audit_logs where action = 'prices.bulk_changed' and data->>'batchId' = ${changeId} limit 1`);
+    const moves = row?.data?.moves;
+    if (!row || !Array.isArray(moves) || moves.some((m) => m.oldMin === undefined)) {
+      throw notFound('هذا التغيير غير موجود أو قديم ولا يمكن التراجع عنه.');
+    }
+    const [done] = await tx.execute<{ id: string }>(sql`
+      select id from audit_logs where action = 'prices.bulk_undone' and data->>'of' = ${changeId} limit 1`);
+    if (done) throw new AppError(409, 'conflict', 'سبق التراجع عن هذا التغيير.');
+    let restored = 0;
+    const restoredMoves: { id: string; old: number; new: number }[] = [];
+    const touched = new Set<string>();
+    for (const m of moves) {
+      const res = await tx.execute<{ product_id: string }>(sql`
+        update prices pr set price_minor = ${m.old}, min_price_minor = ${m.oldMin ?? null},
+               was_price_minor = ${m.oldWas ?? null},
+               price_changed_at = ${ctx.now.toISOString()}::timestamptz, updated_at = now()
+        from variants v
+        where pr.id = ${m.id}::uuid and v.id = pr.id and pr.price_minor = ${m.new}
+        returning v.product_id`);
+      if (res[0]) {
+        restored += 1;
+        restoredMoves.push({ id: m.id, old: m.new, new: m.old });
+        touched.add(res[0].product_id);
+      }
+    }
+    if (touched.size > 0) {
+      await tx.execute(sql`
+        update products set updated_at = now()
+        where id in (${sql.join(
+          [...touched].map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )})`);
+    }
+    await audit(
+      tx,
+      {
+        tenantId,
+        userId,
+        action: 'prices.bulk_undone',
+        entity: 'category',
+        data: {
+          of: changeId,
+          restored,
+          skipped: moves.length - restored,
+          // Only what was really put back, so the history shows what moved
+          moves: restoredMoves,
+        },
+      },
+      ctx.meta,
+    );
+    return { restored, skipped: moves.length - restored };
   });
 }

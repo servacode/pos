@@ -1,24 +1,150 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { ONBOARDING_STEPS, type SectorKey, type StoreResponse } from '@serva/core';
+import { ONBOARDING_STEPS, type SaleListPage, type SectorKey, type StoreResponse } from '@serva/core';
 import {
   Alert,
   Button,
   Card,
+  CashIcon,
+  CheckIcon,
+  cn,
   DeviceIcon,
-  FullScreenLoader,
+  ExpandIcon,
+  IconChip,
   KeyIcon,
   ProductsIcon,
-  ProgressBar,
+  Skeleton,
+  SkeletonText,
   type Icon,
 } from '@serva/ui';
-import { useAuth } from '../../auth/useAuth';
+import { useAuth, useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
-import { errorMessage } from '../../lib/api';
+import { apiFetch, errorMessage } from '../../lib/api';
+import { getHomeSummary } from '../../pages/homeSummary';
+import { listDevices } from '../devices/api';
+import { listStaff } from '../staff/api';
 import { getStore, saveOnboarding, saveProfile } from './api';
+import { CardBar } from './parts';
 import { CurrencyForm, ProfileForm, SectorPicker } from './StoreForms';
 
-const TITLES = ['شو بتشتغل؟', 'معلومات محلّك', 'العملة والأسعار', 'جاهز تبدأ'];
+const TITLES = ['ما نشاط محلّك؟', 'معلومات محلّك', 'العملة والأسعار', 'جاهز تبدأ'];
+
+/** Each step's short name in the step list, and the line under its title. */
+const STEPS: readonly { label: string; description: string }[] = [
+  { label: 'النشاط', description: 'نجهّز لك البرنامج على قدّ نشاطك. تغيّره متى شئت من الإعدادات.' },
+  { label: 'المحل', description: 'كما يُطبع في رأس الفاتورة. تراه في المعاينة وأنت تكتب.' },
+  {
+    label: 'العملة',
+    description: 'الليرة أساس الحسابات والتقارير، والدولار إن كنت تبيع به أو تقبضه.',
+  },
+  { label: 'جاهز', description: 'محلّك جاهز. هذا ما تحتاجه لأول بيع:' },
+];
+
+/**
+ * Where the owner is in the wizard (kit cashier/DeviceLink › الخطوات): a numbered circle per step
+ * joined by a line, ticked once done, the current one ringed in the brand colour. On a phone only
+ * the current step keeps its name on screen.
+ */
+function WizardSteps({ current }: { current: number }) {
+  return (
+    <ol aria-label="خطوات الإعداد" className="flex items-center gap-3">
+      {STEPS.map((item, index) => {
+        const done = index < current;
+        const now = index === current;
+        return (
+          <li
+            key={item.label}
+            aria-current={now ? 'step' : undefined}
+            className="flex min-w-0 flex-1 items-center gap-3 last:flex-none"
+          >
+            <span
+              className={cn(
+                'num grid size-8 shrink-0 place-items-center rounded-full text-sm font-bold transition-colors duration-200 ease-standard',
+                done && 'bg-brand text-on-brand',
+                now && 'bg-brand-soft text-brand-ink ring-2 ring-brand',
+                !done && !now && 'bg-surface text-ink-muted ring-1 ring-line-control/50',
+              )}
+            >
+              {done ? <CheckIcon size={16} strokeWidth={3} /> : index + 1}
+            </span>
+            <span
+              className={cn(
+                'text-sm font-semibold whitespace-nowrap',
+                now ? 'text-ink' : done ? 'text-brand-ink' : 'text-ink-muted',
+                !now && 'max-sm:sr-only',
+              )}
+            >
+              {item.label}
+              {done ? <span className="sr-only"> (تمّت)</span> : null}
+            </span>
+            {index < STEPS.length - 1 ? (
+              <span
+                aria-hidden="true"
+                className={cn('h-0.5 min-w-4 flex-1 rounded-full', done ? 'bg-brand' : 'bg-line')}
+              />
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+type DoneKey = 'products' | 'staff' | 'device' | 'sale';
+
+/**
+ * Which first tasks the store has already done, read from what exists (products, a staff member with a
+ * till code, an approved device, a first invoice). A task that cannot be read (no permission, offline)
+ * stays unticked. Display only.
+ */
+function useDone(active: boolean, myId: string): { done: ReadonlySet<DoneKey>; ready: boolean } {
+  const [done, setDone] = useState<ReadonlySet<DoneKey>>(new Set());
+  const [settled, setSettled] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    let alive = true;
+    const checks: [DoneKey, () => Promise<boolean>][] = [
+      // Goods only: the service the clothing pack adds on its own (تقصير) is not «أضف أصنافك»
+      ['products', async () => ((await getHomeSummary()).photos?.goodsCount ?? 0) > 0],
+      // The card opens the signed-in person's own PIN page: it is ticked when that person has one
+      ['staff', async () => (await listStaff()).staff.some((m) => m.id === myId && m.hasPin)],
+      ['device', async () => (await listDevices()).devices.some((d) => d.status === 'active')],
+      [
+        'sale',
+        async () => (await apiFetch<SaleListPage>('/v1/sales?limit=1', { auth: true })).items.length > 0,
+      ],
+    ];
+    for (const [key, check] of checks) {
+      check()
+        .then((yes) => {
+          if (alive && yes) setDone((all) => new Set(all).add(key));
+        })
+        .catch(() => undefined)
+        .finally(() => alive && setSettled((n) => n + 1));
+    }
+    return () => {
+      alive = false;
+    };
+  }, [active, myId]);
+  return { done, ready: settled >= 4 };
+}
+
+/** The wizard's frame while the store loads: the step list and a card of grey lines. */
+function WizardLoading() {
+  return (
+    <div aria-busy="true" className="mx-auto flex w-full max-w-4xl flex-col gap-8">
+      <span className="sr-only">نجهّز معالج البداية…</span>
+      <Skeleton className="h-8 w-full" />
+      <div className="flex flex-col gap-3">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-9 w-64" />
+      </div>
+      <Card>
+        <SkeletonText lines={5} />
+      </Card>
+    </div>
+  );
+}
 
 /**
  * The start wizard (04 › معالج البداية): four steps right after the account is opened, each one
@@ -33,6 +159,9 @@ export function WelcomePage() {
   const [error, setError] = useState<string | null>(null);
   const [sectors, setSectors] = useState<SectorKey[]>([]);
   const [busy, setBusy] = useState(false);
+  const me = useMe();
+  const { done, ready } = useDone(step === 3, me.user.id);
+  const allDone = ready && done.size === 4;
 
   useEffect(() => {
     let alive = true;
@@ -74,7 +203,7 @@ export function WelcomePage() {
   async function saveSectors() {
     if (!store) return;
     if (sectors.length === 0) {
-      setError('اختر نشاطاً واحداً على الأقل، أو اضغط «تخطَّ».');
+      setError('اختر نشاطاً واحداً على الأقل، أو اضغط «تخط».');
       return;
     }
     setBusy(true);
@@ -89,144 +218,211 @@ export function WelcomePage() {
   }
 
   if (!store) {
-    return error ? (
+    return (
       <AppShell>
-        <Alert tone="error">{error}</Alert>
+        <title>أهلاً بك · SERVA</title>
+        {error ? (
+          <div className="mx-auto w-full max-w-4xl">
+            <Alert tone="error">{error}</Alert>
+          </div>
+        ) : (
+          <WizardLoading />
+        )}
       </AppShell>
-    ) : (
-      <FullScreenLoader />
     );
   }
 
+  const skip = (next: number) => (
+    <Button variant="ghost" onClick={() => void go(next)}>
+      تخط هذه الخطوة
+    </Button>
+  );
+
   return (
     <AppShell>
-      <title>أهلاً بك · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-ink-muted">
-            الخطوة <span className="num">{step + 1}</span> من <span className="num">{ONBOARDING_STEPS}</span>
-          </p>
-          <ProgressBar
-            label="تقدّم الإعداد"
-            value={step + 1}
-            max={ONBOARDING_STEPS}
-            valueText={`الخطوة ${step + 1} من ${ONBOARDING_STEPS}`}
-          />
-          <h1 className="text-2xl font-bold text-ink">{TITLES[step]}</h1>
+      <title>أهلاً بك · SERVA</title>
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
+        <div className="flex flex-col gap-8">
+          <WizardSteps current={step} />
+          <div className="flex flex-col gap-2">
+            {step < 3 ? (
+              <p className="text-sm font-semibold text-brand-ink">
+                الخطوة <span className="num">{step + 1}</span> من{' '}
+                <span className="num">{ONBOARDING_STEPS}</span>
+              </p>
+            ) : null}
+            <h1 className="text-3xl font-bold text-ink">{TITLES[step]}</h1>
+            <p className="text-ink-muted">{STEPS[step]?.description}</p>
+          </div>
         </div>
         {error ? <Alert tone="error">{error}</Alert> : null}
 
         {step === 0 ? (
-          <Card className="flex flex-col gap-5">
-            <SectorPicker value={sectors} onChange={setSectors} />
-            <p className="text-sm text-ink-muted">
-              نجهّز لك البرنامج على قدّ نشاطك. تغيّره متى شئت من الإعدادات.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <Button size="lg" onClick={() => void saveSectors()} loading={busy}>
-                التالي
-              </Button>
-              <Button size="lg" variant="ghost" onClick={() => void go(1)}>
-                تخطَّ
-              </Button>
-            </div>
+          <Card>
+            <SectorPicker variant="cards" value={sectors} onChange={setSectors} />
+            <CardBar>
+              <p className="me-auto text-sm text-ink-muted max-sm:w-full">
+                اختر كل ما ينطبق على محلّك، ولو كان أكثر من نشاط.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 max-sm:w-full max-sm:flex-col-reverse max-sm:*:w-full">
+                <Button variant="ghost" onClick={() => void go(1)}>
+                  تخط
+                </Button>
+                <Button onClick={() => void saveSectors()} loading={busy}>
+                  التالي
+                </Button>
+              </div>
+            </CardBar>
           </Card>
         ) : null}
 
         {step === 1 ? (
-          <>
-            <ProfileForm
-              store={store}
-              showSectors={false}
-              submitLabel="احفظ وتابع"
-              onSaved={(s) => {
-                setStore(s);
-                void go(2);
-              }}
-            />
-            <Button variant="ghost" onClick={() => void go(2)}>
-              تخطَّ هذه الخطوة
-            </Button>
-          </>
+          <ProfileForm
+            store={store}
+            showSectors={false}
+            submitLabel="احفظ وتابع"
+            secondaryAction={skip(2)}
+            onSaved={(s) => {
+              setStore(s);
+              // The top bar names the store from the signed-in profile: read it again now, not at the end
+              void refreshMe();
+              void go(2);
+            }}
+          />
         ) : null}
 
         {step === 2 ? (
-          <>
-            <CurrencyForm
-              store={store}
-              submitLabel="احفظ وتابع"
-              onSaved={(s) => {
-                setStore(s);
-                void go(3);
-              }}
-            />
-            <Button variant="ghost" onClick={() => void go(3)}>
-              تخطَّ هذه الخطوة
-            </Button>
-          </>
+          <CurrencyForm
+            store={store}
+            submitLabel="احفظ وتابع"
+            secondaryAction={skip(3)}
+            onSaved={(s) => {
+              setStore(s);
+              void go(3);
+            }}
+          />
         ) : null}
 
         {step === 3 ? (
-          <Card className="flex flex-col gap-4">
-            <p className="text-ink">محلّك جاهز. هذا ما تحتاجه لأول بيع:</p>
-            <ul className="flex flex-col gap-3">
+          <div className="flex flex-col gap-6">
+            <ul className="grid gap-4 md:grid-cols-2">
               <NextStep
                 icon={ProductsIcon}
                 to="/products"
                 title="أضف أصنافك"
                 text="بالاسم والسعر والباركود"
+                done={done.has('products')}
+                pending={ready && !done.has('products')}
+                compact={allDone}
               />
-              <NextStep icon={KeyIcon} to="/me/pin" title="اختر رمز الدخول للكاشير" text="4 أو 6 أرقام" />
+              <NextStep
+                icon={KeyIcon}
+                to="/me/pin"
+                title="اختر رمز الدخول للكاشير"
+                text="4 أو 6 أرقام"
+                done={done.has('staff')}
+                pending={ready && !done.has('staff')}
+                compact={allDone}
+              />
               <NextStep
                 icon={DeviceIcon}
                 to="/devices"
                 title="اربط جهاز الكاشير"
-                text="جوال أو تابلت أو كمبيوتر على نفس الشبكة"
+                text="جوال أو تابلت أو كمبيوتر متصل بالإنترنت"
+                done={done.has('device')}
+                pending={ready && !done.has('device')}
+                compact={allDone}
+              />
+              <NextStep
+                icon={CashIcon}
+                to="/sales/invoices"
+                title="أول عملية بيع"
+                text="بعها من الكاشير وتراها هنا في الفواتير"
+                done={done.has('sale')}
+                pending={ready && !done.has('sale')}
+                compact={allDone}
               />
             </ul>
-            <Button size="lg" onClick={() => void finish()} loading={busy}>
-              ابدأ العمل
-            </Button>
-          </Card>
+            <Card className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <IconChip tone="success">
+                  <CheckIcon />
+                </IconChip>
+                <p className="text-ink">
+                  {allDone
+                    ? 'كل شيء جاهز. افتح الكاشير وابدأ البيع.'
+                    : 'تقدر تبدأ البيع الآن، وترجع لهذه الخطوات متى شئت.'}
+                </p>
+              </div>
+              <Button size="lg" onClick={() => void finish()} loading={busy} className="max-sm:w-full">
+                ابدأ العمل
+              </Button>
+            </Card>
+          </div>
         ) : null}
 
         {step < 3 ? (
-          <button
-            type="button"
-            className="self-center text-sm text-ink-muted underline underline-offset-4"
-            onClick={() => void finish()}
-          >
+          <Button variant="ghost" size="sm" className="self-center" onClick={() => void finish()}>
             لاحقاً، خذني إلى الرئيسية
-          </button>
+          </Button>
         ) : null}
       </div>
     </AppShell>
   );
 }
 
+/** One thing to do before the first sale: a card that leads to its page. */
 function NextStep({
   icon: StepIcon,
   to,
   title,
   text,
+  done = false,
+  pending = false,
+  compact = false,
 }: {
+  /** The check ran and the task is not done: an amber «لم يتم» says so */
+  pending?: boolean;
+  /** Everything is done: the tiles shrink to a quiet row */
+  compact?: boolean;
   icon: Icon;
   to: string;
   title: string;
   text: string;
+  /** The task is already done: ticked, and the card stays a link back to it */
+  done?: boolean;
 }) {
   return (
-    <li>
+    <li className="flex">
       <Link
         to={to}
-        className="flex items-center gap-3 rounded-control border border-line p-3 hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-ring"
+        className={cn(
+          'group/next flex w-full flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5 max-sm:flex-row max-sm:items-center max-sm:gap-3 max-sm:p-4 sm:p-6',
+          compact && 'flex-row items-center gap-3 p-3 sm:p-3',
+        )}
       >
-        <span className="grid size-10 place-items-center rounded-full bg-brand-soft text-brand-ink">
-          <StepIcon />
+        <span className={cn('flex items-center justify-between gap-3', compact && 'shrink-0')}>
+          <IconChip size={compact ? 'md' : 'lg'} tone={done ? 'success' : undefined}>
+            {done ? <CheckIcon size={24} /> : <StepIcon size={24} />}
+          </IconChip>
+          {/* A chevron toward the reading end: down, turned a quarter toward it. */}
+          <ExpandIcon className="max-sm:hidden -rotate-90 text-ink-subtle transition-colors duration-120 ease-standard group-hover/next:text-brand-ink rtl:rotate-90" />
         </span>
-        <span className="flex flex-col">
-          <span className="font-semibold text-ink">{title}</span>
-          <span className="text-sm text-ink-muted">{text}</span>
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="font-semibold text-ink">
+            {title}
+            {done ? (
+              <span className="ms-2 rounded-full bg-success-soft px-2 py-0.5 text-xs font-semibold text-success-ink">
+                تمّ
+              </span>
+            ) : null}
+            {pending ? (
+              <span className="ms-2 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-semibold text-warning-ink">
+                لم يتم
+              </span>
+            ) : null}
+          </span>
+          {compact ? null : <span className="text-sm text-ink-muted">{text}</span>}
         </span>
       </Link>
     </li>

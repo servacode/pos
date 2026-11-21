@@ -4,7 +4,18 @@ import type { Promotion, PullSetRows, StoreResponse } from '@serva/core';
 import type { PullResponse } from '@serva/sync';
 import { seedCatalog } from './catalog-fixtures';
 import { createDevice } from './devices';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase, settled } from './helpers';
+import { withTenant } from '@serva/db';
+import { runningRules } from '../src/services/shop';
+import {
+  appDb,
+  closeAppDb,
+  closeOwnerDb,
+  makeApp,
+  ownerDb,
+  registerStore,
+  resetDatabase,
+  settled,
+} from './helpers';
 
 /**
  * The supermarket mode on the server: promotions the owner sets and every till pulls, and how the
@@ -174,6 +185,160 @@ describe('promotions', () => {
       payload: { version: 1, name: 'x x', kind: 'percent', percentBp: 1, scope: 'all' },
     });
     expect(unknown.statusCode).toBe(404);
+  });
+});
+
+describe('trade promotions', () => {
+  const post = (
+    s: { headers: Record<string, string> },
+    app2: FastifyInstance,
+    payload: Record<string, unknown>,
+  ) => app2.inject({ method: 'POST', url: '/v1/promotions', headers: s.headers, payload });
+
+  it('keeps a tiered promotion with its steps sorted and a free_item with its gift, and tills pull both', async () => {
+    const s = await store();
+    const { products } = await seedCatalog(app, s.tenantId, s.token);
+    const variantId = products[0]!.variants[0]!.id;
+    const tiered = await post(s, app, {
+      name: 'كميات',
+      kind: 'tiered',
+      percentBp: 900,
+      buyQty: 4,
+      scope: 'all',
+      tiers: [
+        { minQty: 50, percentBp: 800 },
+        { minQty: 10, percentBp: 500 },
+      ],
+      customerKinds: ['grocery', 'grocery', 'minimarket'],
+      priceTiers: ['wholesale'],
+      repOnly: true,
+    });
+    expect(tiered.statusCode, tiered.body).toBe(201);
+    expect(tiered.json<Promotion>()).toMatchObject({
+      kind: 'tiered',
+      percentBp: null,
+      buyQty: null,
+      tiers: [
+        { minQty: 10, percentBp: 500 },
+        { minQty: 50, percentBp: 800 },
+      ],
+      customerKinds: ['grocery', 'minimarket'],
+      priceTiers: ['wholesale'],
+      repOnly: true,
+      freeVariantId: null,
+    });
+    const gift = await post(s, app, {
+      name: 'هدية',
+      kind: 'free_item',
+      percentBp: 100,
+      buyQty: 10,
+      getQty: 7,
+      freeQty: 2,
+      freeVariantId: variantId,
+      scope: 'all',
+      tiers: [{ minQty: 2, percentBp: 100 }],
+    });
+    expect(gift.statusCode, gift.body).toBe(201);
+    expect(gift.json<Promotion>()).toMatchObject({
+      kind: 'free_item',
+      percentBp: null,
+      buyQty: 10,
+      getQty: null,
+      freeQty: 2,
+      freeVariantId: variantId,
+      tiers: [],
+      repOnly: false,
+      customerKinds: [],
+    });
+    const sets = await pull(s.tenantId);
+    expect(sets.promotions.upserts).toHaveLength(2);
+    expect(sets.promotions.upserts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: tiered.json<Promotion>().id,
+          kind: 'tiered',
+          tiers: [
+            { minQty: 10, percentBp: 500 },
+            { minQty: 50, percentBp: 800 },
+          ],
+          repOnly: true,
+          priceTiers: ['wholesale'],
+        }),
+        expect.objectContaining({ kind: 'free_item', freeVariantId: variantId, freeQty: 2, tiers: [] }),
+      ]),
+    );
+  });
+
+  it('an old kind with nothing new set reads back exactly as before, with empty targeting', async () => {
+    const s = await store();
+    const made = await post(s, app, { name: 'خصم', kind: 'percent', percentBp: 1000, scope: 'all' });
+    expect(made.json<Promotion>()).toMatchObject({
+      kind: 'percent',
+      percentBp: 1000,
+      tiers: [],
+      freeVariantId: null,
+      freeQty: null,
+      customerKinds: [],
+      priceTiers: [],
+      repOnly: false,
+    });
+  });
+
+  it('refuses a gift from another store, a tiered one without steps, and a coupon on a trade kind', async () => {
+    const s = await store();
+    const other = await store('0911111111');
+    const { products } = await seedCatalog(app, other.tenantId, other.token);
+    const foreign = await post(s, app, {
+      name: 'هدية غريبة',
+      kind: 'free_item',
+      buyQty: 2,
+      freeQty: 1,
+      freeVariantId: products[0]!.variants[0]!.id,
+      scope: 'all',
+    });
+    expect(foreign.statusCode).toBe(400);
+    expect(foreign.json()).toMatchObject({ error: { fields: { freeVariantId: 'الصنف المجاني غير موجود' } } });
+    expect((await post(s, app, { name: 'بلا شرائح', kind: 'tiered', scope: 'all' })).statusCode).toBe(400);
+    const withCoupon = await post(s, app, {
+      name: 'بكود',
+      kind: 'tiered',
+      scope: 'all',
+      tiers: [{ minQty: 5, percentBp: 100 }],
+      couponCode: 'TRADE5',
+    });
+    expect(withCoupon.statusCode).toBe(400);
+    const badKind = await post(s, app, {
+      name: 'نوع خطأ',
+      kind: 'percent',
+      percentBp: 100,
+      scope: 'all',
+      customerKinds: ['bank'],
+    });
+    expect(badKind.statusCode).toBe(400);
+  });
+
+  it('the online shop never prices with a promotion meant for certain customers or the reps', async () => {
+    const s = await store();
+    for (const extra of [{ repOnly: true }, { priceTiers: ['wholesale'] }, { customerKinds: ['grocery'] }]) {
+      expect(
+        (await post(s, app, { name: 'خاص', kind: 'percent', percentBp: 500, scope: 'all', ...extra }))
+          .statusCode,
+      ).toBe(201);
+    }
+    expect(
+      (await post(s, app, { name: 'للجميع', kind: 'percent', percentBp: 500, scope: 'all' })).statusCode,
+    ).toBe(201);
+    const running = await withTenant(appDb().db, s.tenantId, (tx) => runningRules(tx, null, false));
+    expect(running.map((r) => r.name)).toEqual(['للجميع']);
+  });
+
+  it('only the owner of the store may add one (no token, no promotion)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      payload: { name: 'خصم', kind: 'percent', percentBp: 1000, scope: 'all' },
+    });
+    expect(res.statusCode).toBe(401);
   });
 });
 

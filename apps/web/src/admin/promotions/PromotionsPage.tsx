@@ -1,37 +1,166 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { Promotion } from '@serva/core';
-import { Alert, Badge, Button, DataTable, type DataColumn } from '@serva/ui';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
+import { promotionActive, type OnlineStoreSettings, type Promotion } from '@serva/core';
+import { AddIcon, Badge, Button, CheckIcon, EmptyState, InfoIcon, OfferIcon, Sheet } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
-import { errorMessage } from '../../lib/api';
-import { listPromotions, updatePromotion } from './api';
+import { apiFetch, errorMessage } from '../../lib/api';
+import { dayText } from '../../lib/dates';
+import { useIsPhone } from '../../lib/useIsPhone';
+import { Amt, PageTop, Panel, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
+import { archivePromotion, listPromotions } from './api';
+import { EndDateDialog } from './PromotionDialogs';
 import { localDate, PromotionForm, WEEKDAY_NAMES } from './PromotionForm';
+
+const PromotionReportPanel = lazy(() =>
+  import('./PromotionReportPanel').then((m) => ({ default: m.PromotionReportPanel })),
+);
+
+/**
+ * «توصيل مجاني فوق مبلغ»: the offer owners ask for most. It is the store's own line (set with the delivery fees in
+ * the online store), shown here with the other offers so it is found. Hidden for someone who cannot read the store.
+ */
+function FreeDeliveryOffer() {
+  const me = useMe();
+  const [store, setStore] = useState<OnlineStoreSettings | null>(null);
+  useEffect(() => {
+    let alive = true;
+    apiFetch<OnlineStoreSettings>('/v1/online-store', { auth: true })
+      .then((s) => alive && setStore(s))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!store || !store.delivery) return null;
+  const over = store.freeDeliveryOverMinor ?? null;
+  return (
+    <Panel title="توصيل مجاني فوق مبلغ">
+      <p style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'baseline', margin: 0 }}>
+        {over ? (
+          <>
+            <span>
+              الطلب الذي تبلغ بضاعته <Amt minor={over} currency={me.settings.baseCurrency} /> فأكثر يوصَّل بلا
+              أجرة في المتجر الإلكتروني.
+            </span>
+          </>
+        ) : (
+          <span style={{ color: 'var(--ink-muted)' }}>
+            غير مفعّل: الزبون يدفع أجرة التوصيل دائماً. حدد مبلغاً فيشجّعه على إكمال سلته.
+          </span>
+        )}{' '}
+        <Link to="/online-store" style={{ fontWeight: 600, textDecoration: 'underline' }}>
+          {over ? 'غيّر المبلغ' : 'فعّله'}
+        </Link>
+      </p>
+    </Panel>
+  );
+}
 
 /** What the promotion gives, as the owner says it. */
 export function promotionSummary(p: Promotion): string {
   const what =
-    p.kind === 'percent' ? `خصم ${(p.percentBp ?? 0) / 100}%` : `اشترِ ${p.buyQty} وخذ ${p.getQty} مجاناً`;
+    p.kind === 'percent'
+      ? `خصم ${(p.percentBp ?? 0) / 100}%`
+      : p.kind === 'tiered'
+        ? `خصم حسب الكمية: ${(p.tiers ?? []).map((t) => `من ${t.minQty} ${t.percentBp / 100}%`).join('، ')}`
+        : p.kind === 'free_item'
+          ? `اشترِ ${p.buyQty} وخذ ${p.freeQty} من صنف آخر مجاناً`
+          : `اشترِ ${p.buyQty} وخذ ${p.getQty} مجاناً`;
+  const who = [
+    p.repOnly ? 'للمندوب فقط' : null,
+    (p.customerKinds ?? []).length > 0 ? 'لأنواع محددة من الزبائن' : null,
+    (p.priceTiers ?? []).length > 0 ? 'لقائمة سعر محددة' : null,
+  ].filter(Boolean);
   const on =
     p.scope === 'all'
       ? 'على كل المنتجات'
       : p.scope === 'categories'
         ? `على ${p.categoryIds.length} تصنيف`
         : `على ${p.productIds.length} منتج`;
-  return `${what} ${on}`;
+  return who.length > 0 ? `${what} ${on} · ${who.join('، ')}` : `${what} ${on}`;
 }
 
-/** When it runs, in words. */
+/** How a date shows in a sentence: «30 تشرين الأول 2026» (never the ISO form, which reads reversed in Arabic) */
+const dayWords = (iso: string) => dayText(localDate(iso));
+
+/** When it runs, in words: dates, weekdays and hours in the order a person says them. */
 export function promotionWhen(p: Promotion): string {
   const parts: string[] = [];
-  if (p.startsAt) parts.push(`من ${localDate(p.startsAt)}`);
+  if (p.startsAt) parts.push(`من ${dayWords(p.startsAt)}`);
   if (p.endsAt) {
     const last = new Date(p.endsAt);
     last.setUTCDate(last.getUTCDate() - 1);
-    parts.push(`حتى ${localDate(last.toISOString())}`);
+    parts.push(`حتى ${dayWords(last.toISOString())}`);
   }
   if (p.daysOfWeek.length > 0) parts.push(p.daysOfWeek.map((d) => WEEKDAY_NAMES[d]).join('، '));
   if (p.fromTime && p.toTime) parts.push(`${p.fromTime}–${p.toTime}`);
   return parts.length > 0 ? parts.join(' · ') : 'دائماً';
 }
+
+/** `idle`: inside its dates but not on its days or hours right now */
+type PromotionState = 'active' | 'idle' | 'scheduled' | 'ended' | 'stopped';
+
+const DAY = 86_400_000;
+
+/** Where the promotion stands today: stopped by the owner, not started yet, past its last day, or on. */
+function promotionState(p: Promotion, now: number, timeZone = 'Asia/Damascus'): PromotionState {
+  if (p.archived) return 'stopped';
+  if (p.startsAt && Date.parse(p.startsAt) > now) return 'scheduled';
+  if (p.endsAt && Date.parse(p.endsAt) <= now) return 'ended';
+  const timed = p.daysOfWeek.length > 0 || Boolean(p.fromTime && p.toTime);
+  return timed && !promotionActive(p, new Date(now), timeZone) ? 'idle' : 'active';
+}
+
+const isOff = (p: Promotion, now: number) => {
+  const state = promotionState(p, now);
+  return state === 'stopped' || state === 'ended';
+};
+
+/** «ينتهي بعد 3 أيام» in the last week of an offer, so an owner does not leave a sale on by mistake */
+function endsSoon(p: Promotion, now: number): string | null {
+  if (!p.endsAt) return null;
+  const left = Math.ceil((Date.parse(p.endsAt) - now) / DAY);
+  if (left < 1 || left > 7) return null;
+  return left === 1 ? 'ينتهي اليوم' : left === 2 ? 'ينتهي غداً' : `ينتهي بعد ${left} أيام`;
+}
+
+/** Two running offers that can both hit the same piece: the customer gets the better one, the owner should know */
+function overlapsWith(p: Promotion, all: readonly Promotion[], now: number): Promotion | null {
+  if (promotionState(p, now) !== 'active' || p.couponCode) return null;
+  return (
+    all.find((q) => {
+      if (q.id === p.id || q.couponCode || promotionState(q, now) !== 'active') return false;
+      if (q.repOnly !== p.repOnly) return false;
+      if (p.scope === 'all' || q.scope === 'all') return true;
+      if (p.scope !== q.scope) return false;
+      const mine = new Set(p.scope === 'categories' ? p.categoryIds : p.productIds);
+      return (q.scope === 'categories' ? q.categoryIds : q.productIds).some((id) => mine.has(id));
+    }) ?? null
+  );
+}
+
+function StateBadge({ state }: { state: PromotionState }) {
+  if (state === 'active') {
+    return (
+      <StatusPill kind="ok" icon={<CheckIcon size={16} />}>
+        يعمل
+      </StatusPill>
+    );
+  }
+  if (state === 'scheduled') return <StatusPill kind="open">مجدول</StatusPill>;
+  if (state === 'idle') return <StatusPill kind="ok">في غير وقته</StatusPill>;
+  return <StatusPill kind="ok">{state === 'ended' ? 'انتهى' : 'متوقف'}</StatusPill>;
+}
+
+/** The big figure of an offer: what it gives, in two or three characters */
+function stampOf(p: Promotion): string {
+  if (p.kind === 'percent') return `${(p.percentBp ?? 0) / 100}%`;
+  if (p.kind === 'tiered') return `حتى ${Math.max(0, ...(p.tiers ?? []).map((t) => t.percentBp)) / 100}%`;
+  return `${p.buyQty}+${p.kind === 'free_item' ? (p.freeQty ?? 0) : p.getQty}`;
+}
+
+const GROUPS = { running: 'تعمل الآن أو مجدولة', off: 'متوقفة أو منتهية' } as const;
 
 /**
  * «العروض» (03 › عروض متقدمة): promotions the tills apply by themselves, online or not. The owner
@@ -40,91 +169,383 @@ export function promotionWhen(p: Promotion): string {
 export function PromotionsPage() {
   const [items, setItems] = useState<Promotion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Promotion | 'new' | null>(null);
+  // The offers being stopped or started: their button is off until the answer, so a double click is one request
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  // Stopped and ended offers stay out of sight until asked for: a list of old tests would bury the live ones
+  const [showOff, setShowOff] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  // The offer whose end date is being moved
+  const [endFor, setEndFor] = useState<Promotion | null>(null);
+  const phone = useIsPhone();
+  const newest = useRef(0);
+  const inflight = useRef(new Set<string>());
 
   const load = useCallback(() => {
     setError(null);
+    const mine = ++newest.current;
     listPromotions()
-      .then((r) => setItems(r.items))
-      .catch((e: unknown) => setError(errorMessage(e)));
+      .then((r) => mine === newest.current && setItems(r.items))
+      .catch((e: unknown) => mine === newest.current && setError(errorMessage(e)));
   }, []);
   useEffect(load, [load]);
 
   async function toggle(p: Promotion) {
+    // The ref answers a second click that lands before the page has drawn the disabled button
+    if (inflight.current.has(p.id)) return;
+    inflight.current.add(p.id);
+    setBusy((b) => new Set(b).add(p.id));
+    setActionError(null);
+    setNotice(null);
     try {
-      const { id, version, updatedAt: _u, ...rest } = p;
-      await updatePromotion(id, { ...rest, version, archived: !p.archived });
-      load();
+      await archivePromotion(p.id, { version: p.version, archived: !p.archived });
+      setNotice(p.archived ? `شُغّل «${p.name}».` : `أُوقف «${p.name}»، وتجده تحت «المتوقفة والمنتهية».`);
     } catch (e) {
-      setError(errorMessage(e));
+      setActionError(errorMessage(e));
+    } finally {
+      inflight.current.delete(p.id);
+      setBusy((b) => {
+        const rest = new Set(b);
+        rest.delete(p.id);
+        return rest;
+      });
     }
+    load();
   }
 
-  const columns: DataColumn<Promotion>[] = [
+  const now = Date.now();
+  const all = (items ?? []).slice().sort((a, b) => Number(isOff(a, now)) - Number(isOff(b, now)));
+  const offCount = all.filter((p) => isOff(p, now)).length;
+  const rows = showOff ? all : all.filter((p) => !isOff(p, now));
+  const running = items?.filter((p) => !isOff(p, now) && promotionState(p, now) !== 'scheduled').length ?? 0;
+
+  const columns: SxColumn<Promotion>[] = [
     {
-      key: 'name',
+      key: 'stamp',
       header: 'العرض',
       cell: (p) => (
-        <button
-          type="button"
-          className="font-semibold text-brand-ink hover:underline"
-          onClick={() => setEditing(p)}
-        >
-          {p.name}
-        </button>
+        <bdi dir="ltr" className="num" style={{ fontWeight: 700, fontSize: 18 }}>
+          {stampOf(p)}
+        </bdi>
       ),
     },
-    { key: 'what', header: 'ماذا يعطي', cell: promotionSummary },
-    { key: 'when', header: 'متى', cell: promotionWhen },
     {
-      key: 'state',
-      header: 'الحالة',
-      cell: (p) => (p.archived ? <Badge tone="neutral">متوقف</Badge> : <Badge tone="success">يعمل</Badge>),
+      key: 'name',
+      header: 'الاسم',
+      lead: true,
+      cell: (p) => {
+        const other = overlapsWith(p, items ?? [], now);
+        return (
+          <span
+            style={{ display: 'flex', flexDirection: 'column', gap: 2, whiteSpace: 'normal', minWidth: 0 }}
+          >
+            <span>
+              <button
+                type="button"
+                onClick={() => setEditing(p)}
+                style={{ font: 'inherit', fontWeight: 600, textAlign: 'start' }}
+              >
+                {p.name}
+              </button>{' '}
+              {p.couponCode ? (
+                <Badge tone="brand">
+                  كود <bdi dir="ltr">{p.couponCode}</bdi>
+                </Badge>
+              ) : null}
+            </span>
+            <span style={{ fontSize: 13, color: 'var(--ink-muted)' }}>{promotionSummary(p)}</span>
+            {other ? (
+              <span style={{ fontSize: 12, color: 'var(--warning-ink)' }}>
+                يتقاطع مع «{other.name}»: يُطبَّق الأفضل للزبون.
+              </span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
-      key: 'action',
-      header: '',
+      key: 'when',
+      header: 'متى',
+      hideBelowLg: true,
+      cell: (p) => {
+        const soon = endsSoon(p, now);
+        return (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2, whiteSpace: 'normal' }}>
+            <span>
+              <span className="sr-only">متى: </span>
+              <span style={promotionWhen(p) === 'دائماً' ? { color: 'var(--ink-muted)' } : undefined}>
+                {promotionWhen(p)}
+              </span>
+            </span>
+            {soon && promotionState(p, now) === 'active' ? (
+              <span style={{ fontSize: 12, color: 'var(--warning-ink)', fontWeight: 600 }}>{soon}</span>
+            ) : null}
+          </span>
+        );
+      },
+    },
+    { key: 'state', header: 'الحالة', cell: (p) => <StateBadge state={promotionState(p, now)} /> },
+    {
+      key: 'act',
+      header: <span className="sr-only">إجراء</span>,
+      numeric: true,
       cell: (p) => (
-        <Button size="sm" variant="secondary" onClick={() => void toggle(p)}>
-          {p.archived ? 'شغّل' : 'أوقف'}
-        </Button>
+        <PromotionActions
+          p={p}
+          busy={busy.has(p.id)}
+          onToggle={() => void toggle(p)}
+          onEnd={() => setEndFor(p)}
+        />
       ),
     },
   ];
 
   return (
     <AppShell>
-      <title>العروض · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex items-center gap-4">
-          <h1 className="flex-1 text-2xl font-bold text-ink">العروض</h1>
-          {editing === null ? <Button onClick={() => setEditing('new')}>عرض جديد</Button> : null}
-        </div>
-        <Alert tone="info">
+      <title>العروض · SERVA</title>
+      <SalesPage>
+        <PageTop
+          title="العروض"
+          subtitle={
+            items && items.length > 0 ? (
+              <>
+                يطبّقها الكاشير بنفسه، مع الإنترنت أو دونه. الفعّالة: <bdi className="num">{running}</bdi> من{' '}
+                <bdi className="num">{items.length}</bdi>.
+              </>
+            ) : (
+              'يطبّقها الكاشير بنفسه، مع الإنترنت أو دونه.'
+            )
+          }
+          actions={
+            <Button icon={<AddIcon />} onClick={() => setEditing('new')}>
+              عرض جديد
+            </Button>
+          }
+        />
+        {notice ? (
+          <p role="status" style={{ color: 'var(--ink-muted)', fontWeight: 600 }}>
+            {notice}
+          </p>
+        ) : null}
+        {actionError ? (
+          <p role="alert" style={{ color: 'var(--danger-ink)', fontWeight: 600 }}>
+            {actionError}
+          </p>
+        ) : null}
+        <Panel title="كل العروض" flush>
+          {phone && rows.length > 0 && !error ? (
+            <PromotionCards
+              rows={rows}
+              all={items ?? []}
+              now={now}
+              busy={busy}
+              onEdit={setEditing}
+              onToggle={(p) => void toggle(p)}
+              onEnd={setEndFor}
+            />
+          ) : (
+            <SxTable
+              bare
+              caption="العروض"
+              columns={columns}
+              rows={rows}
+              rowKey={(p) => p.id}
+              loading={items === null && !error}
+              {...(error ? { error } : {})}
+              onRetry={load}
+              groupOf={(p) => (isOff(p, now) ? 'off' : 'running')}
+              groupLabel={(key, count) => (
+                <>
+                  {GROUPS[key as keyof typeof GROUPS]} · <span className="num">{count}</span>
+                </>
+              )}
+              empty={
+                <EmptyState
+                  icon={OfferIcon}
+                  title="لا عروض بعد."
+                  description="أضف أول عرض: خصم على تصنيف، أو «اشترِ 2 والثالث مجاناً»."
+                  action={
+                    <Button variant="secondary" icon={<AddIcon />} onClick={() => setEditing('new')}>
+                      أضف عرضاً
+                    </Button>
+                  }
+                />
+              }
+            />
+          )}
+          {offCount > 0 ? (
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line)' }}>
+              <Button variant="secondary" aria-expanded={showOff} onClick={() => setShowOff((v) => !v)}>
+                {showOff ? 'أخفِ المتوقفة والمنتهية' : `أظهر المتوقفة والمنتهية (${offCount})`}
+              </Button>
+            </div>
+          ) : null}
+        </Panel>
+        <FreeDeliveryOffer />
+        <Suspense fallback={null}>
+          <PromotionReportPanel />
+        </Suspense>
+
+        <p style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: 'var(--ink-muted)' }}>
+          <InfoIcon size={16} />
           الكاشير يطبّق العرض بنفسه على كل سطر ينطبق عليه، ويختار الأفضل للزبون إن انطبق أكثر من عرض. الخصم
-          الذي يكتبه الكاشير يحلّ محل العرض على ذلك السطر.
-        </Alert>
+          الذي يكتبه الكاشير يحلّ محل العرض على ذلك السطر. العرض الذي تحفظه يظهر في المتجر الإلكتروني فوراً إن
+          لم تحفظه متوقفاً.
+        </p>
+      </SalesPage>
+
+      {endFor ? (
+        <EndDateDialog
+          key={endFor.id}
+          promotion={endFor}
+          onCancel={() => setEndFor(null)}
+          onSaved={(message) => {
+            setEndFor(null);
+            setNotice(message);
+            load();
+          }}
+        />
+      ) : null}
+
+      <Sheet
+        open={editing !== null}
+        onOpenChange={(open) => !open && setEditing(null)}
+        title={editing === null || editing === 'new' ? 'عرض جديد' : `عدّل «${editing.name}»`}
+        description="خصم بنسبة أو قطع مجانية، على كل المنتجات أو بعضها، في الوقت الذي تختاره."
+      >
         {editing !== null ? (
           <PromotionForm
             key={editing === 'new' ? 'new' : editing.id}
             {...(editing === 'new' ? {} : { promotion: editing })}
-            onSaved={() => {
+            onSaved={(saved) => {
+              // An offer saved stopped would vanish from the list: show the stopped ones so the owner sees it
+              if (saved.archived) setShowOff(true);
               setEditing(null);
               load();
             }}
             onCancel={() => setEditing(null)}
           />
         ) : null}
-        <DataTable
-          caption="العروض"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(p) => p.id}
-          loading={!items && !error}
-          {...(error ? { error, onRetry: load } : {})}
-          empty="لا عروض بعد. أضف أول عرض: خصم على تصنيف، أو «اشترِ 2 والثالث مجاناً»."
-        />
-      </div>
+      </Sheet>
     </AppShell>
+  );
+}
+
+/**
+ * What can be done to an offer from the list: stop (archive) or start it, and move its end date. A stopped offer
+ * leaves the list until «show stopped» is asked for; nothing is ever deleted.
+ */
+function PromotionActions({
+  p,
+  busy,
+  onToggle,
+  onEnd,
+}: {
+  p: Promotion;
+  busy: boolean;
+  onToggle: () => void;
+  onEnd: () => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+      <Button variant="secondary" size="sm" loading={busy} disabled={busy} onClick={onToggle}>
+        {p.archived ? 'شغّل' : 'أوقف'}
+      </Button>
+      <Button variant="secondary" size="sm" aria-label={`تاريخ انتهاء ${p.name}`} onClick={onEnd}>
+        تاريخ الانتهاء
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The same offers as cards, for a phone: the figure on the leading edge, the name with its words, the
+ * state and the stop or start button under them (a table's five columns leave the name three letters wide).
+ */
+function PromotionCards({
+  rows,
+  all,
+  now,
+  busy,
+  onEdit,
+  onToggle,
+  onEnd,
+}: {
+  rows: readonly Promotion[];
+  all: readonly Promotion[];
+  now: number;
+  busy: ReadonlySet<string>;
+  onEdit: (p: Promotion) => void;
+  onToggle: (p: Promotion) => void;
+  onEnd: (p: Promotion) => void;
+}) {
+  return (
+    <ul
+      aria-label="العروض"
+      style={{ display: 'flex', flexDirection: 'column', margin: 0, padding: 0, listStyle: 'none' }}
+    >
+      {rows.map((p) => {
+        const other = overlapsWith(p, all, now);
+        const soon = endsSoon(p, now);
+        return (
+          <li
+            key={p.id}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'auto minmax(0, 1fr)',
+              gap: '4px 14px',
+              padding: 16,
+              borderBottom: '1px solid var(--line)',
+            }}
+          >
+            <bdi
+              dir="ltr"
+              className="num"
+              style={{ fontWeight: 700, fontSize: 22, minWidth: 56, gridRow: 'span 2' }}
+            >
+              {stampOf(p)}
+            </bdi>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+              <button
+                type="button"
+                onClick={() => onEdit(p)}
+                style={{ font: 'inherit', fontWeight: 600, textAlign: 'start' }}
+              >
+                {p.name}
+              </button>
+              {p.couponCode ? (
+                <span>
+                  <Badge tone="brand">
+                    كود <bdi dir="ltr">{p.couponCode}</bdi>
+                  </Badge>
+                </span>
+              ) : null}
+              <span style={{ fontSize: 13, color: 'var(--ink-muted)' }}>{promotionSummary(p)}</span>
+              <span style={{ fontSize: 13, color: 'var(--ink-muted)' }}>{promotionWhen(p)}</span>
+              {soon && promotionState(p, now) === 'active' ? (
+                <span style={{ fontSize: 12, color: 'var(--warning-ink)', fontWeight: 600 }}>{soon}</span>
+              ) : null}
+              {other ? (
+                <span style={{ fontSize: 12, color: 'var(--warning-ink)' }}>
+                  يتقاطع مع «{other.name}»: يُطبَّق الأفضل للزبون.
+                </span>
+              ) : null}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <StateBadge state={promotionState(p, now)} />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <PromotionActions
+                p={p}
+                busy={busy.has(p.id)}
+                onToggle={() => onToggle(p)}
+                onEnd={() => onEnd(p)}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

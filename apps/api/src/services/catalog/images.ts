@@ -221,8 +221,21 @@ export function deleteProductImage(
           eq(productImages.id, imageId),
         ),
       )
-      .returning({ id: productImages.id });
+      .returning({ id: productImages.id, uploadId: productImages.uploadId });
     if (gone.length === 0) throw notFound(IMAGE);
+    // The bytes go with the last picture that used them (the same file sent twice is one upload, and
+    // the shop's logo or cover may share it): a deleted picture no longer fills the database
+    // (needs the DELETE grant of migration 0099; until it is applied the bytes stay, as before)
+    const [may] = await tx.execute<{ ok: boolean }>(
+      sql`select has_table_privilege(current_user, 'uploads', 'DELETE') as ok`,
+    );
+    if (may?.ok)
+      await tx.execute(sql`
+      delete from uploads u
+      where u.tenant_id = ${tenantId} and u.id = ${gone[0]!.uploadId}
+        and not exists (select 1 from product_images i where i.tenant_id = u.tenant_id and i.upload_id = u.id)
+        and not exists (select 1 from online_stores o
+                        where o.tenant_id = u.tenant_id and (o.logo_upload_id = u.id or o.cover_upload_id = u.id))`);
     await touchPieces(tx, tenantId, productId);
     await audit(
       tx,

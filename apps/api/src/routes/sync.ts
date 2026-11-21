@@ -17,6 +17,7 @@ import { bootstrapSnapshot, resyncSnapshot, SnapshotStore } from '../services/sn
 import { recordHeartbeat } from '../services/sync-heartbeat';
 import { pullChanges } from '../services/sync-pull';
 import { costAfterPush } from '../services/costing';
+import { releaseQuietly } from '../services/subscription-release';
 import { pushDocuments, type SyncProcessors } from '../services/sync-push';
 import { parseBody } from './validation';
 
@@ -87,10 +88,27 @@ export function syncRoutes(processors: SyncProcessors = {}) {
       async (request) => {
         const device = deviceOf(request);
         const body = parseBody(pushRequestSchema, request.body);
+        const meta = { ip: clientIp(request), userAgent: request.headers['user-agent'] ?? null };
+        // A store that can write again first gets back what it held while it was read-only, so a
+        // document pushed now that depends on one of them sees it posted.
+        await releaseQuietly(
+          app.db,
+          device.tenantId,
+          {
+            processors,
+            now: app.clock.now(),
+            meta,
+            enforceSubscription: app.env.SUBSCRIPTION_ENFORCEMENT,
+            backoff: true,
+            onError: (error, docId) => request.log.error({ err: error, docId }, 'quarantine release failed'),
+          },
+          (error) => request.log.error({ err: error }, 'quarantine release failed'),
+        );
         const answer = await pushDocuments(app.db, device, body, {
-          meta: { ip: clientIp(request), userAgent: request.headers['user-agent'] ?? null },
+          meta,
           now: app.clock.now(),
           processors,
+          enforceSubscription: app.env.SUBSCRIPTION_ENFORCEMENT,
           onError: (error, docId) => request.log.error({ err: error, docId }, 'sync document failed'),
         });
         // What was sold is costed next, apart: a failure there is retried on the next push

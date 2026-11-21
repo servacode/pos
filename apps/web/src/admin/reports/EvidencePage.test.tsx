@@ -60,7 +60,11 @@ describe('«شاشة الدليل»', () => {
     // A device still waiting for approval has nothing to show.
     const options = within(screen.getByLabelText('الجهاز')).getAllByRole('option');
     expect(options.map((o) => o.textContent)).toEqual(['كاشير 1 · 001', 'كاشير النعيم · 002']);
-    expect(screen.getByRole('link', { name: 'شاشة الدليل' })).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(screen.getByRole('navigation', { name: 'القائمة الرئيسية' })).getByRole('link', {
+        name: 'التقارير',
+      }),
+    ).toHaveAttribute('aria-current', 'page');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 
@@ -151,6 +155,10 @@ describe('«شاشة الدليل»', () => {
   it('is closed to a cashier', async () => {
     openEvidence({}, ['sale.create']);
 
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
   });
 });

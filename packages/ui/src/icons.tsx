@@ -8,7 +8,34 @@ import {
   Bell,
   BookOpen,
   CalendarClock,
+  Boxes,
   Camera,
+  Carrot,
+  Coffee,
+  Croissant,
+  Hammer,
+  Pill,
+  Accessibility,
+  Gem,
+  Handbag,
+  Glasses,
+  Watch,
+  Baby,
+  Snowflake,
+  SportShoe,
+  createLucideIcon,
+  Bed,
+  HeartPulse,
+  SprayCan,
+  Syringe,
+  ShoppingBasket,
+  Stethoscope,
+  Bandage,
+  Hand,
+  Droplet,
+  Pipette,
+  Thermometer,
+  UtensilsCrossed,
   ChartColumn,
   Check,
   ChevronDown,
@@ -27,6 +54,7 @@ import {
   Hash,
   House,
   ImageOff,
+  MessageCircle,
   Inbox,
   Info,
   KeyRound,
@@ -40,8 +68,11 @@ import {
   Minus,
   Monitor,
   MonitorSmartphone,
+  Moon,
   Package,
   PackageOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRight,
   Pencil,
   Percent,
@@ -50,6 +81,7 @@ import {
   QrCode,
   Receipt,
   RefreshCw,
+  Repeat2,
   Scale,
   Scissors,
   Search,
@@ -61,6 +93,7 @@ import {
   Smartphone,
   Sparkles,
   Store,
+  Sun,
   Tablet,
   Tag,
   Trash,
@@ -74,6 +107,7 @@ import {
   Warehouse,
   Wifi,
   WifiOff,
+  Wrench,
   X,
   type LucideIcon,
   type LucideProps,
@@ -144,6 +178,7 @@ export const DeleteIcon = defineIcon(Trash);
 export const MoreIcon = defineIcon(Ellipsis);
 export const PrintIcon = defineIcon(Printer);
 export const RetryIcon = defineIcon(RefreshCw);
+export const RepeatIcon = defineIcon(Repeat2);
 export const ExpandIcon = defineIcon(ChevronDown);
 export const EyeIcon = defineIcon(Eye);
 export const EyeOffIcon = defineIcon(EyeOff);
@@ -207,5 +242,117 @@ export const GridIcon = defineIcon(LayoutGrid);
 export const SparklesIcon = defineIcon(Sparkles);
 export const ShirtIcon = defineIcon(Shirt);
 export const NoImageIcon = defineIcon(ImageOff);
+export const ChatIcon = defineIcon(MessageCircle);
 export const PackageOpenIcon = defineIcon(PackageOpen);
 export const PanelIcon = defineIcon(PanelRight);
+export const WrenchIcon = defineIcon(Wrench);
+
+// The activity (sector) icons of tab 14 › أيقونة كل نشاط. Clothing, electronics, cosmetics and the
+// general shop reuse ShirtIcon, PhoneIcon, SparklesIcon and StoreIcon above.
+export const SupermarketIcon = defineIcon(ShoppingBasket);
+export const RestaurantIcon = defineIcon(UtensilsCrossed);
+export const CafeIcon = defineIcon(Coffee);
+export const PharmacyIcon = defineIcon(Pill);
+export const BakeryIcon = defineIcon(Croissant);
+export const BuildingMaterialsIcon = defineIcon(Hammer);
+export const MedicalSuppliesIcon = defineIcon(Stethoscope);
+export const ProduceIcon = defineIcon(Carrot);
+export const WholesaleIcon = defineIcon(Boxes);
+
+// What an item is (the placeholder of an item with no photo): shoes, jewellery, perfume, syringes, devices.
+export const ShoeIcon = defineIcon(SportShoe);
+export const SneakerIcon = ShoeIcon;
+
+// Garments lucide has no picture for (round 13): drawn on the same 24 grid, same stroke, so they sit with the rest.
+/** lucide wants a key on every part of a drawing */
+function glyph(name: string, parts: [string, Record<string, string | number>][]): LucideIcon {
+  return createLucideIcon(
+    name,
+    parts.map(([tag, attrs], i) => [tag, { ...attrs, key: `p${i}` }]) as Parameters<
+      typeof createLucideIcon
+    >[1],
+  );
+}
+const Trousers = glyph('serva-trousers', [
+  ['path', { d: 'M7 3h10l1.5 18h-5L12 10l-1.5 11h-5z' }],
+  ['path', { d: 'M7.2 7h9.6' }],
+]);
+const Skirt = glyph('serva-skirt', [
+  ['path', { d: 'M9 3h6l5.5 17h-17z' }],
+  ['path', { d: 'M8.3 7h7.4' }],
+  ['path', { d: 'M12 7v13' }],
+]);
+const Dress = glyph('serva-dress', [
+  ['path', { d: 'M9 2l.5 5L8 10 3.5 21h17L16 10l-1.5-3L15 2' }],
+  ['path', { d: 'M8 10h8' }],
+]);
+const Top = glyph('serva-top', [
+  ['path', { d: 'M8 3v4c0 1.5-1 2.5-2 3l1 11h10l1-11c-1-.5-2-1.5-2-3V3' }],
+  ['path', { d: 'M8 3c1 2 2 3 4 3s3-1 4-3' }],
+]);
+const Sock = glyph('serva-sock', [
+  ['path', { d: 'M8 3h7v9l5 3.5a3 3 0 0 1-1.5 5.5H10a3 3 0 0 1-2-3z' }],
+  ['path', { d: 'M8 7h7' }],
+]);
+const Belt = glyph('serva-belt', [
+  ['rect', { x: 2, y: 9, width: 20, height: 6, rx: 1 }],
+  ['rect', { x: 10, y: 7, width: 4, height: 10, rx: 1 }],
+  ['path', { d: 'M5 12h.01M18 12h.01' }],
+]);
+const Scarf = glyph('serva-scarf', [
+  ['path', { d: 'M6 4c0 3.5 2.5 6 6 6s6-2.5 6-6' }],
+  ['path', { d: 'M10 9.5L8 21h4.5l1-11' }],
+]);
+const Coat = glyph('serva-coat', [
+  ['path', { d: 'M9 3L4 6v7l3 .5V21h10v-7.5l3-.5V6l-5-3' }],
+  ['path', { d: 'M9 3l3 5 3-5' }],
+  ['path', { d: 'M12 8v13' }],
+]);
+// An abaya or a robe: long to the ankle, wide sleeves, the opening down the middle (not the dress's flare)
+const Robe = glyph('serva-robe', [
+  ['path', { d: 'M9 2h6l1.5 3.5L21 9l-2 4-2.5-1.5V22h-9V11.5L5 13 3 9l4.5-3.5z' }],
+  ['path', { d: 'M12 5.5V22' }],
+]);
+// A face mask: the curved body, the ear loops and two pleats
+const Mask = glyph('serva-mask', [
+  ['path', { d: 'M5 7.5c4.5-2 9.5-2 14 0v5c0 3-3.2 5-7 5s-7-2-7-5z' }],
+  ['path', { d: 'M5 9.5H2.5v3L5 12.5M19 9.5h2.5v3L19 12.5' }],
+  ['path', { d: 'M8 11.5h8M8.5 14h7' }],
+]);
+export const RobeIcon = defineIcon(Robe);
+export const MaskIcon = defineIcon(Mask);
+export const TrousersIcon = defineIcon(Trousers);
+export const SkirtIcon = defineIcon(Skirt);
+export const DressIcon = defineIcon(Dress);
+export const TopIcon = defineIcon(Top);
+export const SockIcon = defineIcon(Sock);
+export const BeltIcon = defineIcon(Belt);
+export const ScarfIcon = defineIcon(Scarf);
+export const CoatIcon = defineIcon(Coat);
+export const AccessoryIcon = defineIcon(Gem);
+export const PerfumeIcon = defineIcon(SprayCan);
+export const SyringeIcon = defineIcon(Syringe);
+export const HeartPulseIcon = defineIcon(HeartPulse);
+export const WheelchairIcon = defineIcon(Accessibility);
+// Medical supplies by kind (the till's item tiles): gloves, dressings, drips, tubes, thermometers
+export const GloveIcon = defineIcon(Hand);
+export const BandageIcon = defineIcon(Bandage);
+export const DropIcon = defineIcon(Droplet);
+export const TubeIcon = defineIcon(Pipette);
+export const ThermometerIcon = defineIcon(Thermometer);
+export const BagIcon = defineIcon(Handbag);
+export const GlassesIcon = defineIcon(Glasses);
+export const WatchIcon = defineIcon(Watch);
+export const KidsIcon = defineIcon(Baby);
+export const WinterIcon = defineIcon(Snowflake);
+export const SleepIcon = defineIcon(Bed);
+
+// The theme switch (هوية 4 › الوضع الداكن): light, dark, and «حسب الجهاز» (follow the device).
+export const SunIcon = defineIcon(Sun);
+export const MoonIcon = defineIcon(Moon);
+export const SystemThemeIcon = defineIcon(Monitor);
+// Fold and unfold the sidebar. Drawn, like every directional glyph here, for a left-to-right page
+// (the panel on the left) and mirrored in RTL, where the sidebar sits on the right: in Arabic they
+// show lucide's PanelRightClose and PanelRightOpen.
+export const PanelCollapseIcon = defineIcon(PanelLeftClose, { directional: true });
+export const PanelExpandIcon = defineIcon(PanelLeftOpen, { directional: true });

@@ -102,4 +102,22 @@ describe('alteration tickets', () => {
     expect((await ticket(store, { item: '' })).statusCode).toBe(400);
     expect((await ticket(store, { work: '' })).statusCode).toBe(400);
   });
+
+  it('keeps a deposit with the voucher it was taken on, and refuses one over the fee or without its voucher', async () => {
+    const store = await openStore(app);
+    const made = await ticket(store, { depositMinor: 50_000, depositVoucher: 'GFT-001-002-0000001' });
+    expect(made.statusCode, made.body).toBe(201);
+    expect(made.json<AlterationTicket>()).toMatchObject({
+      depositMinor: 50_000,
+      depositVoucher: 'GFT-001-002-0000001',
+    });
+    expect((await open(store))[0]).toMatchObject({ depositMinor: 50_000 });
+    // No deposit: zero and no voucher
+    expect((await ticket(store)).json<AlterationTicket>()).toMatchObject({
+      depositMinor: 0,
+      depositVoucher: null,
+    });
+    expect((await ticket(store, { depositMinor: 200_000, depositVoucher: 'GFT-1' })).statusCode).toBe(400);
+    expect((await ticket(store, { depositMinor: 1_000 })).statusCode).toBe(400);
+  });
 });

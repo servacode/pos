@@ -35,7 +35,9 @@ export function createDb(
   const client = postgres(url, {
     max: options.max ?? 10,
     onnotice: () => {},
-    connection: { application_name: options.applicationName ?? 'serva-api', ...timeouts },
+    // jit off: the planner's JIT compile costs 0.4-1.2 s on the first run of a heavier read (the customers list)
+    // and buys nothing on a store's few thousand rows.
+    connection: { application_name: options.applicationName ?? 'serva-api', jit: 'off', ...timeouts },
   });
   return { db: drizzle(client, { schema }), client };
 }
@@ -53,4 +55,23 @@ export async function withTenant<T>(
     await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
     return fn(tx);
   });
+}
+
+/**
+ * withTenant as one consistent, read-only picture of the store (repeatable read): every query of
+ * `fn` sees the data of the same instant. For long reads that must agree with each other, such as
+ * the store export; it cannot write.
+ */
+export async function withTenantSnapshot<T>(
+  db: Database,
+  tenantId: string,
+  fn: (tx: Transaction) => Promise<T>,
+): Promise<T> {
+  return db.transaction(
+    async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+      return fn(tx);
+    },
+    { isolationLevel: 'repeatable read', accessMode: 'read only' },
+  );
 }

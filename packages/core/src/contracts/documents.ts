@@ -12,6 +12,8 @@ import {
   uuidSchema,
 } from './common';
 import { customerPayloadSchema, type CustomerPayload } from './customers';
+import { chequeDetailsSchema } from './cheques';
+import { installmentPlanInputSchema, receiptAllocationSchema } from './installments';
 
 /**
  * Payloads of the documents a cashier device sends in phase 1 (17 › الإرسال; 15 › عقد المزامنة v1;
@@ -68,14 +70,12 @@ export const NON_CASH_METHODS: readonly PaymentMethod[] = [
   'points',
 ];
 
-/** Methods whose reference is mandatory: approval code, wallet transaction, transfer or cheque number (27). */
-export const REFERENCE_METHODS: readonly PaymentMethod[] = [
-  'card',
-  'wallet',
-  'transfer',
-  'cheque',
-  'voucher',
-];
+/**
+ * Methods whose reference is mandatory: wallet transaction, transfer, cheque or voucher number (27).
+ * A card's approval number is the store's choice (settings.till.cardApprovalRequired, enforced at
+ * the till), so the document accepts a card payment without it.
+ */
+export const REFERENCE_METHODS: readonly PaymentMethod[] = ['wallet', 'transfer', 'cheque', 'voucher'];
 
 /** Methods that put the amount on a named customer: credit (1200) and cheque (1160, party). */
 export const CUSTOMER_METHODS: readonly PaymentMethod[] = ['credit', 'cheque', 'points'];
@@ -107,6 +107,8 @@ const discountMeta = {
   source: z.enum(DISCOUNT_SOURCES),
   reason: z.string().trim().min(1).max(200).nullable(),
   approval: approvalSchema.nullable(),
+  /** The offer behind a `promotion` discount, so the report groups by it and a rename does not split it. Optional: older tills send only the name as the reason. */
+  promotionId: uuidSchema.optional(),
 };
 export const documentDiscountSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('percent'), bp: bpSchema, ...discountMeta }),
@@ -152,6 +154,14 @@ export const saleTotalsSchema = z.object({
   totalMinor: nonNegativeMinorSchema,
 });
 
+/** What a sale line took from one batch: the batch and its expiry as received, base units (thousandths) */
+export const batchAllocationSchema = z.object({
+  batchNo: z.string().trim().min(1).max(60).nullable(),
+  expiry: z.iso.date().nullable(),
+  qty: z.int().positive(),
+});
+export type BatchAllocation = z.output<typeof batchAllocationSchema>;
+
 /**
  * One sale line: the snapshot of the moment (08 › قواعد ثابتة 2) and what the engine made of it.
  *
@@ -188,15 +198,49 @@ export const saleLineSchema = z.object({
    * as optional, so a line without them leaves it out.
    */
   serials: z.array(z.string().trim().min(3).max(40)).max(1000).optional(),
+  /** Numbers a manager let through though the store never received them, and who allowed it */
+  serialOverrides: z.array(z.string().trim().min(3).max(40)).max(1000).optional(),
+  serialApprovedBy: uuidSchema.nullable().optional(),
+  /** The warranty in months the receipt printed an end date for (with serials) */
+  warrantyMonths: z.int().min(1).max(240).optional(),
+  /**
+   * The batch the till chose for this line (03 › الصيدليات: الدفعة, nearest expiry first) and its
+   * expiry date. Metadata only: stock and costing stay per item. Optional, left out elsewhere.
+   */
+  batchNo: z.string().trim().min(1).max(60).nullable().optional(),
+  batchExpiry: z.iso.date().nullable().optional(),
+  /**
+   * The batches the line's pieces came from, base units each (FEFO, split across batches when one
+   * is not enough). Optional: a line from an older till has only batchNo and batchExpiry above.
+   */
+  batches: z.array(batchAllocationSchema).max(50).optional(),
   /** Price of one pack in the invoice currency: what the engine prices */
   unitPriceMinor: nonNegativeMinorSchema,
   /** The tax rate row (posting picks its account); null with taxRateBp 0 when untaxed */
   taxRateId: uuidSchema.nullable(),
   taxRateBp: bpSchema,
   discount: documentDiscountSchema.nullable(),
+  /**
+   * Round 21: a service line, which the invoice-level discount skips (its own discount still
+   * applies). Optional and absent from every line priced before, which took its share.
+   */
+  noInvoiceDiscount: z.boolean().optional(),
   priced: pricedLineSchema,
 });
 export type SaleLine = z.output<typeof saleLineSchema>;
+
+/**
+ * «الوصفة» (03 › الصيدليات): the prescription number and doctor of a sale with a prescription
+ * medicine, and for a controlled one also the patient's name and ID number. Every field is
+ * optional text; the till asks for what the item and the store's setting require.
+ */
+export const prescriptionSchema = z.object({
+  ref: z.string().trim().min(1).max(60).nullable(),
+  doctor: z.string().trim().min(1).max(120).nullable(),
+  patientName: z.string().trim().min(1).max(120).nullable(),
+  patientId: z.string().trim().min(1).max(40).nullable(),
+});
+export type Prescription = z.output<typeof prescriptionSchema>;
 
 /**
  * One payment as received (09 › payments). For cash, amountMinor is what the customer handed over
@@ -223,6 +267,8 @@ export const salePaymentSchema = z
     cardBrand: z.string().trim().min(1).max(20).nullable(),
     /** The provider account (card acquirer, wallet such as Sham Cash): its subaccount under 1140/1150 */
     providerAccountId: uuidSchema.nullable(),
+    /** A cheque's bank, number, due date and drawer (the reference keeps them as one line too) */
+    cheque: chequeDetailsSchema.nullable().optional(),
   })
   .superRefine((p, ctx) => {
     if (REFERENCE_METHODS.includes(p.method) && p.reference === null) {
@@ -297,6 +343,15 @@ export const salePayloadSchema = z
     salespersonId: userId.nullable(),
     /** Optional (12 › الزبون); required for a credit payment */
     customerId: uuidSchema.nullable(),
+    /** The manager who allowed a sale on account by a cashier without «البيع بالآجل»; absent otherwise */
+    creditApproval: approvalSchema.nullable().optional(),
+    /**
+     * The manager who allowed a line to be sold with no valid batch, an expired one included (round 38:
+     * the store's «بيع المنتهي برمز المدير»). The server audits a sale of an expired batch with it.
+     */
+    batchApproval: approvalSchema.nullable().optional(),
+    /** What the customer owed after this sale, as the till last knew it: printed on a credit receipt */
+    customerBalanceAfterMinor: minorSchema.nullable().optional(),
     /** The customer's name as printed, a snapshot */
     customerName: z.string().trim().min(1).max(120).nullable(),
     /** Invoice currency: the store's base currency when the sale was made */
@@ -328,6 +383,18 @@ export const salePayloadSchema = z
      * contract v1 as optional: an ordinary sale leaves it out.
      */
     onlineOrderId: uuidSchema.nullable().optional(),
+    /**
+     * A pre-sale order (SO, «المندوبون والتوزيع») this sale delivers: the sale marks it delivered, in
+     * part or in whole. Optional and additive, like onlineOrderId: it changes nothing about how the sale posts.
+     */
+    salesOrderId: uuidSchema.nullable().optional(),
+    /** The prescription of a pharmacy sale (03 › الصيدليات); optional, an ordinary sale leaves it out */
+    prescription: prescriptionSchema.nullable().optional(),
+    /**
+     * Instalments (الأقساط): the plan this sale finances, its credit payment being the financed amount.
+     * Optional and absent from every sale made before; it changes nothing about how the sale posts.
+     */
+    installmentPlan: installmentPlanInputSchema.nullable().optional(),
   })
   .superRefine((sale, ctx) => {
     const issue = (path: (string | number)[], message: string) =>
@@ -677,8 +744,10 @@ export type CashMovementPayload = z.output<typeof cashMovementPayloadSchema>;
 /**
  * How a return pays back. `voucher` (03 › الملابس: قسيمة الاستبدال) pays nothing out: the amount
  * stays the customer's, on a voucher whose code is the return's own number (2310 until spent).
+ * `account` (08 › مرتجع مبيعات: تخفيض دين الزبون) pays nothing out either: the amount comes off what
+ * the customer owes (credit on 1200 for the customer the return names), as a collection would.
  */
-export const REFUND_METHODS = ['cash', 'card', 'wallet', 'transfer', 'voucher'] as const;
+export const REFUND_METHODS = ['cash', 'card', 'wallet', 'transfer', 'voucher', 'account'] as const;
 export type RefundMethod = (typeof REFUND_METHODS)[number];
 
 /** A returned line's share of its sale line, in the invoice currency (packages/core › sale-return.ts) */
@@ -717,10 +786,73 @@ export const refundSchema = z
     currency: currencyCodeSchema,
     amountMinor: positiveMinorSchema,
     reference: z.string().trim().min(1).max(64).nullable(),
+    /**
+     * Round 21: a cash refund is rounded to the cash step like a cash sale. `amountMinor` is what
+     * leaves the drawer; `roundingMinor` = amountMinor − the exact refund (negative when the till
+     * paid out less), posted to 6400. Optional and absent from every refund made before (and from
+     * every non-cash one): there the refund is exactly what the goods came to.
+     */
+    roundingMinor: z.int().optional(),
+    /**
+     * Round 36 (decision 10): part of a cash refund paid out of a foreign drawer (the dollar's),
+     * when the sale was paid in it. `amountMinor` stays the whole refund in the invoice currency
+     * (rounding included); each entry is what left its drawer in its own currency, its value in the
+     * invoice currency at `rate` (the rate the sale took that payment at), so the drawer of the
+     * invoice currency pays `amountMinor` less the sum of the `baseAmountMinor`. Optional and absent
+     * from every refund made before: there the whole refund leaves the invoice currency's drawer.
+     */
+    foreign: z
+      .array(
+        z.object({
+          currency: currencyCodeSchema,
+          amountMinor: positiveMinorSchema,
+          baseAmountMinor: positiveMinorSchema,
+          rate: exchangeRateSchema,
+        }),
+      )
+      .min(1)
+      .max(3)
+      .optional(),
   })
-  .refine((r) => r.method === 'cash' || r.method === 'voucher' || r.reference !== null, {
-    path: ['reference'],
-    message: 'a card, wallet or transfer refund needs its reference',
+  .refine(
+    (r) => r.method === 'cash' || r.method === 'voucher' || r.method === 'account' || r.reference !== null,
+    {
+      path: ['reference'],
+      message: 'a card, wallet or transfer refund needs its reference',
+    },
+  )
+  .refine((r) => r.roundingMinor === undefined || r.roundingMinor === 0 || r.method === 'cash', {
+    path: ['roundingMinor'],
+    message: 'only a cash refund is rounded',
+  })
+  .superRefine((r, ctx) => {
+    if (!r.foreign) return;
+    if (r.method !== 'cash') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['foreign'],
+        message: 'only a cash refund leaves a foreign drawer',
+      });
+      return;
+    }
+    const seen = new Set<string>();
+    for (const [i, f] of r.foreign.entries()) {
+      if (f.currency === r.currency || seen.has(f.currency)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['foreign', i, 'currency'],
+          message: 'one foreign drawer per currency, other than the invoice currency',
+        });
+      }
+      seen.add(f.currency);
+    }
+    if (bigSum(r.foreign.map((f) => f.baseAmountMinor)) > BigInt(r.amountMinor)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['foreign'],
+        message: 'the foreign drawers cannot pay more than the refund',
+      });
+    }
   });
 export type Refund = z.output<typeof refundSchema>;
 
@@ -746,10 +878,24 @@ export const returnPayloadSchema = z
     refunds: z.array(refundSchema).max(10),
     /** The manager who allowed it, when the cashier may not refund alone */
     approval: approvalSchema.nullable(),
+    /**
+     * The customer whose account an `account` refund comes off (the sale's own customer). Optional
+     * and absent from every other return, so tills that predate it still sync.
+     */
+    customerId: uuidSchema.nullable().optional(),
+    /**
+     * Round 35 (D7): the goods come back broken or past their date. They do not go back on the shelf:
+     * the server puts them in the branch's damaged stock (never sellable) until they are returned to
+     * the supplier or written off. Optional and absent from every return made before.
+     */
+    damaged: z.boolean().optional(),
   })
   .superRefine((r, ctx) => {
     const issue = (path: (string | number)[], message: string) =>
       ctx.addIssue({ code: 'custom', path, message });
+    if (r.refunds.some((f) => f.method === 'account') && !r.customerId) {
+      issue(['customerId'], 'a refund to the customer account needs the customer');
+    }
     const lineNos = new Set<number>();
     const saleLines = new Set<number>();
     r.lines.forEach((l, i) => {
@@ -767,7 +913,11 @@ export const returnPayloadSchema = z
       if (f.currency !== r.currency)
         issue(['refunds', i, 'currency'], 'a refund is paid in the invoice currency');
     });
-    if (bigSum(r.refunds.map((f) => f.amountMinor)) !== BigInt(r.totals.totalMinor)) {
+    // What leaves, less the cash rounding, is exactly the goods' total (rounding is 0 / absent on
+    // every refund an older till made, so those still pay back exactly the total)
+    if (
+      bigSum(r.refunds.map((f) => f.amountMinor - (f.roundingMinor ?? 0))) !== BigInt(r.totals.totalMinor)
+    ) {
       issue(['refunds'], 'the refunds must pay back exactly the total');
     }
   });
@@ -795,6 +945,8 @@ export const receiptPayloadSchema = z
     method: z.enum(RECEIPT_METHODS),
     reference: z.string().trim().min(1).max(64).nullable(),
     note: z.string().trim().max(200).nullable(),
+    /** Instalments (الأقساط): the instalments this payment settles; optional, posts nothing of its own */
+    allocations: z.array(receiptAllocationSchema).max(60).optional(),
   })
   .refine((r) => r.method === 'cash' || r.reference !== null, {
     path: ['reference'],
@@ -829,6 +981,14 @@ export const giftVoucherPayloadSchema = z
   });
 export type GiftVoucherPayload = z.output<typeof giftVoucherPayloadSchema>;
 
+/**
+ * `deposit` (DEP, «عربون»): what a customer pays up front for an alteration, a rental or an order.
+ * The same shape and the same postings as a gift voucher (Dr the drawer, Cr 2310), a document of its
+ * own so the Z and the ledger name it. Gift vouchers already taken as deposits stay as they are.
+ */
+export const depositPayloadSchema = giftVoucherPayloadSchema;
+export type DepositPayload = z.output<typeof depositPayloadSchema>;
+
 // ─── Validation entry point ──────────────────────────────────────────────────
 
 /** The payload schema of each document type that has one in this contract version. */
@@ -840,6 +1000,7 @@ export const DOCUMENT_PAYLOAD_SCHEMAS = {
   return: returnPayloadSchema,
   receipt: receiptPayloadSchema,
   gift_voucher: giftVoucherPayloadSchema,
+  deposit: depositPayloadSchema,
   customer: customerPayloadSchema,
 } as const;
 export type PayloadDocType = keyof typeof DOCUMENT_PAYLOAD_SCHEMAS;

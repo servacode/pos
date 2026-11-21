@@ -139,7 +139,8 @@ describe('«احجز» at the till (03 › الألبسة: الحجز بعربو
     await signIn(user);
     await scan(user, PRODUCTS.oil.barcode!.code);
     await scan(user, PRODUCTS.oil.barcode!.code);
-    await user.click(screen.getByRole('button', { name: 'احجز' }));
+    await user.click(screen.getByRole('button', { name: 'أدوات الفاتورة' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'احجز' }));
     const panel = await screen.findByRole('region', { name: 'احجز للزبون' });
     await user.type(within(panel).getByLabelText('اسم الزبون'), 'سلمى');
     await user.type(within(panel).getByLabelText('جوال الزبون'), '0933111222');
@@ -147,7 +148,7 @@ describe('«احجز» at the till (03 › الألبسة: الحجز بعربو
     await user.click(within(panel).getByRole('button', { name: 'احجز' }));
 
     expect(await screen.findByText(/حُجز ONL-000004/)).toBeInTheDocument();
-    const voucher = outbox.find((e) => e.type === 'gift_voucher')!;
+    const voucher = outbox.find((e) => e.type === 'deposit')!;
     expect(voucher.doc.payload).toMatchObject({ amountMinor: 10_000, method: 'cash' });
     expect(holds).toEqual([
       expect.objectContaining({
@@ -178,7 +179,8 @@ describe('«احجز» at the till (03 › الألبسة: الحجز بعربو
     const { user, outbox } = renderPos({ local, fetch });
     await signIn(user);
     await scan(user, PRODUCTS.oil.barcode!.code);
-    await user.click(screen.getByRole('button', { name: 'احجز' }));
+    await user.click(screen.getByRole('button', { name: 'أدوات الفاتورة' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'احجز' }));
     const panel = await screen.findByRole('region', { name: 'احجز للزبون' });
     await user.type(within(panel).getByLabelText('اسم الزبون'), 'سلمى');
     await user.type(within(panel).getByLabelText('جوال الزبون'), '0933111222');
@@ -188,7 +190,7 @@ describe('«احجز» at the till (03 › الألبسة: الحجز بعربو
     up = true;
     await user.click(within(panel).getByRole('button', { name: 'أعد إرسال الحجز' }));
     expect(await screen.findByText(/حُجز ONL-000005/)).toBeInTheDocument();
-    expect(outbox.filter((e) => e.type === 'gift_voucher')).toHaveLength(1);
+    expect(outbox.filter((e) => e.type === 'deposit')).toHaveLength(1);
     expect(holds).toHaveLength(2);
   });
 

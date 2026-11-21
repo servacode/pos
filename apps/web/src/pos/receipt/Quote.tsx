@@ -15,6 +15,10 @@ export interface QuoteData {
   cashierName: string;
   wholesale: boolean;
   customerName?: string | null;
+  /** QUO number and last day, once the server saved it; `unsaved` when it could not be */
+  number?: string | null;
+  validUntil?: string | null;
+  unsaved?: boolean;
 }
 
 /**
@@ -37,6 +41,11 @@ export function Quote({ data, width = 80 }: { data: QuoteData; width?: PaperWidt
       <div className="flex flex-col items-center">
         <span className="text-base font-bold">{data.settings.storeName}</span>
         <span className="text-lg font-bold">عرض سعر</span>
+        {data.number ? (
+          <bdi dir="ltr" className="num font-bold">
+            {data.number}
+          </bdi>
+        ) : null}
         {data.wholesale ? <span>بأسعار الجملة</span> : null}
         <span>
           {dateText(data.at, digits)} ، {clockText(data.at, digits)}
@@ -72,6 +81,12 @@ export function Quote({ data, width = 80 }: { data: QuoteData; width?: PaperWidt
         <span>المجموع</span>
         <Money minor={data.totals.totalMinor} currency={base} />
       </div>
+      {data.validUntil ? (
+        <p className="text-center">
+          صالح حتى <bdi className="num">{dateText(Date.parse(`${data.validUntil}T12:00:00`), digits)}</bdi>
+        </p>
+      ) : null}
+      {data.unsaved ? <p className="text-center text-xs">لم يُحفظ في النظام: لا اتصال بالخادم.</p> : null}
       <p className="text-center text-xs">هذا عرض سعر وليس فاتورة. الأسعار قابلة للتغيّر.</p>
     </div>
   );

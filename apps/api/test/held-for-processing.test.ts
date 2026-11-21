@@ -20,6 +20,7 @@ import { DOCUMENT_PROCESSORS } from '../src/services/processors';
 import type { SyncProcessors } from '../src/services/sync-push';
 import {
   documents,
+  newId,
   goldenFirstSale,
   movement,
   openStore,
@@ -149,25 +150,39 @@ function processedDocs(store: Store, doc: ReturnType<typeof documents>) {
       reference: 'W-1',
       note: null,
     }),
+    // Round 38: a product the till made offline
+    doc('temp_item', {
+      productId: newId(),
+      variantId: newId(),
+      actorId: store.userId,
+      nameAr: 'صنف جديد',
+      priceMinor: 5_000,
+      currency: 'SYP',
+      categoryId: null,
+      barcode: '6291041500299',
+      approval: null,
+    }),
   ];
 }
 
 describe('which types are posted today', () => {
-  it('splits DOC_SERIES into the 8 types with a processor and the 15 held ones', () => {
+  it('splits DOC_SERIES into the 10 types with a processor and the 14 held ones', () => {
     expect(PROCESSED).toEqual([
       'cash_movement',
       'customer',
+      'deposit',
       'gift_voucher',
       'receipt',
       'return',
       'sale',
       'shift_close',
       'shift_open',
+      'temp_item',
     ]);
-    expect(DOC_TYPES).toHaveLength(23);
+    expect(DOC_TYPES).toHaveLength(24);
     // When a phase adds a processor this number drops: the held documents of that type are then
     // the catch-up of that phase (M1), never posted here on their own.
-    expect(HELD).toHaveLength(15);
+    expect(HELD).toHaveLength(14);
   });
 });
 
@@ -424,7 +439,7 @@ describe('what the merchant sees', () => {
       headers: { authorization: `Bearer ${store.accessToken}` },
     });
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toMatchObject({ sent: 22, accepted: 22, heldForProcessing: 15 });
+    expect(res.json()).toMatchObject({ sent: 22, accepted: 22, heldForProcessing: 14 });
   });
 });
 

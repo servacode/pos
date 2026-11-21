@@ -1,12 +1,13 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { MeResponse, SupplierListResponse } from '@serva/core';
+import type { MeResponse, ProductDetail, SupplierListResponse } from '@serva/core';
 import { mockFetch, type MockRequest } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
 import { productsPath } from '../catalog/api';
 import { moneyOf, qtyOf } from './api';
+import { parseRunCounts, sizeRunQuantities } from './SizeGrid';
 
 function owner(): MeResponse {
   const base = makeMe();
@@ -25,7 +26,7 @@ function open() {
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: owner() }),
     'GET /v1/suppliers': () => ({ status: 200, body: suppliers }),
-    'GET /v1/purchases': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+    'GET /v1/purchases?limit=50': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
     'POST /v1/suppliers': (r: MockRequest) => {
       const s = {
         id: 's-1',
@@ -55,6 +56,7 @@ function open() {
           id: `v-${size}${i}`,
           label: `${size} · ${colour}`,
           archivedAt: null,
+          barcodes: [],
           attributes: [
             { name: 'المقاس', value: size },
             { name: 'اللون', value: colour },
@@ -68,7 +70,11 @@ function open() {
     }),
     'GET /v1/products/p-1': () => ({
       status: 200,
-      body: { id: 'p-1', nameAr: 'حليب طازج', variants: [{ id: 'v-1', label: null, archivedAt: null }] },
+      body: {
+        id: 'p-1',
+        nameAr: 'حليب طازج',
+        variants: [{ id: 'v-1', label: null, archivedAt: null, barcodes: [] }],
+      },
     }),
     'POST /v1/purchases': () => ({ status: 201, body: { id: 'pu-1', number: 'PUR-2026-000001' } }),
   });
@@ -88,6 +94,12 @@ describe('«المشتريات»', () => {
     await user.click(await screen.findByRole('button', { name: 'فاتورة شراء' }));
     await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'حليب');
     await user.click(await screen.findByRole('button', { name: 'حليب طازج' }));
+    // the cursor is already in the new line's quantity, and the item search comes before the payment choice
+    expect(await screen.findByLabelText('كمية حليب طازج')).toHaveFocus();
+    expect(screen.getByLabelText('كمية حليب طازج')).toHaveAttribute('placeholder', 'الكمية');
+    const search = screen.getByLabelText('أضف صنفاً بالاسم أو الباركود');
+    const payment = screen.getByRole('heading', { name: 'الدفع' });
+    expect(search.compareDocumentPosition(payment) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.type(await screen.findByLabelText('كمية حليب طازج'), '12');
     await user.type(screen.getByLabelText('كلفة حليب طازج'), '24000');
     await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));
@@ -100,6 +112,81 @@ describe('«المشتريات»', () => {
       lines: [{ variantId: 'v-1', qty: 12_000, costMinor: 2_400_000 }],
     });
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
+  });
+  it('asks before saving a total that looks like a pasted date, and saves when the owner says it is right', async () => {
+    const { user, requestsTo } = open();
+    await user.click(await screen.findByRole('button', { name: 'مورد جديد' }));
+    await user.type(screen.getByLabelText('اسم المورد'), 'مؤسسة الفرات');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await screen.findByText('أُضيف المورد.');
+    await user.click(await screen.findByRole('button', { name: 'فاتورة شراء' }));
+    await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'حليب');
+    await user.click(await screen.findByRole('button', { name: 'حليب طازج' }));
+    await user.type(await screen.findByLabelText('كمية حليب طازج'), '30');
+    await user.type(screen.getByLabelText('كلفة حليب طازج'), '30062027');
+    await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));
+    expect(await screen.findByText(/يشبه تاريخاً أو رقم هاتف/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/purchases')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'أعد المراجعة' }));
+    expect(requestsTo('POST', '/v1/purchases')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));
+    await user.click(await screen.findByRole('button', { name: 'الأرقام صحيحة، سجّل' }));
+    expect(
+      await screen.findByText('سُجّلت الفاتورة PUR-2026-000001 ودخلت البضاعة المخزون.'),
+    ).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/purchases')).toHaveLength(1);
+  });
+});
+
+describe('«تفاصيل» of a purchase invoice', () => {
+  it('opens its lines with quantity, cost, batch and expiry, read only', async () => {
+    const row = {
+      id: 'pu-7',
+      number: 'PUR-2026-000007',
+      date: '2026-11-02',
+      supplierId: 's-1',
+      supplierName: 'معمل الأمل',
+      payment: 'credit',
+      reference: null,
+      totalMinor: 1_200_000,
+    };
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/suppliers': {
+        status: 200,
+        body: { items: [], totalOwedMinor: 0, baseCurrency: 'SYP' } satisfies SupplierListResponse,
+      },
+      'GET /v1/purchases?limit=50': { status: 200, body: { items: [row], baseCurrency: 'SYP' } },
+      'GET /v1/purchases/pu-7': {
+        status: 200,
+        body: {
+          ...row,
+          branchId: 'b-1',
+          notes: null,
+          baseCurrency: 'SYP',
+          lines: [
+            {
+              lineNo: 1,
+              variantId: 'v-1',
+              productId: 'p-1',
+              name: 'قفازات طبية',
+              qty: 100_000,
+              costMinor: 1_200_000,
+              batchNo: 'G-77',
+              expiryDate: '2028-05-01',
+              serials: [],
+            },
+          ],
+        },
+      },
+    });
+    const { user } = renderApp('/purchases');
+    await user.click(await screen.findByRole('button', { name: 'تفاصيل PUR-2026-000007' }));
+    const lines = await screen.findByRole('list', { name: 'أصناف الفاتورة' });
+    expect(within(lines).getByText('قفازات طبية')).toBeInTheDocument();
+    expect(within(lines).getByText('G-77')).toBeInTheDocument();
+    expect(within(lines).getByText('2028-05-01')).toBeInTheDocument();
   });
 });
 
@@ -128,9 +215,9 @@ describe('typed amounts', () => {
     await user.type(within(grid).getByLabelText('كمية M · أبيض'), '6');
     await user.type(within(grid).getByLabelText('كمية L · أبيض'), '4');
     await user.type(within(grid).getByLabelText('كلفة القطعة الواحدة'), '12500');
-    await user.click(within(grid).getByRole('button', { name: 'أضف 10 قطعة' }));
+    await user.click(within(grid).getByRole('button', { name: 'أضف 10 قطع' }));
     expect(screen.getByLabelText('كمية قميص كتان M · أبيض')).toHaveValue('6');
-    expect(screen.getByLabelText('كلفة قميص كتان L · أبيض')).toHaveValue('50000');
+    expect(screen.getByLabelText('كلفة قميص كتان L · أبيض')).toHaveValue('50,000');
     await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));
     await screen.findByText(/سُجّلت الفاتورة/);
     expect(requestsTo('POST', '/v1/purchases')[0]?.body).toMatchObject({
@@ -139,5 +226,260 @@ describe('typed amounts', () => {
         { variantId: 'v-L1', qty: 4000, costMinor: 5_000_000 },
       ],
     });
+  });
+});
+
+describe('size runs («طقم مقاسات»)', () => {
+  it('fills every colour with the run, sizes in the grid’s order, and a run never adds a missing piece', async () => {
+    const { user } = open();
+    await user.click(await screen.findByRole('button', { name: 'مورد جديد' }));
+    await user.type(screen.getByLabelText('اسم المورد'), 'معمل');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await user.click(await screen.findByRole('button', { name: 'فاتورة شراء' }));
+    await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'قميص');
+    await user.click(await screen.findByRole('button', { name: 'قميص كتان' }));
+    const grid = await screen.findByRole('group', { name: 'جدول قميص كتان' });
+    await user.clear(within(grid).getByLabelText('عدد الأطقم لكل لون'));
+    await user.type(within(grid).getByLabelText('عدد الأطقم لكل لون'), '2');
+    await user.click(within(grid).getByRole('button', { name: 'طقم 1-2-2-1' }));
+    // Sizes M, L: the run's 1 and 2, twice; the blue L was never made
+    expect(within(grid).getByLabelText('كمية M · أبيض')).toHaveValue('2');
+    expect(within(grid).getByLabelText('كمية L · أبيض')).toHaveValue('4');
+    expect(within(grid).getByLabelText('كمية M · أزرق')).toHaveValue('2');
+  });
+});
+
+describe('size run quantities and their text', () => {
+  const piece = (size: string, colour: string): ProductDetail['variants'][number] =>
+    ({
+      id: `${size}-${colour}`,
+      archivedAt: null,
+      label: `${size} · ${colour}`,
+      attributes: [
+        { name: 'المقاس', value: size },
+        { name: 'اللون', value: colour },
+      ],
+    }) as ProductDetail['variants'][number];
+
+  it('puts 1-2-2-1 on S-M-L-XL of each colour, and follows the sizes when they are the columns', () => {
+    const rows = ['S', 'M', 'L', 'XL'].flatMap((s) => ['أبيض', 'أسود'].map((c) => piece(s, c)));
+    expect(sizeRunQuantities(rows, [1, 2, 2, 1], 1)).toEqual({
+      'S-أبيض': '1',
+      'S-أسود': '1',
+      'M-أبيض': '2',
+      'M-أسود': '2',
+      'L-أبيض': '2',
+      'L-أسود': '2',
+      'XL-أبيض': '1',
+      'XL-أسود': '1',
+    });
+    // Colour first, size second: the sizes are the columns
+    const flipped = rows.map((v) => ({ ...v, attributes: [...v.attributes].reverse() }));
+    expect(sizeRunQuantities(flipped, [1, 0, 3], 2)).toEqual({
+      'S-أبيض': '2',
+      'S-أسود': '2',
+      'L-أبيض': '6',
+      'L-أسود': '6',
+    });
+  });
+
+  it('reads «1-2-2-1» with Arabic digits and refuses what is no list of counts', () => {
+    expect(parseRunCounts('1-2-2-1')).toEqual([1, 2, 2, 1]);
+    expect(parseRunCounts('١ - ٢ - ٢ - ١')).toEqual([1, 2, 2, 1]);
+    expect(parseRunCounts('0-0')).toBeNull();
+    expect(parseRunCounts('a-b')).toBeNull();
+    expect(parseRunCounts('')).toBeNull();
+    expect(parseRunCounts('1-2-3-4-5-6-7-8-9-1-2-3-4')).toBeNull();
+  });
+});
+
+describe('payments and duplicate suppliers', () => {
+  function openWithSupplier() {
+    const suppliers: SupplierListResponse = {
+      items: [
+        {
+          id: 's-1',
+          name: 'شركة النور',
+          phone: '0933123456',
+          notes: null,
+          balanceMinor: 100_000,
+          archived: false,
+        },
+      ],
+      totalOwedMinor: 100_000,
+      baseCurrency: 'SYP',
+    };
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/suppliers': () => ({ status: 200, body: suppliers }),
+      'GET /v1/purchases?limit=50': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+      'POST /v1/supplier-payments': () => ({
+        status: 201,
+        body: {
+          id: 'sp-1',
+          number: 'PAY-1',
+          supplierId: 's-1',
+          date: '2026-10-30',
+          amountMinor: 1,
+          method: 'cash',
+        },
+      }),
+      'POST /v1/suppliers': () => ({
+        status: 201,
+        body: { id: 's-2', name: 'شركة النور', phone: null, notes: null, balanceMinor: 0, archived: false },
+      }),
+    });
+    return { ...mock, ...renderApp('/purchases') };
+  }
+
+  it('tells a supplier phone that cannot be right before sending, and sends nothing', async () => {
+    const { user, requestsTo } = openWithSupplier();
+    await user.click(await screen.findByRole('button', { name: 'مورد جديد' }));
+    await user.type(screen.getByLabelText('اسم المورد'), 'شركة جديدة');
+    await user.type(screen.getByLabelText('الجوال'), 'abc');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/رقم الهاتف غير صحيح/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/suppliers')).toHaveLength(0);
+  });
+
+  it('asks to confirm a payment above what is owed and sends it as an advance', async () => {
+    const { user, requestsTo } = openWithSupplier();
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '5000');
+    expect(await screen.findByText(/أكبر مما للمورد عليك/)).toBeInTheDocument();
+    const submit = screen.getByRole('button', { name: 'سجّل الدفعة' });
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByRole('switch', { name: 'نعم، هذه دفعة مقدّمة' }));
+    await user.click(submit);
+    expect(await screen.findByText('سُجّل سند الدفع PAY-1.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/supplier-payments')[0]?.body).toMatchObject({
+      amountMinor: 500_000,
+      advance: true,
+    });
+  });
+
+  it('pays by cheque with its bank, number and due date, out of the bank', async () => {
+    const { user, requestsTo } = openWithSupplier();
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '10');
+    await user.click(screen.getByRole('radio', { name: 'بشيك' }));
+    const submit = screen.getByRole('button', { name: 'سجّل الدفعة' });
+    expect(submit).toBeDisabled();
+    await user.type(screen.getByLabelText('البنك'), 'بنك سورية');
+    await user.type(screen.getByLabelText('رقم الشيك'), '4410');
+    await user.click(submit);
+    expect(await screen.findByText('سُجّل سند الدفع PAY-1.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/supplier-payments')[0]?.body).toMatchObject({
+      method: 'bank',
+      cheque: { bank: 'بنك سورية', number: '4410' },
+    });
+  });
+
+  it('refuses an absurd amount with a message and warns about a supplier with the same name', async () => {
+    const { user, requestsTo } = openWithSupplier();
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '88299999999999999');
+    expect(await screen.findByText(/كبير جداً/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'سجّل الدفعة' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'إلغاء' }));
+
+    await user.click(screen.getByRole('button', { name: 'مورد جديد' }));
+    await user.type(screen.getByLabelText('اسم المورد'), 'شركة النور');
+    expect(await screen.findByText(/يوجد مورد بالاسم نفسه/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'افتح المورد' })).toHaveAttribute(
+      'href',
+      '/suppliers/s-1/statement',
+    );
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(requestsTo('POST', '/v1/suppliers')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'أضِفه رغم ذلك' }));
+    expect(await screen.findByText('أُضيف المورد.')).toBeInTheDocument();
+  });
+});
+
+describe('size runs that do not match the grid', () => {
+  it('says what a run with fewer or more counts than sizes will do', async () => {
+    const { runMismatchNote } = await import('./SizeGrid');
+    expect(runMismatchNote('طقم', 4, 4)).toBeNull();
+    expect(runMismatchNote('طقم 3', 3, 5)).toBe('«طقم 3» له 3 من 5 مقاسات: الباقي بلا كمية.');
+    expect(runMismatchNote('طقم 6', 6, 4)).toBe('«طقم 6» له 6 أعداد والجدول 4 مقاسات فقط: الزائد يُهمَل.');
+  });
+});
+
+describe('round 44: money typed by the owner and retries', () => {
+  const supplier = {
+    id: 's-1',
+    name: 'شركة النور',
+    phone: '0933123456',
+    notes: null,
+    balanceMinor: 500_000,
+    archived: false,
+  };
+  function openWith(post: () => { status: number; body: unknown }) {
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/suppliers': () => ({
+        status: 200,
+        body: { items: [supplier], totalOwedMinor: 500_000, baseCurrency: 'SYP' },
+      }),
+      'GET /v1/purchases?limit=50': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+      'POST /v1/supplier-payments': post,
+    });
+    return { ...mock, ...renderApp('/purchases') };
+  }
+
+  it('says why a minus sign or a third decimal is refused, and sends nothing', async () => {
+    const { user, requestsTo } = openWith(() => ({ status: 201, body: {} }));
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    const amount = screen.getByLabelText('المبلغ بالليرة');
+    await user.type(amount, '-100');
+    expect(await screen.findByText(/لا تكتب إشارة ناقص/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'سجّل الدفعة' })).toBeDisabled();
+    await user.clear(amount);
+    await user.type(amount, '1000.555');
+    expect(await screen.findByText(/بمنزلتين عشريتين/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'سجّل الدفعة' })).toBeDisabled();
+    expect(requestsTo('POST', '/v1/supplier-payments')).toHaveLength(0);
+  });
+
+  it('keeps the same document id when the first try fails, so a retry cannot pay twice', async () => {
+    let calls = 0;
+    const { user, requestsTo } = openWith(() => {
+      calls += 1;
+      return calls === 1
+        ? { status: 500, body: { error: { code: 'internal', message: 'تعذّر الاتصال.' } } }
+        : {
+            status: 201,
+            body: {
+              id: 'sp-1',
+              number: 'PAY-1',
+              supplierId: 's-1',
+              date: '2026-10-30',
+              amountMinor: 1,
+              method: 'cash',
+            },
+          };
+    });
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '1,000.55');
+    await user.click(screen.getByRole('button', { name: 'سجّل الدفعة' }));
+    expect(await screen.findByText('تعذّر الاتصال.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'سجّل الدفعة' }));
+    expect(await screen.findByText('سُجّل سند الدفع PAY-1.')).toBeInTheDocument();
+    const [first, second] = requestsTo('POST', '/v1/supplier-payments').map(
+      (r) => r.body as { id?: string; amountMinor: number },
+    );
+    expect(first?.amountMinor).toBe(100_055);
+    expect(first?.id).toBeTruthy();
+    expect(second?.id).toBe(first?.id);
+  });
+
+  it('reads an amount with Arabic digits and Arabic separators', () => {
+    expect(moneyOf('١٬٢٠٠٫٥٠')).toBe(120_050);
+    expect(moneyOf('1،200')).toBe(120_000);
+    expect(moneyOf('-5')).toBeNull();
+    expect(moneyOf('1.234')).toBeNull();
   });
 });
