@@ -266,8 +266,22 @@ export function LandingPage() {
       <header className="nav">
         <div className="wrap navin">
           <Link className="logo" to="/" aria-label="سيرفا">
-            <img className="lk-l" src="/brand/serva-lockup.svg" alt="" width={102} height={36} />
-            <img className="lk-d" src="/brand/serva-lockup-dark.svg" alt="" width={102} height={36} />
+            <img
+              className="lk-l"
+              src="/brand/serva-logo.webp"
+              srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
+              alt=""
+              width={360}
+              height={240}
+            />
+            <img
+              className="lk-d"
+              src="/brand/serva-logo-on-dark.webp"
+              srcSet="/brand/serva-logo-on-dark.webp 1x, /brand/serva-logo-on-dark@2x.webp 2x"
+              alt=""
+              width={360}
+              height={240}
+            />
           </Link>
           <nav className="nav-links" aria-label="الأقسام">
             <a href="#sectors">القطاعات</a>
@@ -800,18 +814,20 @@ export function LandingPage() {
               <Link className="logo" to="/" aria-label="سيرفا">
                 <img
                   className="lk-l"
-                  src="/brand/serva-lockup.svg"
+                  src="/brand/serva-logo.webp"
+                  srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
                   alt=""
-                  width={102}
-                  height={36}
+                  width={360}
+                  height={240}
                   loading="lazy"
                 />
                 <img
                   className="lk-d"
-                  src="/brand/serva-lockup-dark.svg"
+                  src="/brand/serva-logo-on-dark.webp"
+                  srcSet="/brand/serva-logo-on-dark.webp 1x, /brand/serva-logo-on-dark@2x.webp 2x"
                   alt=""
-                  width={102}
-                  height={36}
+                  width={360}
+                  height={240}
                   loading="lazy"
                 />
               </Link>

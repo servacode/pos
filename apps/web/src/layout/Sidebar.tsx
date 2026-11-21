@@ -117,7 +117,7 @@ export function SidebarPanel({
       <div className="sh-head">
         <div className="sh-wm">
           <Link to="/" className="sh-wm-link" aria-label="سيرفا، الرئيسية">
-            {rail ? <LogoMark tone="sidebar" /> : <Logo tone="sidebar" />}
+            {rail ? <LogoMark tone="sidebar" /> : <Logo tone="sidebar" className="h-20" />}
           </Link>
           {mode === 'drawer' ? (
             <button type="button" className="sh-sbbtn sh-close" aria-label="أغلق القائمة" onClick={onClose}>

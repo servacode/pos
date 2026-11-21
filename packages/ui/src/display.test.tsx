@@ -9,7 +9,7 @@ import { Card, StatTile } from './Card';
 import { DataTable, type DataColumn } from './DataTable';
 import { EmptyState } from './EmptyState';
 import { CheckCircleIcon, CustomersIcon, ProductsIcon } from './icons';
-import { AppIcon, Logo, LOGO_S_PATH, LogoMark, LogoStacked } from './Logo';
+import { AppIcon, Logo, LogoMark, LogoStacked } from './Logo';
 import { Money } from './Money';
 import { PageHeader } from './PageHeader';
 import { ProgressBar } from './ProgressBar';
@@ -662,67 +662,41 @@ describe('EmptyState, Skeleton and Avatar', () => {
 });
 
 describe('Logo (docs/design/IDENTITY.md › الشعار)', () => {
-  it('draws the mark: the blue «S» swoosh, the green swoosh and arrow cut away around it', () => {
-    const { container } = renderUi(<LogoMark />);
-    const svg = container.querySelector('svg')!;
-
-    expect(svg).toHaveAttribute('viewBox', '40 40 440 440');
-    expect(svg).toHaveAttribute('aria-hidden', 'true');
-    const blue = [...svg.querySelectorAll('path')].find(
-      (p) => p.getAttribute('d') === LOGO_S_PATH && p.getAttribute('stroke-width') === '92',
-    )!;
-    expect(blue).toHaveClass('stroke-brand');
-    expect(blue).toHaveAttribute('stroke-linecap', 'round');
-    expect(svg.querySelectorAll('.fill-accent')).toHaveLength(2);
-    expect(svg.querySelector('mask')).not.toBeNull();
-    // Follows the theme through the tokens: no hard-coded colour in the page's own mode.
-    expect(svg.innerHTML).not.toMatch(/#[0-9a-f]{6}/i);
+  it('shows the owner’s own picture, never a redrawing', () => {
+    renderUi(<Logo />);
+    const logo = screen.getByRole('img', { name: 'SERVA' });
+    expect(logo.tagName).toBe('IMG');
+    expect(logo).toHaveAttribute('src', '/brand/serva-logo.webp');
+    expect(logo.getAttribute('srcset')).toContain('/brand/serva-logo@2x.webp 2x');
   });
 
-  it('names the mark when it stands alone', () => {
+  it('takes the see-through cut of the same picture on the dark sidebar', () => {
+    renderUi(<Logo tone="sidebar" />);
+    expect(screen.getByRole('img', { name: 'SERVA' })).toHaveAttribute(
+      'src',
+      '/brand/serva-logo-on-dark.webp',
+    );
+  });
+
+  it('shows the «S» of the picture as the mark, hidden from readers unless it is named', () => {
+    const { container } = renderUi(<LogoMark />);
+    const mark = container.querySelector('img')!;
+    expect(mark).toHaveAttribute('src', '/brand/serva-mark.webp');
+    expect(mark).toHaveAttribute('aria-hidden', 'true');
     renderUi(<LogoMark label="علامة سيرفا" />);
     expect(screen.getByRole('img', { name: 'علامة سيرفا' })).toBeInTheDocument();
   });
 
-  it('draws the app icon as the mark on a rounded tile', () => {
-    renderUi(<AppIcon label="أيقونة التطبيق" />);
-    const icon = screen.getByRole('img', { name: 'أيقونة التطبيق' });
-    expect(icon.parentElement).toHaveClass('bg-surface', 'rounded-[22%]');
-  });
-
-  it('draws the lockup «SERVA» with the letters, and «سيرفا» under the stacked one', () => {
+  it('draws the app icon as the mark on a rounded tile, and «سيرفا» under the stacked logo', () => {
     renderUi(
       <>
-        <Logo />
+        <AppIcon label="أيقونة التطبيق" />
         <LogoStacked />
       </>,
     );
-    const lockups = screen.getAllByRole('img', { name: 'SERVA' });
-    expect(lockups).toHaveLength(2);
-    for (const lockup of lockups) {
-      expect(lockup).toHaveAttribute('viewBox', '44 44 1190 420');
-      expect(lockup.querySelectorAll('path').length).toBeGreaterThanOrEqual(4);
-    }
+    expect(screen.getByRole('img', { name: 'أيقونة التطبيق' })).toHaveClass('rounded-[22%]');
+    expect(screen.getByRole('img', { name: 'SERVA' })).toBeInTheDocument();
     expect(screen.getByText('سيرفا')).toHaveClass('text-brand-ink', 'font-semibold');
-  });
-
-  it('gives each logo its own mask id', () => {
-    const { container } = renderUi(
-      <>
-        <LogoMark />
-        <Logo />
-        <LogoMark label="علامة سيرفا" />
-      </>,
-    );
-    const ids = [...container.querySelectorAll('mask')].map((mask) => mask.id);
-    expect(new Set(ids).size).toBe(3);
-    for (const id of ids) expect(id).toMatch(/^[\w-]+$/);
-  });
-
-  it('takes the green of the sidebar and the dark-surface blue on the deep sidebar', () => {
-    const { container } = renderUi(<Logo tone="sidebar" />);
-    expect(container.querySelectorAll('.fill-sidebar-brand')).toHaveLength(2);
-    expect(container.querySelector('path[stroke="#4a80ff"]')).not.toBeNull();
   });
 });
 

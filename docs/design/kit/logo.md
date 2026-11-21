@@ -1,3 +1,5 @@
+> **Superseded (2026-11-21):** the logo is now the owner's own picture, used as it is. See `docs/design/IDENTITY.md` › Logo and `apps/web/public/brand/`. The drawings below are the old emerald mark, kept only as history.
+
 # شعار سيرفا
 
 > الشعار المعتمد الآن: S زرقاء بسهم أخضر مع «erva» (انظر IDENTITY.md › Logo، والملفات في `apps/web/public/brand/`). ما بعد هذا السطر هو الشعار الزمرّدي القديم، محفوظ للأرشيف فقط.

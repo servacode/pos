@@ -2604,7 +2604,10 @@
 }
 .lp .logo img {
   width: auto;
-  height: 36px;
+  height: 64px;
+}
+.lp .logo .lk-l {
+  border-radius: 10px;
 }
 .lp[data-v='a'] .logo .lk-l,
 .lp[data-v='b'] .logo .lk-d {
@@ -2612,6 +2615,6 @@
 }
 @media (max-width: 640px) {
   .lp .logo img {
-    height: 32px;
+    height: 44px;
   }
 }
