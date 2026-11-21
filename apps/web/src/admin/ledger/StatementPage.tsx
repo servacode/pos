@@ -18,6 +18,7 @@ import {
   PrintIcon,
   Skeleton,
   StatTile,
+  ToggleChip,
   useDigits,
   type DataColumn,
 } from '@serva/ui';
@@ -49,6 +50,19 @@ const COPY = {
     signed: (minor: number) => -minor,
   },
 } as const;
+
+/** Period presets of the statement: the first and last day of each, as ISO days, from today's day */
+export function statementPeriods(today: string): { key: string; label: string; from: string; to: string }[] {
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7));
+  const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
+  return [
+    { key: 'month', label: 'هذا الشهر', from: iso(year, month, 1), to: today },
+    { key: 'last', label: 'الشهر الماضي', from: iso(year, month - 1, 1), to: iso(year, month, 0) },
+    { key: 'q', label: 'آخر 3 أشهر', from: iso(year, month - 2, 1), to: today },
+    { key: 'year', label: 'هذه السنة', from: `${year}-01-01`, to: today },
+  ];
+}
 
 type Copy = (typeof COPY)[keyof typeof COPY];
 
@@ -381,6 +395,21 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
         }
       />
       <Card className="grid gap-4 sm:flex sm:flex-wrap sm:items-end print:hidden">
+        <div role="radiogroup" aria-label="الفترة" className="flex w-full flex-wrap gap-2">
+          {statementPeriods(today).map((period) => (
+            <ToggleChip
+              key={period.key}
+              type="radio"
+              name="statement-period"
+              label={period.label}
+              checked={from === period.from && to === period.to}
+              onChange={() => {
+                setFrom(period.from);
+                setTo(period.to);
+              }}
+            />
+          ))}
+        </div>
         <DayField label="من" value={from} max={to} onChange={setFrom} />
         <DayField label="إلى" value={to} max={today} onChange={setTo} />
       </Card>

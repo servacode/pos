@@ -12,6 +12,7 @@ import {
 } from '../lib/api';
 import { AuthContext, type AuthContextValue, type AuthState } from './AuthContext';
 import { clearReportCache } from '../admin/reports/useReport';
+import { setBranchScope } from '../layout/branchScope';
 
 function fetchMe(): Promise<MeResponse> {
   return apiFetch<MeResponse>('/v1/me', { auth: true });
@@ -92,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () =>
       onSessionExpired(() => {
         clearReportCache();
+        setBranchScope(null);
         keepMe(null);
         setState({ status: 'signedOut', reason: 'expired' });
       }),
@@ -139,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const startSession = useCallback(
     async (auth: AuthResponse) => {
       clearReportCache();
+      setBranchScope(null);
       setAccessToken(auth.accessToken);
       await refreshMe();
     },
@@ -155,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     await apiFetch<void>('/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     clearReportCache();
+    setBranchScope(null);
     keepMe(null);
     forgetSession();
     setState({ status: 'signedOut' });

@@ -1854,7 +1854,7 @@ export function HomePage() {
     lowRows(merch, groupedLow(merch.data?.lowStock ?? [])).length === 0 &&
     moneyFigures(me, money).total === 0 &&
     !moneyFigures(me, money).loading;
-  const manyBranches = me.branches.length > 1 && !branchOnly;
+  const manyBranches = me.branches.length > 1 && !branchOnly && seesSales;
   const scopeName = scope ? (me.branches.find((b) => b.id === scope)?.name ?? null) : null;
   const firstWay =
     seesSales && brandNew ? (
@@ -1901,16 +1901,13 @@ export function HomePage() {
             </button>
           </Alert>
         ) : null}
-        {quietFresh ? firstWay : null}
-        <TrialBanner me={me} />
-        {summary.data ? <SetupStrip me={me} summary={summary.data} /> : null}
         <PageTop
           title={`أهلاً، ${firstName(me.user.fullName)}`}
           subtitle={`${weekdayOf(today)} ${dayText(today, me.settings.numberFormat)} · ${
             branchOnly
               ? `أرقام ${branchOnly} فقط${seesCheques ? '، وما على الزبائن للمتجر كله' : ''}.`
               : scopeName
-                ? `أرقام فرع ${scopeName} فقط. الطلبات والشيكات والأقساط والموردون وديون الزبائن للمتجر كله.`
+                ? `أرقام ${scopeName.startsWith('فرع') ? '' : 'فرع '}${scopeName} فقط. الطلبات والشيكات والأقساط والموردون وديون الزبائن للمتجر كله.`
                 : seesSales
                   ? 'هذه صورة متجرك اليوم.'
                   : 'أهلاً بك في عملك اليوم.'
@@ -1926,6 +1923,9 @@ export function HomePage() {
             />
           </div>
         ) : null}
+        {quietFresh ? firstWay : null}
+        <TrialBanner me={me} />
+        {summary.data ? <SetupStrip me={me} summary={summary.data} /> : null}
         {!brandNew && (seesSales || canCatalog) ? (
           <div className="-mt-3 flex min-w-0 flex-wrap items-center gap-2 max-sm:flex-col max-sm:flex-nowrap max-sm:items-stretch">
             {seesSales ? (
@@ -2005,7 +2005,6 @@ export function HomePage() {
                 }}
               />
             ) : null}
-            {seesStock && !brandNew ? <BestSellersWeek report={weekTop} /> : null}
             {!quietFresh ? firstWay : null}
             {!seesSales ? canSell ? <TillCard /> : <StoreCard me={me} /> : null}
           </div>
@@ -2028,6 +2027,7 @@ export function HomePage() {
               <div className="grid items-start gap-6 md:grid-cols-2 xl:grid-cols-1">
                 <BestSellers report={day} />
                 <PaymentMix me={me} report={day} />
+                {seesStock ? <BestSellersWeek report={weekTop} /> : null}
               </div>
             ) : null}
           </div>

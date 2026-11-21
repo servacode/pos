@@ -42,7 +42,7 @@ import { Amt, DownloadGlyph, PageTop, SalesPage, StatusPill, SxTable, type SxCol
 import { exportCustomers, listCustomerPage, listGroups, type CustomerPageQuery } from './api';
 import { customersCsv } from './csv';
 import { CustomerForm, KIND_SECTORS } from './CustomerForm';
-import { birthdayLink, debtReminderLink } from './debtReminder';
+import { birthdayLink, birthdayTiming, debtReminderLink } from './debtReminder';
 import { Ago, BalanceCell, CheckChip, CountLine, Empty, SortHead, Who } from './parts';
 import { BulkReminder } from './BulkReminder';
 import { GroupsDialog } from './GroupsDialog';
@@ -137,6 +137,28 @@ function RowMenu({ customer, store, today }: { customer: CustomerListItem; store
   );
 }
 
+/** In the birthday view: the greeting as a visible button (the same WhatsApp link as the row's «⋯») */
+function BirthdayGreet({
+  customer,
+  store,
+  today,
+}: {
+  customer: CustomerListItem;
+  store: string;
+  today: string;
+}) {
+  const link =
+    customer.noMessages || !birthdayTiming(customer.birthDate, today)
+      ? null
+      : birthdayLink(customer.phone, { name: customer.name, store });
+  if (!link) return null;
+  return (
+    <a href={link} target="_blank" rel="noreferrer" className="sx-fbtn">
+      <SendIcon size={16} /> هنّئه على واتساب
+    </a>
+  );
+}
+
 /** A customer as a card on a phone: name and balance, then what else is known */
 function CustomerCard({
   customer,
@@ -144,12 +166,14 @@ function CustomerCard({
   clothing,
   store,
   today,
+  birthdays,
 }: {
   customer: CustomerListItem;
   base: CurrencyCode;
   clothing: boolean;
   store: string;
   today: string;
+  birthdays: boolean;
 }) {
   const digits = useDigits();
   return (
@@ -160,6 +184,9 @@ function CustomerCard({
           <span className="cx-badges">
             {customer.priceTier === 'wholesale' ? <StatusPill kind="ok">جملة</StatusPill> : null}
             {customer.archived ? <StatusPill kind="open">مؤرشف</StatusPill> : null}
+            {birthdays && birthdayTiming(customer.birthDate, today) === 'today' ? (
+              <StatusPill kind="warn">اليوم</StatusPill>
+            ) : null}
             {customer.approvalStatus === 'pending' ? (
               <StatusPill kind="warn">بانتظار الموافقة</StatusPill>
             ) : null}
@@ -171,6 +198,7 @@ function CustomerCard({
         <RowMenu customer={customer} store={store} today={today} />
       </span>
       <span className="x">
+        {birthdays ? <BirthdayGreet customer={customer} store={store} today={today} /> : null}
         <span>
           {customer.lastPurchaseDate ? (
             <>
@@ -320,7 +348,11 @@ export function CustomersPage() {
             {c.groupName ? <StatusPill kind="ok">{c.groupName}</StatusPill> : null}
             {c.archived ? <StatusPill kind="open">مؤرشف</StatusPill> : null}
             {c.approvalStatus === 'pending' ? <StatusPill kind="warn">بانتظار الموافقة</StatusPill> : null}
+            {birthdays && birthdayTiming(c.birthDate, today) === 'today' ? (
+              <StatusPill kind="warn">اليوم</StatusPill>
+            ) : null}
           </span>
+          {birthdays ? <BirthdayGreet customer={c} store={me.tenant.name} today={today} /> : null}
           {c.phone ? (
             <span className="sx-subline">
               <bdi dir="ltr" className="sx-n">
@@ -628,6 +660,7 @@ export function CustomersPage() {
                     clothing={clothing}
                     store={me.tenant.name}
                     today={today}
+                    birthdays={birthdays}
                   />
                 ))}
               </ul>

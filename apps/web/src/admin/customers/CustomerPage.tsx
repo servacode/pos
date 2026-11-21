@@ -18,6 +18,7 @@ import {
   EditIcon,
   formatQuantity,
   SalesIcon,
+  SendIcon,
   Skeleton,
   UndoIcon,
   useDigits,
@@ -37,7 +38,7 @@ import { CustomerPlans } from '../installments/CustomerPlans';
 import { archiveDuplicate, getCustomer, getPurchases, listCustomers, updateCustomer } from './api';
 import { CustomerForm } from './CustomerForm';
 import { CustomerMoneyDialog } from './CustomerMoneyDialog';
-import { debtReminderLink } from './debtReminder';
+import { birthdayLink, birthdayTiming, debtReminderLink } from './debtReminder';
 import { Empty } from './parts';
 import './customers.css';
 
@@ -342,6 +343,13 @@ export function CustomerPage() {
           store: me.tenant.name,
         })
       : null;
+  // The birthday greeting is offered in the month of the birthday
+  const greeting =
+    customer &&
+    !customer.noMessages &&
+    birthdayTiming(customer.birthDate, isoDay(Date.now(), me.tenant.timezone))
+      ? birthdayLink(customer.phone, { name: customer.name, store: me.tenant.name })
+      : null;
 
   const columns: SxColumn<StatementRow>[] = [
     {
@@ -434,6 +442,11 @@ export function CustomerPage() {
                   {reminder ? (
                     <a href={reminder} target="_blank" rel="noreferrer" className="sx-fbtn">
                       <CashIcon size={16} /> ذكّره بالدين
+                    </a>
+                  ) : null}
+                  {greeting ? (
+                    <a href={greeting} target="_blank" rel="noreferrer" className="sx-fbtn">
+                      <SendIcon size={16} /> هنّئه بعيد ميلاده
                     </a>
                   ) : null}
                   {canManage && !editing ? (

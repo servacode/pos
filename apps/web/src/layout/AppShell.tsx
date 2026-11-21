@@ -15,7 +15,7 @@ import {
   StoreIcon,
   cn,
 } from '@serva/ui';
-import { holdsAny } from '../admin/reports/access';
+import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
 import { useAuth, useMe } from '../auth/useAuth';
 import { apiFetch } from '../lib/api';
 import { formatDays, formatNumber } from '../lib/format';
@@ -481,7 +481,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const branchLabel =
     branchCount > 1 ? 'كل الفروع' : tied && branchCount === 1 ? (me.branches[0]?.name ?? null) : null;
   const branchChoice =
-    branchCount > 1 && !tied && current?.key === 'home'
+    branchCount > 1 && !tied && current?.key === 'home' && holdsAny(me, DAY_REPORT_ACCESS)
       ? { branches: me.branches, value: chosenBranch }
       : null;
   const waiting = formatNumber(pending.length, digits);

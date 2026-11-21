@@ -1,14 +1,24 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import type { VoucherListRow } from '@serva/core';
-import { Alert, Button, Dialog, GiftIcon, SearchField, TextField, useDigits } from '@serva/ui';
+import type { CurrencyCode, VoucherListRow } from '@serva/core';
+import {
+  Alert,
+  Button,
+  Dialog,
+  GiftIcon,
+  SearchField,
+  Skeleton,
+  StatTile,
+  TextField,
+  useDigits,
+} from '@serva/ui';
 import { DateField } from '../../lib/DateField';
 import { useMe } from '../../auth/useAuth';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { errorMessage } from '../../lib/api';
 import { dayText, isoDay } from '../../lib/dates';
 import { Pager, useCursorPages } from '../pager';
-import { Amt, Panel, StatusPill, SxTable, type SxColumn } from '../sales/ui';
+import { Amt, StatusPill, SxTable, type SxColumn } from '../sales/ui';
 import { listVouchers, updateVoucher } from './api';
 import { CheckChip, Empty, RadioChips } from './parts';
 
@@ -138,6 +148,16 @@ export function VouchersPanel() {
     listVouchers(status, cursor, { kind, q }),
   );
   const items = data?.items ?? [];
+  const openCount = (data?.outstanding ?? []).reduce((n, o) => n + o.count, 0);
+  // What was spent from the listed vouchers issued this month (the list carries no spending date)
+  const month = isoDay(Date.now(), me.tenant.timezone).slice(0, 7);
+  const usedByCurrency = new Map<CurrencyCode, number>();
+  for (const v of items) {
+    if (v.redeemedMinor > 0 && isoDay(Date.parse(v.createdAt), me.tenant.timezone).startsWith(month)) {
+      usedByCurrency.set(v.currency, (usedByCurrency.get(v.currency) ?? 0) + v.redeemedMinor);
+    }
+  }
+  const usedThisMonth = [...usedByCurrency];
 
   const columns: SxColumn<VoucherListRow>[] = [
     {
@@ -219,28 +239,53 @@ export function VouchersPanel() {
 
   return (
     <>
-      <Panel title="ما على المتجر من قسائم" aside="ما لم يُصرف بعد، ويُحسب التزاماً على المتجر">
-        {data ? (
-          data.outstanding.length === 0 ? (
-            <p className="sx-wait">لا قسائم مفتوحة.</p>
-          ) : (
-            <dl className="cx-plan">
-              {data.outstanding.map((o) => (
-                <div key={o.currency}>
-                  <dt>
-                    <bdi className="sx-n">{o.count}</bdi> قسيمة مفتوحة
-                  </dt>
-                  <dd>
-                    <Amt minor={o.amountMinor} currency={o.currency} />
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )
-        ) : (
-          <p className="sx-wait">نحمّل…</p>
-        )}
-      </Panel>
+      <div className="grid gap-4 sm:grid-cols-3" aria-label="ما على المتجر من قسائم">
+        <StatTile
+          label="القسائم المفتوحة"
+          value={data ? <bdi className="sx-n">{openCount}</bdi> : <Skeleton className="h-6 w-12" />}
+          footnote="قسيمة مفتوحة"
+        />
+        <StatTile
+          label="ما على المتجر منها"
+          value={
+            data ? (
+              data.outstanding.length === 0 ? (
+                <span className="sx-z">—</span>
+              ) : (
+                <span className="flex flex-col">
+                  {data.outstanding.map((o) => (
+                    <Amt key={o.currency} minor={o.amountMinor} currency={o.currency} />
+                  ))}
+                </span>
+              )
+            ) : (
+              <Skeleton className="h-6 w-24" />
+            )
+          }
+          footnote="ما لم يُصرف بعد، ويُحسب التزاماً على المتجر"
+          wrapFootnote
+        />
+        <StatTile
+          label="صُرف من قسائم هذا الشهر"
+          value={
+            data ? (
+              usedThisMonth.length === 0 ? (
+                <span className="sx-z">—</span>
+              ) : (
+                <span className="flex flex-col">
+                  {usedThisMonth.map(([currency, minor]) => (
+                    <Amt key={currency} minor={minor} currency={currency} />
+                  ))}
+                </span>
+              )
+            ) : (
+              <Skeleton className="h-6 w-24" />
+            )
+          }
+          footnote="من القسائم المعروضة التي صدرت هذا الشهر"
+          wrapFootnote
+        />
+      </div>
       <div className="sx-card sx-filterbar">
         <div className="sx-search">
           <SearchField
