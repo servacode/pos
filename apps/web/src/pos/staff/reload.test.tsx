@@ -21,8 +21,10 @@ describe('reloading the till', () => {
     renderPos({ local });
     expect(await screen.findByRole('list', { name: 'الأصناف' })).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'الموظفون' })).not.toBeInTheDocument();
-    // No code is kept anywhere
-    expect(JSON.stringify(globalThis.sessionStorage)).not.toContain(PINS[ids.samer]!);
+    // No code is kept anywhere (long numbers such as timestamps are dropped first: one read at
+    // 1795258000000 ms holds «2580» by chance)
+    const kept = JSON.stringify(globalThis.sessionStorage).replace(/\d{7,}/g, '#');
+    expect(kept).not.toContain(PINS[ids.samer]!);
   });
 
   it('asks for the code again after the screen is locked, and after the idle window', async () => {
