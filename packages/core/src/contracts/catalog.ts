@@ -399,6 +399,8 @@ export const productListQuery = z.object({
   stock: z.enum(['out']).optional(),
   /** The order: by name (default) or the least stock first */
   sort: z.enum(['name', 'stock']).default('name'),
+  /** '1': also the unit, the wholesale price and (for cost.view) the average cost, for the export */
+  detail: z.enum(['1']).optional(),
   ...listPageQuery,
 });
 export type ProductListQuery = z.input<typeof productListQuery>;
@@ -506,6 +508,12 @@ export interface ProductListItem {
   thumbUrl?: string | null;
   /** The earliest expiry over the live pieces that hold stock (yyyy-mm-dd); null when none is tracked */
   nearestExpiry?: string | null;
+  /** Only with `detail=1` */
+  unitName?: string | null;
+  /** Lowest and highest wholesale price over live variants; null when none has one (`detail=1`) */
+  wholesale?: { minMinor: number; maxMinor: number } | null;
+  /** The average cost of one unit in the base currency; null: none, or the user lacks cost.view (`detail=1`) */
+  costMinor?: number | null;
   version: number;
 }
 
@@ -1055,6 +1063,8 @@ export type BulkPriceInput = z.input<typeof bulkPriceInput>;
 
 export interface BulkPriceResult {
   applied: boolean;
+  /** The id to give «تراجع» (POST /v1/prices/bulk/{id}/undo); null when nothing was applied */
+  changeId?: string | null;
   items: {
     productId: string;
     variantId: string;

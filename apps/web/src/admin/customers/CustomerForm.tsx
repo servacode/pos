@@ -10,16 +10,18 @@ import {
   type CustomerDetail,
   type CurrencyCode,
   type CustomerKind,
+  type CustomerGroup,
   type CustomerListItem,
   type RegionRow,
   type SectorKey,
 } from '@serva/core';
 import { Alert, Button, Select, Switch, TextField } from '@serva/ui';
+import { DateField } from '../../lib/DateField';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, errorMessage } from '../../lib/api';
 import { storeSells } from '../../lib/sectors';
 import { approveCustomer, listRegions } from '../distribution/api';
-import { createCustomer, listCustomers, updateCustomer } from './api';
+import { createCustomer, listCustomers, listGroups, updateCustomer } from './api';
 import './customers.css';
 
 /** The shops that sell to clinics, hospitals and offices: only they type a customer by kind */
@@ -176,12 +178,23 @@ export function CustomerForm({
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // «المجموعة» and the birthday
+  const [groups, setGroups] = useState<CustomerGroup[]>([]);
+  const [groupId, setGroupId] = useState(customer?.groupId ?? '');
+  const [birthDate, setBirthDate] = useState(customer?.birthDate ?? '');
+  useEffect(() => {
+    listGroups()
+      .then((g) => setGroups(g.filter((x) => !x.archived || x.id === customer?.groupId)))
+      .catch(() => setGroups([]));
+  }, [customer?.groupId]);
+  /** The server said another customer has this phone: the owner may save anyway */
+  const [twinPhone, setTwinPhone] = useState(false);
 
   const same = useTwins(existing, name, phone, customer?.id);
   const base = me.settings.baseCurrency;
   const unit = base === 'SYP' ? 'بالليرة' : `(${base})`;
 
-  async function save() {
+  async function save(confirmDuplicate = false) {
     // Everything that can be wrong with what was typed is said before anything is sent
     const creditLimitMinor = limitOf(limit, base);
     if (creditLimitMinor === 'bad') {
@@ -211,11 +224,18 @@ export function CustomerForm({
       kind: kind || null,
       contactName,
       contactPhone,
+      groupId: groupId || null,
+      birthDate: birthDate || null,
+      ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
     };
     try {
       onSaved(customer ? await updateCustomer(customer.id, input) : await createCustomer(input));
     } catch (e) {
-      if (e instanceof ApiError && e.fields) setFields(e.fields);
+      if (e instanceof ApiError && e.status === 409 && e.fields?.phone) {
+        setTwinPhone(true);
+        setFields({ phone: e.fields.phone });
+        setError(e.message);
+      } else if (e instanceof ApiError && e.fields) setFields(e.fields);
       else setError(errorMessage(e));
       setSaving(false);
     }
@@ -237,7 +257,18 @@ export function CustomerForm({
           </span>
         </div>
         <div className="cx-form">
-          {error ? <Alert tone="error">{error}</Alert> : null}
+          {error ? (
+            <Alert tone={twinPhone ? 'warning' : 'error'}>
+              {error}
+              {twinPhone ? (
+                <span className="mt-2 flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" loading={saving} onClick={() => void save(true)}>
+                    احفظ رغم ذلك
+                  </Button>
+                </span>
+              ) : null}
+            </Alert>
+          ) : null}
           {distribution && customer?.approvalStatus === 'pending' ? (
             <Alert tone="warning" title="زبون أضافه مندوب وينتظر موافقتك">
               <p>حتى توافق عليه يبيعه المندوب نقداً فقط.</p>
@@ -272,7 +303,10 @@ export function CustomerForm({
                 inputMode="tel"
                 dir="ltr"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => {
+                  setPhone(e.target.value);
+                  setTwinPhone(false);
+                }}
                 error={fields.phone}
               />
               <TextField
@@ -286,6 +320,26 @@ export function CustomerForm({
                 value={taxNumber}
                 onChange={(e) => setTaxNumber(e.target.value)}
                 error={fields.taxNumber}
+              />
+              <Select
+                label="المجموعة"
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
+                error={fields.groupId}
+              >
+                <option value="">بلا مجموعة</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                    {g.discountBps > 0 ? ` (خصم ${g.discountBps / 100}%)` : ''}
+                  </option>
+                ))}
+              </Select>
+              <DateField
+                label="تاريخ الميلاد"
+                value={birthDate}
+                onChange={setBirthDate}
+                error={fields.birthDate}
               />
               {asksKind ? (
                 <Select

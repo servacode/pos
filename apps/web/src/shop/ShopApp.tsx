@@ -53,7 +53,15 @@ import { canChoose, canPick, capOf, cartCount, cartTotal, useShopCart, variantFo
 import { openWhatsApp, withTrackingLink } from './open';
 import { getOnce } from './getOnce';
 import { CatalogueFilters } from './CatalogueFilters';
-import { accentStyle, CouponBox, CoverBanner, NotifyMe, ProductNotes, StoreMark } from './ShopExtras';
+import {
+  accentStyle,
+  CouponBox,
+  CoverBanner,
+  NotifyMe,
+  ProductNotes,
+  ShopHero,
+  StoreMark,
+} from './ShopExtras';
 import {
   applyFilters,
   filterCount,
@@ -160,6 +168,22 @@ export function ShopApp() {
           <Route path="p/:id" element={<ProductView home={home} slug={slug} base={base} cart={cart} />} />
           <Route path="cart" element={<CartView home={home} slug={slug} base={base} cart={cart} />} />
           <Route path="o/:token" element={<TrackView home={home} slug={slug} base={base} />} />
+          <Route
+            path="*"
+            element={
+              <EmptyState
+                icon={StoreIcon}
+                title="هذه الصفحة غير موجودة"
+                description="قد يكون الرابط ناقصاً أو قديماً."
+                className="bg-surface"
+                action={
+                  <Link to={base} className={linkButton('primary', density)}>
+                    إلى المتجر
+                  </Link>
+                }
+              />
+            }
+          />
         </Routes>
       </main>
       <footer className="border-t border-line bg-surface">
@@ -295,15 +319,29 @@ function NoPicture({
   categoryName = null,
   sectors,
   large = false,
+  typographic = false,
 }: {
   name: string;
   categoryName?: string | null;
+  /** A catalogue tile without a photo: a small icon of its kind with its department, on the tint */
+  typographic?: boolean;
   /** The store's business types (a clothing store never draws a medical icon) */
   sectors?: readonly string[];
   large?: boolean;
 }) {
   // The icon of its kind on a soft tint reads as a deliberate tile, not a missing image
   const Kind = placeholderIconFor({ categoryName, name, ...(sectors ? { sectors } : {}) });
+  if (typographic) {
+    return (
+      <span
+        aria-hidden="true"
+        className="flex size-full flex-col items-center justify-center gap-1 bg-linear-to-br from-brand-soft to-surface-muted text-brand-ink/70 select-none"
+      >
+        <Kind size={24} />
+        <span className="max-w-full truncate px-2 text-xs font-semibold">{categoryName ?? ''}</span>
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden="true"
@@ -367,8 +405,10 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
   const title = (category ? tops.find((c) => c.id === category)?.name : null) ?? 'كل البضاعة';
   // A shop without a single picture yet gets shorter tiles: a wall of tall empty frames looks unfinished.
   const media = home.products.some((p) => p.imageUrl) ? 'aspect-[4/5]' : 'aspect-[4/3]';
+  const anyPicture = home.products.some((p) => p.imageUrl);
   return (
     <>
+      <ShopHero store={home.store} count={home.products.length} />
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
           <div className="flex min-w-0 flex-col gap-1">
@@ -441,7 +481,11 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
       ) : (
         <ul
           aria-label="البضاعة"
-          className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-4"
+          className={cn(
+            'grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-6',
+            // Typographic tiles are small: more of them to a row until the photos come
+            anyPicture ? 'lg:grid-cols-4' : 'lg:grid-cols-5 xl:grid-cols-6',
+          )}
         >
           {shown.map((p) => (
             <li key={p.id}>
@@ -449,7 +493,12 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                 to={`${base}/p/${p.id}`}
                 className="group flex h-full flex-col overflow-hidden rounded-card border border-line bg-surface shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5"
               >
-                <span className={cn('relative block overflow-hidden bg-surface-muted', media)}>
+                <span
+                  className={cn(
+                    'relative block overflow-hidden border-b border-line bg-surface-muted',
+                    media,
+                  )}
+                >
                   {p.imageUrl ? (
                     <img
                       src={p.imageUrl}
@@ -465,6 +514,7 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                       name={p.name}
                       sectors={home.store.sectors}
                       categoryName={home.categories.find((c) => c.id === p.categoryId)?.name ?? null}
+                      typographic
                     />
                   )}
                   {ribbonOf(p) ? (
@@ -509,6 +559,23 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
           ))}
         </ul>
       )}
+      {home.truncated ? (
+        <p role="note" className="text-center text-sm text-ink-muted">
+          هذه أول البضاعة بالاسم، وفي المحل أكثر منها.
+          {home.store.whatsapp ? (
+            <>
+              {' '}
+              <TextLink
+                href={`https://wa.me/${home.store.whatsapp}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                اسأل المحل على واتساب
+              </TextLink>
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </>
   );
 }
@@ -862,12 +929,16 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   // What the server says the cart costs with the code (its offers and the code's, as the order is priced)
   const [quote, setQuote] = useState<{ key: string; quote: ShopQuote } | null>(null);
   const [couponRefused, setCouponRefused] = useState<string | null>(null);
+  // The quote could not be had (a line gone since it was added, the network): the cart says so, not «نحسب…» for ever
+  const [quoteFailed, setQuoteFailed] = useState<string | null>(null);
   const quoteKey = coupon
     ? `${coupon.code}|${cart.lines.map((l) => `${l.variantId}:${l.qty}`).join(',')}`
     : '';
   useEffect(() => {
     if (!coupon || coupon.coupon.percentBp === null || !store.showPrices) return;
     let current = true;
+    setQuoteFailed(null);
+    const key = quoteKey;
     apiFetch<ShopQuote>(`/v1/shop/${encodeURIComponent(slug)}/quote`, {
       method: 'POST',
       body: { lines: cart.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })), coupon: coupon.code },
@@ -881,6 +952,8 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
         if (e instanceof ApiError && e.fields?.coupon) {
           setCouponRefused(e.fields.coupon);
           setCoupon(null);
+        } else {
+          setQuoteFailed(key);
         }
       },
     );
@@ -1072,7 +1145,11 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
     showPrices &&
     coupon?.coupon.percentBp !== null &&
     coupon?.coupon.percentBp !== undefined &&
-    !quoted;
+    !quoted &&
+    quoteFailed !== quoteKey;
+  const failedQuote = Boolean(coupon) && !quoted && quoteFailed === quoteKey;
+  // The server's total when it priced the cart, else the cart's own
+  const merchandise = coupon && quoted ? quoted.totalMinor : subtotal;
   const couponNote = !coupon
     ? null
     : coupon.coupon.kind === 'buy_get'
@@ -1159,6 +1236,11 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
         </ul>
         <div className="flex flex-col gap-2 rounded-b-card border-t border-line bg-surface-total px-5 py-4 sm:px-6">
           {waitingQuote ? <p className="text-sm text-ink-muted">نحسب خصم الكود…</p> : null}
+          {failedQuote ? (
+            <p role="status" className="text-sm text-ink-muted">
+              تعذّر حساب الخصم الآن، ويُحسب عند إتمام الطلب.
+            </p>
+          ) : null}
           {discount > 0 ? (
             <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">
               <span>خصم الكود</span>
@@ -1169,7 +1251,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
             <span className={fee > 0 ? 'text-ink-muted' : 'font-semibold'}>المجموع</span>
             {showPrices ? (
               <Money
-                minor={subtotal - discount}
+                minor={merchandise}
                 currency={store.currency}
                 className={fee > 0 ? 'font-semibold' : 'text-xl font-bold'}
               />
@@ -1185,11 +1267,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
               </div>
               <div className="flex items-center justify-between gap-3 border-t border-line pt-2">
                 <span className="font-semibold">الإجمالي</span>
-                <Money
-                  minor={subtotal - discount + fee}
-                  currency={store.currency}
-                  className="text-xl font-bold"
-                />
+                <Money minor={merchandise + fee} currency={store.currency} className="text-xl font-bold" />
               </div>
             </>
           ) : null}

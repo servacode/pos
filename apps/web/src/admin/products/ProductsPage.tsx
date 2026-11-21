@@ -35,6 +35,7 @@ import {
   Select,
   Sheet,
   cn,
+  isolateNegative,
   formatQuantity,
   textLinkClass,
   type DataColumn,
@@ -159,23 +160,21 @@ function negativeWords(item: Pick<ProductListItem, 'stockQty' | 'sellableQty'>, 
 }
 
 function StockCell({ item, digits }: { item: ProductListItem; digits: 'latn' | 'arab' }) {
+  // The real count on the shelf (what the books say, a minus kept) is the big number; what the till can
+  // still sell is told under it only when it differs
+  const net = item.stockQty;
   const avail = availableOf(item);
-  const below = negativeWords(item, digits);
   return (
     <span className="flex flex-col items-end">
-      <span
-        className={cn('font-semibold', avail < 0 && 'text-danger-ink', avail === 0 && 'text-warning-ink')}
-      >
-        {formatQuantity(avail, digits)}
-        {avail > 0 ? (
-          <span className="font-normal text-ink-muted"> {countWord(avail, { one: 'قطعة', few: 'قطع' })}</span>
+      <span className={cn('font-semibold', net < 0 && 'text-danger-ink', net === 0 && 'text-warning-ink')}>
+        {net < 0 ? isolateNegative(`-${formatQuantity(-net, digits)}`) : formatQuantity(net, digits)}
+        {net > 0 ? (
+          <span className="font-normal text-ink-muted"> {countWord(net, { one: 'قطعة', few: 'قطع' })}</span>
         ) : null}
       </span>
-      {below ? (
-        <span className="text-xs whitespace-nowrap text-danger-ink">{below}</span>
-      ) : item.sellableQty !== undefined && item.sellableQty !== item.stockQty ? (
+      {avail !== net ? (
         <span className="text-xs whitespace-nowrap text-ink-muted">
-          في المخزن <bdi className="num">{formatQuantity(item.stockQty, digits)}</bdi>
+          متوفر للبيع <bdi className="num">{formatQuantity(avail, digits)}</bdi>
         </span>
       ) : null}
     </span>
@@ -427,7 +426,7 @@ export function ProductsPage() {
   // the top bar.
   return (
     <AppShell>
-      <CatalogGate>
+      <CatalogGate viewOnly>
         <ProductsList />
       </CatalogGate>
     </AppShell>
@@ -522,6 +521,7 @@ function ProductsList() {
           ...(JSON.parse(queryKey) as ProductListQuery),
           ...(cursor ? { cursor } : {}),
           limit: 200,
+          detail: '1',
         });
         all.push(...page.items);
         cursor = page.nextCursor;
@@ -540,6 +540,12 @@ function ProductsList() {
           'أعلى سعر',
           'الكمية الصافية',
           'المتوفر للبيع',
+          'الوحدة',
+          'الموسم',
+          'الحالة',
+          'سعر الجملة (أدنى)',
+          'سعر الجملة (أعلى)',
+          ...(me.user.permissions.includes('cost.view') ? ['متوسط التكلفة'] : []),
         ],
         all.map((i) => [
           i.nameAr,
@@ -551,6 +557,24 @@ function ProductsList() {
           i.price ? i.price.maxMinor / 10 ** getCurrency(i.price.currency).decimals : '',
           i.type === 'service' ? '' : i.stockQty / 1000,
           i.type === 'service' ? '' : availableOf(i) / 1000,
+          i.unitName ?? '',
+          i.season ?? '',
+          i.archivedAt ? 'مؤرشف' : i.status === 'temporary' ? 'قيد المراجعة' : 'نشط',
+          ...(() => {
+            const cur = i.price?.currency ?? me.settings.baseCurrency;
+            const dec = 10 ** getCurrency(cur).decimals;
+            return [
+              i.wholesale ? i.wholesale.minMinor / dec : '',
+              i.wholesale ? i.wholesale.maxMinor / dec : '',
+            ];
+          })(),
+          ...(me.user.permissions.includes('cost.view')
+            ? [
+                i.costMinor === undefined || i.costMinor === null
+                  ? ''
+                  : i.costMinor / 10 ** getCurrency(me.settings.baseCurrency).decimals,
+              ]
+            : []),
         ]),
       );
       if (cut) {
@@ -940,6 +964,8 @@ function ProductsList() {
               {
                 key: 'products',
                 label: 'المنتجات',
+                onSelect: () => setFilters(NO_FILTERS),
+                selectLabel: 'اعرض كل المنتجات',
                 value: summary ? <bdi className="num">{`${summary.products}${more}`}</bdi> : '…',
                 note:
                   // Only a clothing store counts sizes and colours; elsewhere «15 منتج / 13 صنفاً» only confuses
@@ -956,6 +982,9 @@ function ProductsList() {
               {
                 key: 'pieces',
                 label: 'القطع في المخزون',
+                onSelect: () => setFilter('sort', filters.sort === 'stock' ? 'name' : 'stock'),
+                pressed: filters.sort === 'stock',
+                selectLabel: 'رتّب الأقل مخزوناً أولاً',
                 value: summary ? (
                   <bdi className="num">{`${formatQuantity(summary.pieces, digits)}${more}`}</bdi>
                 ) : (
@@ -967,6 +996,9 @@ function ProductsList() {
                 label: soldOutLabel(clothingStore),
                 value: summary ? <bdi className="num">{`${summary.runOut}${more}`}</bdi> : '…',
                 tone: summary && summary.runOut > 0 ? 'warning' : undefined,
+                onSelect: () => setFilter('stock', filters.stock === 'out' ? '' : 'out'),
+                pressed: filters.stock === 'out',
+                selectLabel: 'اعرض ما نفد فقط',
                 note: !summary?.lowest ? undefined : summary.runOut > 0 ? (
                   <>
                     {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
@@ -1001,6 +1033,9 @@ function ProductsList() {
                     {
                       key: 'expiry',
                       label: 'ينتهي خلال 30 يوماً',
+                      onSelect: () => setFilter('expiry', filters.expiry === 'soon' ? '' : 'soon'),
+                      pressed: filters.expiry === 'soon',
+                      selectLabel: 'اعرض ما ينتهي قريباً',
                       value: <bdi className="num">{expiringSoon}</bdi>,
                       tone: expiringSoon > 0 ? ('warning' as const) : undefined,
                       note:
@@ -1185,7 +1220,7 @@ function ProductsList() {
                   hideLabel
                   value={filters.season}
                   onChange={(event) => setFilter('season', event.target.value)}
-                  className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+                  className="min-w-40 flex-1 lg:w-40 lg:flex-none"
                 >
                   <option value="">كل المواسم</option>
                   {seasons.map((s) => (
@@ -1201,7 +1236,7 @@ function ProductsList() {
                   hideLabel
                   value={filters.expiry}
                   onChange={(event) => setFilter('expiry', event.target.value as Filters['expiry'])}
-                  className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+                  className="min-w-40 flex-1 lg:w-40 lg:flex-none"
                 >
                   <option value="">كل الصلاحيات</option>
                   <option value="soon">ينتهي قريباً</option>
@@ -1213,7 +1248,7 @@ function ProductsList() {
                 hideLabel
                 value={filters.stock}
                 onChange={(event) => setFilter('stock', event.target.value as Filters['stock'])}
-                className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+                className="min-w-40 flex-1 lg:w-40 lg:flex-none"
               >
                 <option value="">كل المخزون</option>
                 <option value="out">نفد فقط</option>
@@ -1223,7 +1258,7 @@ function ProductsList() {
                 hideLabel
                 value={filters.sort}
                 onChange={(event) => setFilter('sort', event.target.value as Filters['sort'])}
-                className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+                className="min-w-40 flex-1 lg:w-40 lg:flex-none"
               >
                 <option value="name">بالاسم</option>
                 <option value="stock">الأقل مخزوناً أولاً</option>

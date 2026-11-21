@@ -4,6 +4,8 @@ import { apiFetch } from '../lib/api';
 /** `GET /v1/me/home-summary`: the few numbers the home page needs, each only for who may open them */
 export interface HomeSummary {
   baseCurrency: CurrencyCode;
+  /** At least one invoice exists, on any day */
+  hasEverSold: boolean;
   debts: {
     totalOwedMinor: number;
     overLimitCount: number;

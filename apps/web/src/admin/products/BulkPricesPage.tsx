@@ -21,7 +21,7 @@ import { storeSells } from '../../lib/sectors';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
 import { listCategories } from '../catalog/api';
-import { ButtonLink } from './parts';
+import { ButtonLink, PriceModes } from './parts';
 
 type Item = BulkPriceResult['items'][number];
 /** A line of the preview: one piece, or a whole model whose pieces all change the same way */
@@ -109,13 +109,14 @@ function BulkPrices() {
   const unit = 10 ** CURRENCIES[base].decimals;
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryId, setCategoryId] = useState('');
-  const [percent, setPercent] = useState('-30');
+  const [percent, setPercent] = useState('');
   const [round, setRound] = useState<(typeof ROUNDING)[number]>(5);
   const [mode, setMode] = useState<'move' | 'restore'>('move');
   const [markWas, setMarkWas] = useState(true);
   const [result, setResult] = useState<BulkPriceResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [undone, setUndone] = useState<{ restored: number; skipped: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -146,6 +147,7 @@ function BulkPrices() {
     if (!categoryId || (mode === 'move' && bp === null)) return;
     setBusy(true);
     setError(null);
+    setUndone(null);
     try {
       setResult(
         await runBulk({
@@ -157,6 +159,26 @@ function BulkPrices() {
           apply,
         }),
       );
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function undo() {
+    if (!result?.changeId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setUndone(
+        await apiFetch<{ restored: number; skipped: number }>(`/v1/prices/bulk/${result.changeId}/undo`, {
+          method: 'POST',
+          body: {},
+          auth: true,
+        }),
+      );
+      setResult(null);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -230,6 +252,7 @@ function BulkPrices() {
           title="تغيير الأسعار"
           subtitle={`${storeSells(me.tenant.sectors, ['clothing']) ? 'تنزيلات آخر الموسم' : 'التنزيلات'} أو رفع الأسعار: كل قطع التصنيف وتصنيفاته الفرعية بنسبة واحدة، مقرّبة، وتُعرض قبل تطبيقها.`}
         />
+        <PriceModes current="/prices" />
         {error ? <Alert tone="error">{error}</Alert> : null}
 
         <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[22rem_minmax(0,1fr)]">
@@ -272,6 +295,7 @@ function BulkPrices() {
                 <div className="grid grid-cols-2 gap-3">
                   <TextField
                     label="النسبة ٪"
+                    placeholder="مثال: −10"
                     hint={
                       <>
                         بالسالب للتنزيل:{' '}
@@ -337,6 +361,14 @@ function BulkPrices() {
           </Panel>
 
           <div className="flex min-w-0 flex-col gap-4">
+            {undone ? (
+              <Alert tone="success">
+                رجعت {countNoun(undone.restored, COUNT_NOUNS.piece)} إلى سعرها قبل التغيير
+                {undone.skipped > 0
+                  ? `، وتُركت ${countNoun(undone.skipped, COUNT_NOUNS.piece)} لأنها تعدّلت بعده.`
+                  : '.'}
+              </Alert>
+            ) : null}
             {result?.applied ? (
               <Alert tone="success">
                 <span className="flex flex-col items-start gap-3">
@@ -344,9 +376,16 @@ function BulkPrices() {
                     تغيّرت أسعار {countNoun(changed.length, COUNT_NOUNS.piece)}، وتصل إلى أجهزة الكاشير مع أول
                     اتصال.
                   </span>
-                  <ButtonLink to={labels} icon={<PrintIcon />}>
-                    اطبع ملصقات الأسعار الجديدة
-                  </ButtonLink>
+                  <span className="flex flex-wrap items-center gap-3">
+                    <ButtonLink to={labels} icon={<PrintIcon />}>
+                      اطبع ملصقات الأسعار الجديدة
+                    </ButtonLink>
+                    {result.changeId ? (
+                      <Button variant="secondary" loading={busy} onClick={() => void undo()}>
+                        تراجع عن هذا التغيير
+                      </Button>
+                    ) : null}
+                  </span>
                 </span>
               </Alert>
             ) : null}

@@ -60,6 +60,7 @@ describe('«تغيير الأسعار»', () => {
     const { user } = renderApp('/prices');
     await screen.findByRole('option', { name: 'رجالي › قمصان' });
     await user.selectOptions(screen.getByLabelText('التصنيف'), 'رجالي › قمصان');
+    await user.type(screen.getByLabelText('النسبة ٪'), '-30');
     await user.click(screen.getByRole('button', { name: 'اعرض الأسعار الجديدة' }));
     const table = await screen.findByRole('table', { name: 'ما سيتغيّر' });
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('31,500');

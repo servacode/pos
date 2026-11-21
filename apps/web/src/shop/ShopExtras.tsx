@@ -56,6 +56,43 @@ export function CoverBanner({ store }: { store: Pick<ShopStore, 'name' | 'coverU
   );
 }
 
+/**
+ * The shop's front: the name, the tagline and how an order reaches the customer, on the brand tint.
+ * Drawn on the home page only, and only when the store has no cover of its own (the cover is its face then).
+ */
+export function ShopHero({
+  store,
+  count,
+}: {
+  store: Pick<ShopStore, 'name' | 'tagline' | 'coverUrl' | 'delivery' | 'pickup'>;
+  count: number;
+}) {
+  if (store.coverUrl) return null;
+  const ways = [store.delivery ? 'توصيل' : null, store.pickup ? 'استلام من المحل' : null].filter(Boolean);
+  return (
+    <section
+      aria-label="عن المتجر"
+      className="flex flex-col gap-2 rounded-card border border-line bg-linear-to-br from-brand-soft to-surface px-5 py-5 sm:px-8 sm:py-7"
+    >
+      <p className="text-2xl/9 font-bold text-brand-ink sm:text-3xl/10">{store.name}</p>
+      {store.tagline ? <p className="text-base text-ink-muted">{store.tagline}</p> : null}
+      <p className="flex flex-wrap gap-2 pt-1">
+        {ways.map((w) => (
+          <span
+            key={w}
+            className="rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold text-ink-muted"
+          >
+            {w}
+          </span>
+        ))}
+        <span className="num rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold text-ink-muted">
+          {count} منتج
+        </span>
+      </p>
+    </section>
+  );
+}
+
 /** The description and the size guide the store wrote for the page, as plain text */
 export function ProductNotes({ product }: { product: Pick<ShopProduct, 'description' | 'sizeGuide'> }) {
   if (!product.description && !product.sizeGuide) return null;

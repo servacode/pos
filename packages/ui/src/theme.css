@@ -164,7 +164,7 @@
   --color-sidebar-active: oklch(0.3188 0.0457 167.96);
   --color-sidebar-line: oklch(0.3037 0.0317 169.2);
   --color-sidebar-ink: oklch(0.8648 0.0156 170.99);
-  --color-sidebar-muted: oklch(0.6907 0.026 166.73);
+  --color-sidebar-muted: oklch(0.7407 0.026 166.73);
   --color-sidebar-strong: oklch(1 0 0);
   --color-sidebar-brand: oklch(0.7151 0.1343 164.44);
 
@@ -239,7 +239,7 @@
       --color-sidebar-active: oklch(0.2678 0.0321 168.52);
       --color-sidebar-line: oklch(0.2612 0.0163 176.44);
       --color-sidebar-ink: oklch(0.8514 0.0172 168.42);
-      --color-sidebar-muted: oklch(0.659 0.0246 168.32);
+      --color-sidebar-muted: oklch(0.729 0.0246 168.32);
       --color-sidebar-strong: oklch(1 0 0);
       --color-sidebar-brand: oklch(0.7258 0.1445 163.06);
       --color-mark-from: oklch(0.5378 0.1134 163.27);

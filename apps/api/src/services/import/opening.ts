@@ -179,6 +179,8 @@ export async function postOpeningBalance(
     name: string;
     balanceMinor: number;
     date: string;
+    /** The entry's own id (a retry of the same request posts once); a new one when missing */
+    entryId?: string;
   },
 ): Promise<void> {
   if (input.balanceMinor === 0) return;
@@ -204,7 +206,7 @@ export async function postOpeningBalance(
     rate: null,
     memo,
   };
-  const entryId = newId();
+  const entryId = input.entryId ?? newId();
   await postEntry(tx, {
     tenantId: auth.tenantId,
     branchId: null,

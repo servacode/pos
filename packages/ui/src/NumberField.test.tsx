@@ -53,3 +53,36 @@ describe('MoneyField letters', () => {
     expect(screen.getByTestId('minor')).toHaveTextContent('4500');
   });
 });
+
+describe('MoneyField refusals', () => {
+  it('refuses a minus with a reason and keeps the amount as it was', async () => {
+    const user = userEvent.setup();
+    render(<Harness currency="SYP" />);
+    const field = screen.getByLabelText('السعر');
+    await user.type(field, '-');
+    expect(screen.getByText('لا يُقبل مبلغ سالب')).toBeInTheDocument();
+    expect(screen.getByTestId('minor')).toHaveTextContent('null');
+    await user.type(field, '5');
+    expect(screen.getByText('لا يُقبل مبلغ سالب')).toBeInTheDocument();
+    expect(screen.getByTestId('minor')).toHaveTextContent('500');
+    await user.tab();
+    expect(screen.queryByText('لا يُقبل مبلغ سالب')).not.toBeInTheDocument();
+  });
+
+  it('refuses a fraction a currency without fractions cannot keep, instead of cutting it', async () => {
+    const user = userEvent.setup();
+    render(<Harness currency="SYP" />);
+    await user.type(screen.getByLabelText('السعر'), '2500');
+    await user.paste('.5');
+    expect(screen.getByText(/تُعرض بلا كسور/)).toBeInTheDocument();
+    expect(screen.getByTestId('minor')).toHaveTextContent('250000');
+  });
+
+  it('refuses a third fraction digit of a two-digit currency', async () => {
+    const user = userEvent.setup();
+    render(<Harness currency="USD" />);
+    await user.type(screen.getByLabelText('السعر'), '12.505');
+    expect(screen.getByText(/أكثر من 2 خانات/)).toBeInTheDocument();
+    expect(screen.getByTestId('minor')).toHaveTextContent('1250');
+  });
+});

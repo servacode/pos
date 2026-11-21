@@ -1587,3 +1587,8 @@ a.sh-trial:hover {
     min-height: 44px;
   }
 }
+@media (max-width: 767px) {
+  .sh-new-btn {
+    display: none;
+  }
+}

@@ -37,7 +37,8 @@ function loadReads(userId: string): Record<string, string> {
 }
 
 /** A notice is a new one again when its count or its time changes: «3 طلبات» read, a 4th arrives. */
-const signature = (notice: Notice) => `${String(notice.count ?? 0)}|${notice.at ?? ''}`;
+const signature = (notice: Notice) =>
+  `${String(notice.count ?? 0)}|${notice.at ?? ''}|${notice.tone}|${notice.title}`;
 
 function useNoticeReads(userId: string, notices: readonly Notice[]) {
   const [reads, setReads] = useState(() => loadReads(userId));
@@ -244,8 +245,12 @@ export function Notifications({
                       <span className="sh-tile" aria-hidden="true">
                         {onlyUnread ? <CheckIcon size={24} /> : <NotificationsIcon size={24} />}
                       </span>
-                      <strong>{onlyUnread ? 'لا إشعارات غير مقروءة' : 'لا تنبيهات جديدة'}</strong>
-                      <span>{onlyUnread ? 'قرأت كل ما وصلك.' : 'هنا يظهر كل ما ينتظرك.'}</span>
+                      <strong>{onlyUnread ? 'لا إشعارات غير مقروءة' : 'لا إشعارات جديدة'}</strong>
+                      <span>
+                        {onlyUnread
+                          ? 'قرأت كل ما وصلك.'
+                          : 'الطلبات والديون والمخزون التي تنتظرك تراها في الرئيسية.'}
+                      </span>
                     </div>
                   ) : (
                     BUCKETS.map(({ key, label: bucket }) => {
@@ -299,7 +304,7 @@ export function Notifications({
                   <div className="sh-pfoot2">
                     <span>{noticeCount(notices.length, total)}</span>
                     <Link to="/" onClick={() => pop.setOpen(false)}>
-                      اعرض الكل
+                      ما ينتظرك في الرئيسية
                       <NextIcon size={16} />
                     </Link>
                   </div>

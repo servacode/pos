@@ -1,6 +1,8 @@
 import type {
   CustomerDetail,
   CustomerInput,
+  CustomerGroup,
+  CustomerGroupInput,
   CustomerKind,
   CustomerListResponse,
   CustomerMoneyResult,
@@ -8,6 +10,7 @@ import type {
   CustomerPaymentInput,
   CustomerPurchases,
   VoucherList,
+  VoucherUpdateInput,
 } from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
@@ -63,6 +66,10 @@ export interface CustomerPageQuery {
   /** Only customers who bought before and not since this day */
   lastBefore?: string;
   approval?: 'pending';
+  sort?: 'balance' | 'name' | 'last' | 'spent';
+  dir?: 'asc' | 'desc';
+  groupId?: string;
+  birthMonth?: number;
   limit: number;
   cursor?: string | null;
 }
@@ -75,6 +82,10 @@ export const listCustomerPage = (query: CustomerPageQuery) => {
   if (query.kind) params.set('kind', query.kind);
   if (query.lastBefore) params.set('lastBefore', query.lastBefore);
   if (query.approval) params.set('approval', query.approval);
+  if (query.sort) params.set('sort', query.sort);
+  if (query.dir) params.set('dir', query.dir);
+  if (query.groupId) params.set('groupId', query.groupId);
+  if (query.birthMonth) params.set('birthMonth', String(query.birthMonth));
   params.set('limit', String(query.limit));
   if (query.cursor) params.set('cursor', query.cursor);
   return apiFetch<CustomerListResponse & { nextCursor: string | null }>(
@@ -86,8 +97,28 @@ export const listCustomerPage = (query: CustomerPageQuery) => {
 };
 
 /** `GET /v1/vouchers`: the exchange and gift vouchers with what is left on each (customers.view) */
-export const listVouchers = (status: 'open' | 'all', cursor?: string | null) => {
+export const listVouchers = (
+  status: 'open' | 'all',
+  cursor?: string | null,
+  filter: { kind?: string; q?: string } = {},
+) => {
   const params = new URLSearchParams({ status, limit: '50' });
   if (cursor) params.set('cursor', cursor);
+  if (filter.kind) params.set('kind', filter.kind);
+  if (filter.q) params.set('q', filter.q);
   return apiFetch<VoucherList>(`/v1/vouchers?${params.toString()}`, { auth: true });
 };
+
+/** `PUT /v1/vouchers/{code}`: the last day of a voucher, or void it (customers.manage) */
+export const updateVoucher = (code: string, input: VoucherUpdateInput) =>
+  apiFetch<{ code: string; expiresOn: string | null; voidedAt: string | null }>(
+    `/v1/vouchers/${encodeURIComponent(code)}`,
+    { method: 'PUT', body: input, auth: true },
+  );
+
+/** `GET /v1/customer-groups`: the groups with their discount and how many customers each holds */
+export const listGroups = () => apiFetch<CustomerGroup[]>('/v1/customer-groups', { auth: true });
+export const createGroup = (input: CustomerGroupInput) =>
+  apiFetch<CustomerGroup>('/v1/customer-groups', { method: 'POST', body: input, auth: true });
+export const updateGroup = (id: string, input: CustomerGroupInput) =>
+  apiFetch<CustomerGroup>(`/v1/customer-groups/${id}`, { method: 'PUT', body: input, auth: true });

@@ -210,9 +210,10 @@ export function SidebarPanel({
               </Link>
             </Hint>
           ) : null
-        ) : (
+        ) : plan.canManage ? (
+          // Whoever cannot act on the plan is not shown its card
           <PlanCard plan={plan} label={trialLabel} />
-        )}
+        ) : null}
         <div className="sh-urow">
           <AccountMenu
             rail={rail}

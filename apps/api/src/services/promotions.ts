@@ -1,5 +1,15 @@
-import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
-import type { CustomerKind, Promotion, PromotionData, PromotionKind, PromotionScope } from '@serva/core';
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import type {
+  CustomerKind,
+  Promotion,
+  PromotionData,
+  PromotionKind,
+  PromotionPreview,
+  PromotionPreviewInput,
+  PromotionReport,
+  PromotionReportQuery,
+  PromotionScope,
+} from '@serva/core';
 import {
   categories,
   products,
@@ -104,13 +114,19 @@ async function checkTargets(tx: Transaction, input: PromotionData): Promise<void
 }
 
 /** A code opens one offer: «كود الخصم» is the store's own, whatever the letters' case. */
-async function checkCoupon(tx: Transaction, input: PromotionData, ownId: string | null): Promise<void> {
-  if (!input.couponCode) return;
+async function checkCoupon(
+  tx: Transaction,
+  input: { couponCode: string | null; archived: boolean },
+  ownId: string | null,
+): Promise<void> {
+  // A stopped offer keeps its code only for show: the code is free for another offer (index 0095)
+  if (!input.couponCode || input.archived) return;
   const [same] = await tx
     .select({ id: promotions.id })
     .from(promotions)
     .where(
       and(
+        isNull(promotions.archivedAt),
         sql`lower(${promotions.couponCode}) = lower(${input.couponCode})`,
         ...(ownId ? [ne(promotions.id, ownId)] : []),
       ),
@@ -237,11 +253,25 @@ export function archivePromotion(
     if (before.version !== input.version) throw staleVersion();
     // Already in the state asked for (a double click): the answer is the offer as it is
     if ((before.archivedAt !== null) === input.archived) return view(before);
+    // Restarting runs the rules a new offer would: an old row with a code and an audience would go live and never work
+    if (!input.archived) {
+      if (
+        before.couponCode &&
+        (before.repOnly || before.customerKinds.length > 0 || before.priceTiers.length > 0)
+      ) {
+        throw fieldError(
+          'couponCode',
+          'الكود لا يعمل مع عرض مخصص لفئة من الزبائن أو للمندوب. عدّل العرض وأزل أحدهما ثم شغّله',
+        );
+      }
+      await checkCoupon(tx, { couponCode: before.couponCode, archived: false }, id);
+    }
     const [row] = await tx
       .update(promotions)
       .set({ archivedAt: input.archived ? now : null })
       .where(and(eq(promotions.id, id), eq(promotions.version, input.version)))
-      .returning();
+      .returning()
+      .catch(rethrowCode);
     if (!row) throw staleVersion();
     await audit(
       tx,
@@ -256,5 +286,93 @@ export function archivePromotion(
       meta,
     );
     return view(row);
+  });
+}
+
+/**
+ * What each offer did at the tills between two dates. The sales keep the offer's name as the reason of
+ * the line's `promotion` discount, so that is what the rows group by (an offer renamed mid-period shows
+ * as two rows, as its receipts did).
+ */
+export function promotionReport(
+  db: Database,
+  auth: AccessClaims,
+  query: PromotionReportQuery,
+): Promise<PromotionReport> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'catalog.manage');
+    const rows = await tx.execute<{
+      name: string;
+      currency: string;
+      invoices: number;
+      pieces: string;
+      discount: string;
+      net: string;
+      free: string;
+    }>(sql`
+      select l -> 'discount' ->> 'reason' as name, i.currency,
+             count(distinct i.id)::int as invoices,
+             coalesce(sum((l ->> 'qty')::bigint), 0)::text as pieces,
+             coalesce(sum((l -> 'priced' ->> 'lineDiscountMinor')::bigint), 0)::text as discount,
+             coalesce(sum((l -> 'priced' ->> 'netMinor')::bigint), 0)::text as net,
+             coalesce(sum(case when (l -> 'priced' ->> 'grossMinor')::bigint = 0 then (l ->> 'qty')::bigint else 0 end), 0)::text as free
+      from invoices i
+      cross join lateral jsonb_array_elements(i.payload -> 'lines') l
+      where i.business_date between ${query.from}::date and ${query.to}::date
+        and l -> 'discount' ->> 'source' = 'promotion'
+      group by 1, 2
+      order by sum((l -> 'priced' ->> 'lineDiscountMinor')::bigint) desc, 1 limit 200`);
+    return {
+      from: query.from,
+      to: query.to,
+      items: rows.map((r) => ({
+        name: r.name ?? '',
+        currency: r.currency,
+        invoices: r.invoices,
+        pieces: Number(r.pieces) / 1000,
+        discountMinor: Number(r.discount),
+        netMinor: Number(r.net),
+        freePieces: Number(r.free) / 1000,
+      })),
+    };
+  });
+}
+
+/** How many products an offer's scope reaches (a category counts its sub-categories), before the owner saves it */
+export function promotionPreview(
+  db: Database,
+  auth: AccessClaims,
+  input: PromotionPreviewInput & { scope: PromotionScope },
+): Promise<PromotionPreview> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'catalog.manage');
+    const live = sql`p.archived_at is null and p.status = 'active' and p.sell_on_pos`;
+    const categoryIds = [...new Set(input.categoryIds ?? [])];
+    const productIds = [...new Set(input.productIds ?? [])];
+    let reach = sql`true`;
+    if (input.scope === 'categories') {
+      if (categoryIds.length === 0) return { products: 0, sample: [] };
+      reach = sql`p.category_id in (
+        with recursive tree(id) as (
+          select id from categories where id in (${sql.join(
+            categoryIds.map((id) => sql`${id}::uuid`),
+            sql`, `,
+          )})
+          union select c.id from categories c join tree t on c.parent_id = t.id)
+        select id from tree)`;
+    } else if (input.scope === 'products') {
+      if (productIds.length === 0) return { products: 0, sample: [] };
+      reach = sql`p.id in (${sql.join(
+        productIds.map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )})`;
+    }
+    const [count] = await tx.execute<{ n: number }>(
+      sql`select count(*)::int as n from products p where ${live} and ${reach}`,
+    );
+    const names = await tx.execute<{ name: string }>(
+      sql`select p.name_ar as name from products p where ${live} and ${reach} order by p.name_ar, p.id limit 3`,
+    );
+    return { products: count?.n ?? 0, sample: names.map((r) => r.name) };
   });
 }

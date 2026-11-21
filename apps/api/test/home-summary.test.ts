@@ -40,6 +40,8 @@ describe('GET /v1/me/home-summary', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.baseCurrency).toBe('SYP');
+    // A store with no invoice at all is new; the page shows the way in only then
+    expect(body.hasEverSold).toBe(false);
     expect(body.photos).toEqual({ goodsCount: 1, withoutPhoto: 1 });
     expect(body.debts).toEqual({ totalOwedMinor: 0, overLimitCount: 0, overLimitOne: null });
     expect(body.lowStock).toEqual({ total: 0, items: [] });

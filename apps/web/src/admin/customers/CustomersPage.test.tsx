@@ -169,6 +169,7 @@ describe('«الزبائن»', () => {
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
 
     await user.click(screen.getByRole('link', { name: 'أبو خالد' }));
+    await user.click(await screen.findByRole('tab', { name: 'الكشف' }));
     expect(await screen.findByRole('table', { name: 'كشف الحساب' })).toBeInTheDocument();
     expect(screen.getByText('فاتورة آجل')).toBeInTheDocument();
     expect(screen.getByText('دفعة')).toBeInTheDocument();
@@ -245,6 +246,7 @@ describe('«الزبائن»', () => {
 
   it('records an opening debt from the customer page', async () => {
     const { user, requestsTo } = open('/customers/c-1');
+    await user.click(await screen.findByRole('tab', { name: 'الكشف' }));
     await user.click(await screen.findByRole('button', { name: 'سجّل دين افتتاحي' }));
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByLabelText(/المبلغ/), '120000');

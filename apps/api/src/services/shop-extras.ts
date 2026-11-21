@@ -36,6 +36,7 @@ import { audit } from './audit';
 import { sniffImage } from './catalog/images';
 import {
   COUPON_BAD,
+  COUPON_KINDS,
   couponRule,
   fieldError,
   getOnlineStore,
@@ -63,7 +64,7 @@ export function shopCoupon(db: Database, slug: string, code: string): Promise<Sh
     withTenant(db, tenantId, async (tx) => {
       const store = await storeOf(tx, tenantId);
       const rule = await couponRule(tx, code);
-      if (!rule) throw fieldError('coupon', COUPON_BAD);
+      if (!rule || !COUPON_KINDS.includes(rule.kind)) throw fieldError('coupon', COUPON_BAD);
       return {
         name: rule.name,
         // A price-ish number only where the shop shows prices
@@ -92,7 +93,7 @@ export function shopQuote(
       let coupon: string | null = null;
       if (input.coupon) {
         const rule = await couponRule(tx, input.coupon);
-        if (!rule?.couponCode) throw refusal('coupon', COUPON_BAD);
+        if (!rule?.couponCode || !COUPON_KINDS.includes(rule.kind)) throw refusal('coupon', COUPON_BAD);
         coupon = rule.couponCode;
       }
       const plain = await priceLines(tx, base, input.lines, false);

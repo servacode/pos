@@ -66,8 +66,10 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
   // ─── Public: anyone with the link ────────────────────────────────────────
   // The catalogue is the same for everyone: a customer's browser (and a shared link's preview) may keep it half a minute
   app.get('/v1/shop/:slug', async (request, reply) => {
+    // The answer is stamped cacheable only once it is a catalogue: a missing or switched-off shop is never kept
+    const home = await shopHome(app.db, slugOf(request.params));
     reply.header('cache-control', 'public, max-age=30');
-    return shopHome(app.db, slugOf(request.params));
+    return home;
   });
   app.get('/v1/shop/:slug/products/:id', async (request) =>
     shopProduct(app.db, slugOf(request.params), idOf(request.params, 'هذا الصنف غير موجود.')),

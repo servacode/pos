@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { CashIcon, ConnectionPill, MenuIcon, NextIcon, SearchIcon, StoreIcon, ThemeToggle } from '@serva/ui';
+import {
+  AddIcon,
+  CashIcon,
+  ConnectionPill,
+  MenuIcon,
+  NextIcon,
+  SearchIcon,
+  StoreIcon,
+  ThemeToggle,
+} from '@serva/ui';
 import type { NumberFormat } from '../lib/format';
 import { useOnline } from '../pos/useOnline';
 import { CommandPalette, type PaletteIntent } from './CommandPalette';
@@ -57,7 +66,7 @@ export function TopBar({
   const stacked = current !== undefined && current.key !== 'home';
   const pageDiffers = current !== undefined && page !== undefined && page.label !== current.label;
 
-  // Ctrl K opens the search, Ctrl N the list of new things, F2 the till: from anywhere in the admin.
+  // Ctrl K opens the search, Alt N (or Ctrl N in an installed app) the list of new things, F2 the till: from anywhere in the admin.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -65,7 +74,11 @@ export function TopBar({
       if (mod && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setPalette({ open: true, intent: 'search' });
-      } else if (mod && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n') {
+      } else if (
+        // A browser tab keeps Ctrl N for a new window, so Alt N is the key that always reaches the page
+        (mod && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n') ||
+        (event.altKey && !mod && !event.shiftKey && event.code === 'KeyN')
+      ) {
         event.preventDefault();
         setPalette({ open: true, intent: 'new' });
       } else if (canSell && event.key === 'F2') {
@@ -80,7 +93,7 @@ export function TopBar({
   return (
     <div className="sh-top">
       <nav aria-label="أنت هنا" className="sh-crumb">
-        <ol className={stacked ? 'has-stack' : undefined}>
+        <ol className={stacked || current?.key === 'home' ? 'has-stack' : undefined}>
           <li className="sh-menu-li">
             <button
               type="button"
@@ -98,6 +111,16 @@ export function TopBar({
               </span>
             </Link>
           </li>
+          {current?.key === 'home' ? (
+            <>
+              <li className="sh-crumb-sep" aria-hidden="true">
+                <NextIcon size={16} />
+              </li>
+              <li className="sh-crumb-stack">
+                <span aria-current="page">الرئيسية</span>
+              </li>
+            </>
+          ) : null}
           {stacked && current ? (
             <>
               <li className="sh-crumb-sep" aria-hidden="true">
@@ -151,6 +174,16 @@ export function TopBar({
           </span>
         ) : null}
         {branchLabel ? <span className="sh-vr" aria-hidden="true" /> : null}
+        <button
+          type="button"
+          className="sh-ibtn sh-new-btn"
+          aria-label="جديد"
+          aria-keyshortcuts="Alt+N"
+          title="جديد (Alt N)"
+          onClick={() => setPalette({ open: true, intent: 'new' })}
+        >
+          <AddIcon />
+        </button>
         {notices ? (
           <Notifications notices={notices} userId={userId} timeZone={timeZone} numberFormat={numberFormat} />
         ) : null}

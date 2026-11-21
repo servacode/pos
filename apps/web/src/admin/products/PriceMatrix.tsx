@@ -66,7 +66,7 @@ export const PriceMatrix = memo(function PriceMatrix({
   return (
     <div className="flex flex-col gap-4">
       <div
-        className="relative min-w-0 overflow-x-auto rounded-control border border-line"
+        className="relative max-w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-control border border-line p-1"
         role="region"
         aria-label="جدول الأسعار، مرّر جانباً لترى الباقي"
       >
@@ -81,7 +81,7 @@ export const PriceMatrix = memo(function PriceMatrix({
                 <th
                   key={col || '_'}
                   scope="col"
-                  className="px-2 pb-1 text-center text-xs font-semibold whitespace-nowrap text-ink-subtle"
+                  className="w-32 min-w-32 px-2 pb-1 text-center text-xs font-semibold whitespace-nowrap text-ink-subtle"
                 >
                   {col || 'السعر'}
                 </th>
@@ -103,7 +103,7 @@ export const PriceMatrix = memo(function PriceMatrix({
                     return (
                       <td
                         key={col || '_'}
-                        className="w-32 min-w-32 rounded-small border border-dashed border-line text-center text-ink-subtle"
+                        className="h-10 w-32 min-w-32 rounded-small border border-dashed border-line text-center text-ink-subtle"
                       >
                         —
                       </td>

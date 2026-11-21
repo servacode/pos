@@ -127,3 +127,49 @@ export interface PromotionRow extends PromotionRule {
 }
 
 export type Promotion = PromotionRow & { updatedAt: string };
+
+/**
+ * `GET /v1/promotions/report?from&to` (catalog.manage): what each offer did at the tills in a period
+ * (the sales whose lines carry it as the reason of a `promotion` discount; a return is not netted off).
+ * One row per offer name and invoice currency, the biggest discount first.
+ */
+export const promotionReportQuery = z.object({
+  from: z.iso.date('اكتب تاريخ البداية'),
+  to: z.iso.date('اكتب تاريخ النهاية'),
+});
+export type PromotionReportQuery = z.input<typeof promotionReportQuery>;
+
+export interface PromotionReportRow {
+  /** The offer's name as printed on the receipts */
+  name: string;
+  currency: string;
+  /** Sales that carry it */
+  invoices: number;
+  /** Pieces sold under it, in whole pieces (thousandths kept) */
+  pieces: number;
+  /** What the offer took off the price, in the invoice currency's minor units */
+  discountMinor: number;
+  /** What those lines were sold for after it */
+  netMinor: number;
+  /** Pieces given free (a «اشترِ وخذ مجاناً» line at price 0) */
+  freePieces: number;
+}
+export interface PromotionReport {
+  from: string;
+  to: string;
+  items: PromotionReportRow[];
+}
+
+/** `POST /v1/promotions/preview` (catalog.manage): how many products an offer's scope touches, before it is saved */
+export const promotionPreviewInput = z.object({
+  scope: z.enum(PROMOTION_SCOPES),
+  categoryIds: z.array(uuidSchema).max(100).default([]),
+  productIds: z.array(uuidSchema).max(500).default([]),
+});
+export type PromotionPreviewInput = z.input<typeof promotionPreviewInput>;
+export interface PromotionPreview {
+  /** Active products for sale the scope reaches */
+  products: number;
+  /** A few of their names */
+  sample: string[];
+}

@@ -749,8 +749,10 @@ describe('the price-change history', () => {
     const notes = rows.map((r) => r.note).join('|');
     expect(notes).toContain('إنهاء التخفيض');
     expect(notes).toContain('تعديل جماعي -30٪');
-    // A product filter leaves the bulk rows out
-    expect((await history(store, `?productId=${p.id}`)).items).toEqual([]);
+    // A product filter keeps that product's own bulk rows, and leaves out another product's
+    const mine = (await history(store, `?productId=${p.id}`)).items;
+    expect(mine.map((r) => r.source)).toEqual(['bulk', 'bulk']);
+    expect(mine.every((r) => r.productId === p.id)).toBe(true);
   });
 
   it('is for those who manage the catalog, and one store never sees another’s', async () => {
@@ -944,13 +946,62 @@ describe('round 44: what the customer is told, what a code is worth, who decides
         .then((r) => r.json<{ items: OnlineOrder[]; nextCursor: string | null }>());
     const one = await page();
     expect(one.items).toHaveLength(2);
-    expect(one.nextCursor).toBe('2');
-    const two = await page('&cursor=2');
+    expect(one.nextCursor).toMatch(/^s\d+$/);
+    const two = await page(`&cursor=${one.nextCursor}`);
     expect(two.items).toHaveLength(1);
     expect(two.nextCursor).toBeNull();
     expect(new Set([...one.items, ...two.items].map((o) => o.id)).size).toBe(3);
     const home = await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion' });
     expect(home.headers['cache-control']).toBe('public, max-age=30');
+  });
+
+  it('a page after an order is decided misses no other order (keyset cursor)', async () => {
+    const store = await testStore(app);
+    const p = await item(store, 'قميص كتان', 9);
+    await saveShop(store);
+    for (const phone of ['0944000001', '0944000002', '0944000003', '0944000004']) {
+      await placeOrder(p.variant, { phone, lines: [{ variantId: p.variant, qty: 1 }] });
+    }
+    const get = (query: string) =>
+      app
+        .inject({
+          method: 'GET',
+          url: `/v1/online-orders?status=pending&limit=2${query}`,
+          headers: as(store),
+        })
+        .then((r) => r.json<{ items: OnlineOrder[]; nextCursor: string | null }>());
+    const first = await get('');
+    const tallies = await app.inject({ method: 'GET', url: '/v1/online-orders', headers: as(store) });
+    expect(tallies.json<{ counts: unknown }>().counts).toEqual({ pending: 4, accepted: 0, all: 4 });
+    // The owner decides one order of page 1, then asks for page 2: the offset form would skip an order
+    const decided = await app.inject({
+      method: 'POST',
+      url: `/v1/online-orders/${first.items[0]!.id}/status`,
+      headers: as(store),
+      payload: { status: 'rejected', version: first.items[0]!.version },
+    });
+    expect(decided.statusCode, decided.body).toBe(200);
+    const second = await get(`&cursor=${first.nextCursor}`);
+    expect(second.items).toHaveLength(2);
+    const all = new Set([...first.items, ...second.items].map((o) => o.id));
+    expect(all.size).toBe(4);
+  });
+
+  it('two identical taps at once make one order (WhatsApp mode)', async () => {
+    const store = await testStore(app);
+    const p = await item(store, 'قميص كتان', 9);
+    await saveShop(store);
+    const [a, b] = await Promise.all([placeOrder(p.variant), placeOrder(p.variant)]);
+    expect(a.statusCode, a.body).toBe(201);
+    expect(b.statusCode, b.body).toBe(201);
+    expect(a.json<ShopOrderPlaced>().number).toBe(b.json<ShopOrderPlaced>().number);
+    expect(await orders(store)).toHaveLength(1);
+  });
+
+  it('an unknown or switched-off shop is never stamped cacheable', async () => {
+    const missing = await app.inject({ method: 'GET', url: '/v1/shop/nobody-here' });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.headers['cache-control'] ?? '').not.toContain('public');
   });
 
   it('answers a repeated tap with the first order, and a different order with a new one', async () => {

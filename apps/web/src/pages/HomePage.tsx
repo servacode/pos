@@ -66,6 +66,7 @@ import {
 import { getSalesBreakdown } from '../admin/reports/SalesReportPage';
 import { Amt, BarList, PageTop, Panel, SalesPage } from '../admin/sales/ui';
 import { getHomeSummary, type HomeSummary } from './homeSummary';
+import { SetupStrip } from './SetupStrip';
 import type { DayReport } from '../admin/reports/contracts';
 import { methodLabel } from '../admin/reports/labels';
 import { useReport, type ReportState } from '../admin/reports/useReport';
@@ -212,6 +213,8 @@ type DayState = ReportState<DayReport>;
 
 // ─── Header ──────────────────────────────────────────────────────────────────
 
+// «افتح الكاشير» is not repeated here: the top bar owns that one filled button (and a phone has the raised
+// tab), so this row is only the two outline shortcuts.
 function QuickActions({ me }: { me: MeResponse }) {
   const canCatalog = holdsAny(me, ['catalog.manage']);
   return (
@@ -226,9 +229,6 @@ function QuickActions({ me }: { me: MeResponse }) {
           اطبع ملصقات
         </ButtonLink>
       ) : null}
-      <ButtonLink to="/pos" reloadDocument variant="primary" icon={<CartIcon />} className="max-sm:w-full">
-        افتح الكاشير
-      </ButtonLink>
     </>
   );
 }
@@ -295,8 +295,11 @@ function HeroTile({
   zeroMorning = false,
   openShift = null,
   yesterday = null,
+  lastSale = null,
   digits,
 }: {
+  /** The latest earlier day with sales, said on a quiet morning when yesterday had none */
+  lastSale?: { date: string; total: number } | null;
   /** Yesterday's net sales, said beside «لا مبيعات بعد» so the morning has a figure to look at */
   yesterday?: number | null;
   /** A shift opened yesterday and still open: its invoices are dated yesterday, said in words */
@@ -341,6 +344,11 @@ function HeroTile({
                   {yesterday !== null && yesterday > 0 ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-on-brand/15 px-2 py-0.5 text-xs font-semibold">
                       أمس <Money minor={yesterday} currency={data.baseCurrency} />
+                    </span>
+                  ) : lastSale ? (
+                    <span className="inline-flex flex-wrap items-center gap-1 rounded-full bg-on-brand/15 px-2 py-0.5 text-xs font-semibold">
+                      آخر يوم فيه مبيعات: {weekdayOf(lastSale.date)} {dayText(lastSale.date, digits)}{' '}
+                      <Money minor={lastSale.total} currency={data.baseCurrency} />
                     </span>
                   ) : null}
                 </>
@@ -468,8 +476,8 @@ function KpiBand({
   // Under three days with sales there is no line to draw: no sparklines or week bars until there is
   const thin = !weekReady || points.filter((p) => (p.total ?? 0) > 0).length < 3;
   // A zero morning says «لا مبيعات بعد» once, not a fall of 100% on every tile
-  const zeroMorning =
-    !!data && data.invoiceCount === 0 && points.slice(0, -1).some((p) => (p.total ?? 0) > 0);
+  const zeroMorning = !!data && data.invoiceCount === 0;
+  const lastSale = [...points.slice(0, -1)].reverse().find((p) => (p.total ?? 0) > 0) ?? null;
   // Early in the day, or with last night's shift still open, today is a few hours against a whole
   // yesterday: no comparison at all (it would say «-98%» at 1 am)
   const partialDay = openShift !== null || hourIn(me.tenant.timezone) < EARLY_HOUR;
@@ -486,94 +494,103 @@ function KpiBand({
         week={weekReady && data && !noHistory && !thin ? totals : null}
         noHistory={noHistory}
         zeroMorning={zeroMorning}
+        lastSale={lastSale && lastSale.total !== null ? { date: lastSale.date, total: lastSale.total } : null}
       />
-      <SnapRow
-        label="مؤشرات اليوم"
-        className="relative grid grid-cols-2 gap-2 sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none sm:gap-4"
-      >
-        {data ? (
-          <>
-            <StatTile
-              className={TILE_CLASS}
-              label="الفواتير"
-              value={<span className="num">{formatNumber(data.invoiceCount, digits)}</span>}
-              sparkline={!thin ? counts : undefined}
-            />
-            <StatTile
-              className={TILE_CLASS}
-              label="متوسط الفاتورة"
-              value={<Money minor={average} currency={data.baseCurrency} />}
-              sparkline={!thin ? averages : undefined}
-            />
-          </>
-        ) : (
-          <>
-            <TileSkeleton />
-            <TileSkeleton />
-          </>
-        )}
-        {seesProfit && !profit.error ? (
-          profit.data ? (
-            <StatTile
-              className={TILE_CLASS}
-              label="الربح الإجمالي"
-              value={<Money minor={profit.data.grossProfitMinor} currency={profit.data.baseCurrency} />}
-              footnote={
-                profit.data.netSalesMinor > 0 &&
-                profit.data.costOfSalesMinor !== undefined &&
-                profit.data.costOfSalesMinor < profit.data.netSalesMinor / 50
-                  ? 'التكلفة غير مكتملة بعد، لذلك لا يُعرض الهامش'
-                  : profit.data.netSalesMinor > 0
-                    ? (() => {
-                        // The net sales sit in their own isolate (an Arabic sentence must not flip the brackets)
-                        const note = (
-                          <>
-                            هامش{' '}
-                            <bdi dir="ltr" className="num">
-                              {formatNumber(
-                                Math.round((profit.data.grossProfitMinor / profit.data.netSalesMinor) * 100),
-                                digits,
-                              )}
-                              %
-                            </bdi>{' '}
-                            من صافي المبيعات بعد المرتجع وبدون الضريبة{' '}
-                            <bdi dir="rtl">
-                              (<Money minor={profit.data.netSalesMinor} currency={profit.data.baseCurrency} />
-                              )
-                            </bdi>
-                          </>
-                        );
-                        const below = profit.data.belowCostCount ?? 0;
-                        // A negative margin says why and where to look
-                        return profit.data.grossProfitMinor < 0 && below > 0 ? (
-                          <>
-                            {note}
-                            <br />
-                            <Link
-                              to="/reports/below-cost"
-                              title="الأصناف التي بيعت بأقل من كلفتها اليوم"
-                              className="font-semibold text-danger-ink underline"
-                            >
-                              {below === 1
-                                ? 'صنف واحد'
-                                : below === 2
-                                  ? 'صنفين'
-                                  : `${formatNumber(below, digits)} ${below <= 10 ? 'أصناف' : 'صنفاً'}`}{' '}
-                              تحت الكلفة — اعرض
-                            </Link>
-                          </>
-                        ) : (
-                          note
-                        );
-                      })()
-                    : undefined
-              }
-            />
+      {zeroMorning ? null : (
+        <SnapRow
+          label="مؤشرات اليوم"
+          className="relative grid grid-cols-2 gap-2 sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none sm:gap-4"
+        >
+          {data ? (
+            <>
+              <StatTile
+                className={TILE_CLASS}
+                label="الفواتير"
+                value={<span className="num">{formatNumber(data.invoiceCount, digits)}</span>}
+                sparkline={!thin ? counts : undefined}
+              />
+              <StatTile
+                className={TILE_CLASS}
+                label="متوسط الفاتورة"
+                value={<Money minor={average} currency={data.baseCurrency} />}
+                sparkline={!thin ? averages : undefined}
+              />
+            </>
           ) : (
-            <TileSkeleton />
-          )
-        ) : null}
-      </SnapRow>
+            <>
+              <TileSkeleton />
+              <TileSkeleton />
+            </>
+          )}
+          {seesProfit && !profit.error ? (
+            profit.data ? (
+              <StatTile
+                className={TILE_CLASS}
+                label="الربح الإجمالي"
+                value={<Money minor={profit.data.grossProfitMinor} currency={profit.data.baseCurrency} />}
+                footnote={
+                  profit.data.netSalesMinor > 0 &&
+                  profit.data.costOfSalesMinor !== undefined &&
+                  profit.data.costOfSalesMinor < profit.data.netSalesMinor / 50
+                    ? 'التكلفة غير مكتملة بعد، لذلك لا يُعرض الهامش'
+                    : profit.data.netSalesMinor > 0
+                      ? (() => {
+                          // The net sales sit in their own isolate (an Arabic sentence must not flip the brackets)
+                          const note = (
+                            <>
+                              هامش{' '}
+                              <bdi dir="ltr" className="num">
+                                {formatNumber(
+                                  Math.round(
+                                    (profit.data.grossProfitMinor / profit.data.netSalesMinor) * 100,
+                                  ),
+                                  digits,
+                                )}
+                                %
+                              </bdi>{' '}
+                              من صافي المبيعات بعد المرتجع وبدون الضريبة{' '}
+                              <bdi dir="rtl">
+                                (
+                                <Money
+                                  minor={profit.data.netSalesMinor}
+                                  currency={profit.data.baseCurrency}
+                                />
+                                )
+                              </bdi>
+                            </>
+                          );
+                          const below = profit.data.belowCostCount ?? 0;
+                          // A negative margin says why and where to look
+                          return profit.data.grossProfitMinor < 0 && below > 0 ? (
+                            <>
+                              {note}
+                              <br />
+                              <Link
+                                to="/reports/below-cost"
+                                title="الأصناف التي بيعت بأقل من كلفتها اليوم"
+                                className="font-semibold text-danger-ink underline"
+                              >
+                                {below === 1
+                                  ? 'صنف واحد'
+                                  : below === 2
+                                    ? 'صنفين'
+                                    : `${formatNumber(below, digits)} ${below <= 10 ? 'أصناف' : 'صنفاً'}`}{' '}
+                                تحت الكلفة — اعرض
+                              </Link>
+                            </>
+                          ) : (
+                            note
+                          );
+                        })()
+                      : undefined
+                }
+              />
+            ) : (
+              <TileSkeleton />
+            )
+          ) : null}
+        </SnapRow>
+      )}
     </section>
   );
 }
@@ -1464,13 +1481,37 @@ function AttentionPanel({
         ]
       : []),
   ];
+  // A source that failed must not look like «nothing waits»: say which one, with a retry
+  const failed: { name: string; retry: () => void }[] = [];
+  const note = (name: string, state: { error: string | null; retry: () => void } | null | undefined) => {
+    if (state?.error) failed.push({ name, retry: state.retry });
+  };
+  note('الطلبات', waiting.seesOrders ? waiting.orders : null);
+  note('طلبات تنتظر الكاشير', waiting.seesOrders ? waiting.toSell : null);
+  note('المخزون والديون', showStock || money.seesCustomers ? merch : null);
+  note('الصلاحية', waiting.seesExpiry ? waiting.expiry : null);
+  note('الشيكات', money.seesCustomers ? money.cheques : null);
+  note('ما علينا للموردين', money.seesSuppliers ? money.suppliers : null);
+  note('الأقساط', money.instalments);
   return (
     <Panel title="تحتاج انتباهك">
-      {items.length > 1 ? (
-        <Tabs label="تحتاج انتباهك" variant="pill" items={items} value={active} onValueChange={setPicked} />
-      ) : (
-        items[0]?.content
-      )}
+      <div className="flex flex-col gap-3">
+        {failed.map((source) => (
+          <Alert key={source.name} tone="warning">
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              تعذّر تحميل «{source.name}»، فقد يكون هناك ما ينتظرك ولا يظهر هنا.
+              <Button size="xs" variant="secondary" icon={<RetryIcon size={16} />} onClick={source.retry}>
+                حاول مجدداً
+              </Button>
+            </span>
+          </Alert>
+        ))}
+        {items.length > 1 ? (
+          <Tabs label="تحتاج انتباهك" variant="pill" items={items} value={active} onValueChange={setPicked} />
+        ) : (
+          items[0]?.content
+        )}
+      </div>
     </Panel>
   );
 }
@@ -1570,7 +1611,7 @@ export function HomePage() {
   // What the page needs from the heavy lists, in one light request: the low pieces, who owes, the photos
   const canCatalogView = holdsAny(me, ['catalog.manage']);
   const summary = useReport(
-    seesStock || seesCheques || canCatalogView ? 'home:summary' : null,
+    seesSales || seesStock || seesCheques || canCatalogView ? 'home:summary' : null,
     getHomeSummary,
     { cache: 'home' },
   );
@@ -1633,11 +1674,14 @@ export function HomePage() {
   // Nothing sold yet, today or in the week behind: a brand-new store gets a way in, not empty charts.
   // Only when the week really loaded and every day of it is a day of zero: a day that failed to load is
   // a gap (null), never a day without sales, so a failed request cannot make an old store look new.
+  // The server says whether the store has ever sold: a week without sales is a quiet week (Eid, a
+  // closed month), not a new store. Until that answer is here (or if it fails) the page is the normal one.
   const brandNew =
     day.data !== null &&
     week.data !== null &&
     day.data.invoiceCount === 0 &&
-    weekPoints.every((p) => p.total === 0);
+    weekPoints.every((p) => p.total === 0) &&
+    summary.data?.hasEverSold === false;
 
   const canCatalog = holdsAny(me, ['catalog.manage']);
   const showWaiting = seesOrders || seesStock || seesExpiry || seesCheques || canCatalogView;
@@ -1676,16 +1720,19 @@ export function HomePage() {
           </Alert>
         ) : null}
         <TrialBanner me={me} />
+        {summary.data ? <SetupStrip me={me} summary={summary.data} /> : null}
         <PageTop
           title={`أهلاً، ${firstName(me.user.fullName)}`}
           subtitle={`${weekdayOf(today)} ${dayText(today, me.settings.numberFormat)} · ${
-            branchOnly ? `أرقام ${branchOnly} فقط.` : 'هذه صورة متجرك اليوم.'
+            branchOnly
+              ? `أرقام ${branchOnly} فقط${seesCheques ? '، وما على الزبائن للمتجر كله' : ''}.`
+              : 'هذه صورة متجرك اليوم.'
           }`}
           actions={<QuickActions me={me} />}
         />
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="flex min-w-0 flex-col gap-6 max-xl:contents xl:col-start-1 xl:row-start-1">
-            {seesSales ? (
+            {seesSales && !brandNew ? (
               // Below 1280 px the figures come first, then what needs attention, then the rest
               <div className="flex min-w-0 flex-col gap-3 max-xl:order-[-2]">
                 {/* On a phone the figures fold behind one line, so «تحتاج انتباهك» comes first */}
@@ -1693,20 +1740,19 @@ export function HomePage() {
                   type="button"
                   aria-expanded={kpiOpen}
                   onClick={() => setKpiOpen((v) => !v)}
-                  className="flex min-h-11 items-center gap-2 rounded-card border border-line bg-surface px-3 text-start text-sm text-ink-muted shadow-e1 md:hidden"
+                  className="flex min-h-14 items-center gap-2 rounded-card border border-line bg-surface px-4 text-start text-sm text-ink-muted shadow-e1 md:hidden"
                 >
-                  <span className="min-w-0 flex-1 truncate">
-                    مبيعات اليوم
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-xs">مبيعات اليوم (صافي)</span>
                     {day.data ? (
-                      <>
-                        {' '}
-                        <Money
-                          minor={netOfReturns(day.data)}
-                          currency={day.data.baseCurrency}
-                          className="font-semibold text-ink"
-                        />
-                      </>
-                    ) : null}
+                      <Money
+                        minor={netOfReturns(day.data)}
+                        currency={day.data.baseCurrency}
+                        className="text-xl font-bold text-ink"
+                      />
+                    ) : (
+                      <Skeleton className="mt-1 h-6 w-32" />
+                    )}
                   </span>
                   <span className="shrink-0 text-xs font-semibold text-brand-ink">
                     {kpiOpen ? 'أخفِ الأرقام' : 'الأرقام'}
@@ -1772,7 +1818,7 @@ export function HomePage() {
             {!seesSales ? <StoreCard me={me} /> : null}
           </div>
           <div className="contents xl:col-start-2 xl:row-start-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
-            <div className="flex min-w-0 flex-col gap-6 empty:hidden max-xl:order-[-1] max-md:order-[-3] xl:order-none">
+            <div className="flex min-w-0 flex-col gap-6 empty:hidden max-xl:order-[-1] xl:order-none">
               {showWaiting ? (
                 <AttentionPanel
                   me={me}

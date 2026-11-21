@@ -208,6 +208,8 @@ export const SYNC_FLAGS = [
   'unknown_voucher',
   /** A sale spent more than was left on a voucher */
   'voucher_overdrawn',
+  /** A sale spent a voucher that was voided or past its last day (round 48) */
+  'voucher_expired',
   'points_overdrawn',
   /** A controlled drug sold without the prescription, doctor and patient details (03 › الصيدليات) */
   'controlled_incomplete',

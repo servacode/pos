@@ -288,6 +288,15 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/sales/summary': 'signed-in',
   'GET /v1/stocktakes': 'signed-in',
   'GET /v1/vouchers': 'signed-in',
+  'PUT /v1/vouchers/:code': 'signed-in',
+  'GET /v1/customer-groups': 'signed-in',
+  'POST /v1/customer-groups': 'signed-in',
+  'PUT /v1/customer-groups/:id': 'signed-in',
+  'GET /v1/me/search': 'signed-in',
+  'GET /v1/promotions/report': 'signed-in',
+  'POST /v1/promotions/preview': 'signed-in',
+  'POST /v1/prices/bulk/:id/undo': 'signed-in',
+  'POST /v1/suppliers/:id/opening-balance': 'signed-in',
   'POST /v1/products/:id/opening-stock': 'signed-in',
   'POST /v1/promotions/:id/archive': 'signed-in',
   'POST /v1/shop/:slug/quote': 'public',
@@ -1536,6 +1545,94 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     });
     expect(res.statusCode).toBe(404);
     expect(res.body).not.toContain('زبون كشف');
+  },
+  // Store B's owner on store A's supplier, bulk price change, voucher and customer group: 404, nothing changed.
+  'POST /v1/suppliers/:id/opening-balance': async (app, { a, b }) => {
+    const id = await supplierOf(app, a);
+    const [before] = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from journal_entries where tenant_id = ${a.tenantId}`;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/suppliers/${id}/opening-balance`,
+      headers: owner(b),
+      payload: { kind: 'debt', amountMinor: 5000 },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('مورد أ');
+    const [after] = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from journal_entries where tenant_id = ${a.tenantId}`;
+    expect(after!.n).toBe(before!.n);
+  },
+  'POST /v1/prices/bulk/:id/undo': async (app, { a, b }) => {
+    const product = await productOf(app, a);
+    const cat = await app.inject({
+      method: 'POST',
+      url: '/v1/categories',
+      headers: owner(a),
+      payload: { name: 'تصنيف الخصم' },
+    });
+    expect(cat.statusCode, cat.body).toBe(201);
+    const categoryId = cat.json<{ id: string }>().id;
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: `/v1/products/${product.id}`,
+      headers: owner(a),
+      payload: { version: product.version, categoryId },
+    });
+    expect(moved.statusCode, moved.body).toBe(200);
+    const applied = await app.inject({
+      method: 'POST',
+      url: '/v1/prices/bulk',
+      headers: owner(a),
+      payload: { categoryId, percentBp: 1000, roundToMinor: 1, apply: true },
+    });
+    expect(applied.statusCode, applied.body).toBe(200);
+    const { changeId } = applied.json<{ changeId?: string }>();
+    expect(changeId).toBeTruthy();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/prices/bulk/${changeId!}/undo`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from audit_logs where tenant_id = ${a.tenantId} and action = 'prices.bulk_undone'`;
+    expect(row!.n).toBe('0');
+  },
+  'PUT /v1/vouchers/:code': async (app, { a, b }) => {
+    await ownerDb()`
+      insert into vouchers (id, tenant_id, code, return_id, kind, currency, amount_minor)
+      values (gen_random_uuid(), ${a.tenantId}, 'IDOR-VCH-1', gen_random_uuid(), 'gift', 'SYP', 5000)`;
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/v1/vouchers/IDOR-VCH-1',
+      headers: owner(b),
+      payload: { void: true, reason: 'مسروق' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ voided_at: Date | null }[]>`
+      select voided_at from vouchers where tenant_id = ${a.tenantId} and code = 'IDOR-VCH-1'`;
+    expect(row!.voided_at).toBeNull();
+  },
+  'PUT /v1/customer-groups/:id': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customer-groups',
+      headers: owner(a),
+      payload: { name: 'مجموعة أ', discountBps: 500 },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const { id } = made.json<{ id: string }>();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/customer-groups/${id}`,
+      headers: owner(b),
+      payload: { name: 'مسروق', discountBps: 9000 },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ name: string; discount_bps: number }[]>`
+      select name, discount_bps from customer_groups where id = ${id}`;
+    expect(row).toEqual({ name: 'مجموعة أ', discount_bps: 500 });
   },
   'GET /v1/suppliers/:id/statement': async (app, { a, b }) => {
     const id = await supplierOf(app, a);

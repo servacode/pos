@@ -1,17 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { MeResponse, OnlineOrder, SupplierReturnRow } from '@serva/core';
+import type { MeResponse } from '@serva/core';
 import { listProducts } from '../admin/catalog/api';
-import { listCustomers } from '../admin/customers/api';
-import { findSerials, getRecall, listPurchases, listSuppliers } from '../admin/purchases/api';
+import { findSerials, getRecall } from '../admin/purchases/api';
 import { listCheques } from '../admin/cheques/api';
-import { listRentals } from '../admin/contracts/api';
 import { holdsAny, type AccessRule } from '../admin/reports/access';
 import { apiFetch } from '../lib/api';
 import { matchesArabic } from '../lib/arabicSearch';
 import { dayText } from '../lib/dates';
 import { listSales } from '../admin/sales/api';
 import { listQuotations } from '../admin/quotations/api';
-import { listClaims } from '../admin/warranty/api';
 
 /** One record the search found: a product, a customer, a supplier, an invoice, a purchase invoice, a serial number or a batch. */
 export interface RecordHit {
@@ -68,34 +65,27 @@ function kept<T>(me: MeResponse, key: string, load: () => Promise<T>): Promise<T
 }
 
 /**
- * The search box asked for its first letter: warm the whole lists now, so the answer to the first
- * query does not wait for them. Called when the box opens or takes focus.
+ * The search box opened: nothing is downloaded any more. Suppliers, purchase invoices, returns,
+ * online orders, rentals, claims and customers are found by the server (`/v1/me/search`); only the
+ * cheques (which have no search of their own) are read, and only once a word is typed.
  */
-export function warmRecordSearch(me: MeResponse): void {
-  const can = (keys: AccessRule) => holdsAny(me, keys);
-  const quiet = (p: Promise<unknown>) => void p.catch(() => undefined);
-  if (can(['purchases.manage'])) {
-    quiet(kept(me, 'suppliers', () => listSuppliers()));
-    quiet(kept(me, 'purchases', () => listPurchases()));
-    quiet(kept(me, 'supplier-returns', supplierReturns));
-  }
-  if (can(['customers.view'])) {
-    quiet(kept(me, 'online-orders', onlineOrders));
-    quiet(kept(me, 'rentals', () => listRentals('all')));
-    quiet(kept(me, 'cheques', () => listCheques(undefined)));
-  }
-  if (can(['catalog.manage'])) quiet(kept(me, 'claims', () => listClaims('all')));
+export function warmRecordSearch(_me: MeResponse): void {
+  // Kept so the palette's call stays; the lists are not warmed any more (round 48)
 }
-
-const onlineOrders = () => apiFetch<{ items: OnlineOrder[] }>('/v1/online-orders', { auth: true });
-const supplierReturns = () =>
-  apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier-returns', { auth: true });
 
 /** One promise per kind of record, each ready as soon as its own request answers. */
 function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
   const can = (keys: AccessRule) => holdsAny(me, keys);
   const quiet = <T>(p: Promise<T[]>): Promise<T[]> => p.catch(() => []);
   const sources: (RecordHit[] | Promise<RecordHit[]>)[] = [
+    // One request for the records the server can find by name or number (see services/record-search.ts)
+    can(['purchases.manage']) || can(['customers.view']) || can(['catalog.manage'])
+      ? quiet(
+          apiFetch<{ items: RecordHit[] }>(`/v1/me/search?q=${encodeURIComponent(q)}`, { auth: true }).then(
+            (r) => r.items,
+          ),
+        )
+      : [],
     can(['catalog.manage'])
       ? quiet(
           listProducts({ q, limit: FEW }).then((r) =>
@@ -106,35 +96,6 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
               detail: p.categoryName ?? undefined,
               to: `/products/${p.id}`,
             })),
-          ),
-        )
-      : [],
-    can(['customers.view'])
-      ? quiet(
-          listCustomers(q).then((r) =>
-            r.items.slice(0, FEW).map((c): RecordHit => ({
-              key: `c:${c.id}`,
-              group: 'الزبائن',
-              label: c.name,
-              detail: c.phone ?? undefined,
-              to: `/customers/${c.id}`,
-            })),
-          ),
-        )
-      : [],
-    can(['purchases.manage'])
-      ? quiet(
-          kept(me, 'suppliers', () => listSuppliers()).then((r) =>
-            r.items
-              .filter((s) => matchesArabic(s.name, q, s.phone ?? undefined))
-              .slice(0, FEW)
-              .map((s): RecordHit => ({
-                key: `s:${s.id}`,
-                group: 'الموردون',
-                label: s.name,
-                detail: s.phone ?? undefined,
-                to: `/suppliers/${s.id}/statement`,
-              })),
           ),
         )
       : [],
@@ -167,57 +128,6 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
           ),
         )
       : [],
-    // Purchase invoices (PUR-…): the list has no search of its own, so the number is matched here
-    can(['purchases.manage'])
-      ? quiet(
-          kept(me, 'purchases', () => listPurchases()).then((r) => {
-            return r.items
-              .filter((p) => matchesArabic(p.number, q, p.reference ?? undefined))
-              .slice(0, FEW)
-              .map((p): RecordHit => ({
-                key: `u:${p.id}`,
-                group: 'فواتير الشراء',
-                label: p.number,
-                detail: p.supplierName,
-                to: `/purchases?q=${encodeURIComponent(p.number)}`,
-              }));
-          }),
-        )
-      : [],
-    // Online orders (ONL-…): the list has no search of its own, so the number, name or phone is matched here
-    can(['customers.view'])
-      ? quiet(
-          kept(me, 'online-orders', onlineOrders).then((r) =>
-            r.items
-              .filter((o) => matchesArabic(o.number, q, o.customerName, o.phone))
-              .slice(0, FEW)
-              .map((o): RecordHit => ({
-                key: `o:${o.id}`,
-                group: 'طلبات المتجر الإلكتروني',
-                label: o.number,
-                detail: o.customerName,
-                to: '/online-store',
-              })),
-          ),
-        )
-      : [],
-    // Rentals (RNT-…) and cheque numbers, matched the same way
-    can(['customers.view'])
-      ? quiet(
-          kept(me, 'rentals', () => listRentals('all')).then((r) =>
-            r.items
-              .filter((x) => matchesArabic(x.number, q, x.customerName, x.item))
-              .slice(0, FEW)
-              .map((x): RecordHit => ({
-                key: `r:${x.id}`,
-                group: 'التأجير',
-                label: x.number,
-                detail: `${x.item} · ${x.customerName}`,
-                to: '/rentals',
-              })),
-          ),
-        )
-      : [],
     can(['customers.view'])
       ? quiet(
           kept(me, 'cheques', () => listCheques(undefined)).then((r) =>
@@ -232,40 +142,6 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
                 label: withArabicDates(c.reference ?? c.documentNumber),
                 detail: c.customerName ?? undefined,
                 to: '/cheques',
-              })),
-          ),
-        )
-      : [],
-    // Warranty claims (WC-…), supplier returns (PRT-…) and quotations (QUO-…): matched by number,
-    // and by the name or serial next to it
-    can(['catalog.manage'])
-      ? quiet(
-          kept(me, 'claims', () => listClaims('all')).then((r) =>
-            r.items
-              .filter((c) => matchesArabic(c.number, q, c.serial, c.customerName ?? undefined))
-              .slice(0, FEW)
-              .map((c): RecordHit => ({
-                key: `w:${c.id}`,
-                group: 'مطالبات الضمان',
-                label: c.number,
-                detail: `${c.item}${c.customerName ? ` · ${c.customerName}` : ''}`,
-                to: '/warranty',
-              })),
-          ),
-        )
-      : [],
-    can(['purchases.manage'])
-      ? quiet(
-          kept(me, 'supplier-returns', supplierReturns).then((r) =>
-            r.items
-              .filter((x) => matchesArabic(x.number, q, x.supplierName))
-              .slice(0, FEW)
-              .map((x): RecordHit => ({
-                key: `t:${x.id}`,
-                group: 'مرتجعات الموردين',
-                label: x.number,
-                detail: x.supplierName,
-                to: '/supplier-returns',
               })),
           ),
         )
@@ -347,5 +223,11 @@ export function useRecordSearch(me: MeResponse, query: string, enabled: boolean)
     };
   }, [me, q, enabled]);
   const ready = state.q === q && q.length >= 2;
-  return { hits: ready ? state.hits : [], searching: q.length >= 2 && (!ready || state.pending > 0) };
+  // The last hits stay on screen while the next letter is being answered (no flicker), when the
+  // new query is a longer or shorter form of the one they answered
+  const related = state.q.length >= 2 && q.length >= 2 && (q.startsWith(state.q) || state.q.startsWith(q));
+  return {
+    hits: ready || related ? state.hits : [],
+    searching: q.length >= 2 && (!ready || state.pending > 0),
+  };
 }

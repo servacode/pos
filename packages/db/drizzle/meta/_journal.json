@@ -652,6 +652,20 @@
       "when": 1795165967887,
       "tag": "0093_supplier_cheque_payable",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1795165968887,
+      "tag": "0094_promotions_coupon_live",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1795165969887,
+      "tag": "0095_customers_round48",
+      "breakpoints": true
     }
   ]
 }

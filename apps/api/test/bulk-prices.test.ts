@@ -189,6 +189,93 @@ describe('bulk price change', () => {
     expect([read.variants[0]!.price.priceMinor, read.variants[0]!.wasPriceMinor]).toEqual([3_600_000, null]);
   });
 
+  it('undoes a bulk change once, leaves a piece edited since, and shows in the product history', async () => {
+    const store = await openStore(app);
+    const summer = await category(store, 'صيفي');
+    const shirt = await product(store, 'قميص', summer.id, [4_500_000, 4_600_000], 3_000_000);
+    const applied = (
+      await bulk(store, { categoryId: summer.id, percentBp: -3000, roundToMinor: 50_000, apply: true })
+    ).json<BulkPriceResult>();
+    expect(applied.changeId).toBeTruthy();
+    // The product's own history now carries the bulk rows (it did not before)
+    const own = await app.inject({
+      method: 'GET',
+      url: `/v1/price-history?productId=${shirt.id}`,
+      headers: as(store),
+    });
+    expect(own.json<{ items: { source: string }[] }>().items.filter((r) => r.source === 'bulk')).toHaveLength(
+      2,
+    );
+    // One piece edited by hand afterwards stays as the owner left it
+    const fresh = (
+      await app.inject({ method: 'GET', url: `/v1/products/${shirt.id}`, headers: as(store) })
+    ).json<ProductDetail>();
+    const edited = await app.inject({
+      method: 'PATCH',
+      url: `/v1/products/${shirt.id}`,
+      headers: as(store),
+      payload: {
+        version: fresh.version,
+        variants: [{ id: shirt.variants[0]!.id, price: { currency: 'SYP', priceMinor: 3_300_000 } }],
+      },
+    });
+    expect(edited.statusCode, edited.body).toBe(200);
+    const undo = await app.inject({
+      method: 'POST',
+      url: `/v1/prices/bulk/${applied.changeId!}/undo`,
+      headers: as(store),
+      payload: {},
+    });
+    expect(undo.statusCode, undo.body).toBe(200);
+    expect(undo.json()).toEqual({ restored: 1, skipped: 1 });
+    const read = (
+      await app.inject({ method: 'GET', url: `/v1/products/${shirt.id}`, headers: as(store) })
+    ).json<ProductDetail>();
+    expect(read.variants.map((v) => v.price.priceMinor).sort()).toEqual([3_300_000, 4_600_000]);
+    expect(read.variants.every((v) => v.wasPriceMinor === null || v.price.priceMinor === 3_300_000)).toBe(
+      true,
+    );
+    const again = await app.inject({
+      method: 'POST',
+      url: `/v1/prices/bulk/${applied.changeId!}/undo`,
+      headers: as(store),
+      payload: {},
+    });
+    expect(again.statusCode).toBe(409);
+  });
+
+  it('pages the price history and shows a floor or wholesale edit', async () => {
+    const store = await openStore(app);
+    const summer = await category(store, 'صيفي');
+    const shirt = await product(store, 'قميص', summer.id, [4_500_000]);
+    for (const w of [1_000_000, 1_100_000]) {
+      const cur = (
+        await app.inject({ method: 'GET', url: `/v1/products/${shirt.id}`, headers: as(store) })
+      ).json<ProductDetail>();
+      const r = await app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${shirt.id}`,
+        headers: as(store),
+        payload: { version: cur.version, variants: [{ id: shirt.variants[0]!.id, wholesalePriceMinor: w }] },
+      });
+      expect(r.statusCode, r.body).toBe(200);
+    }
+    const first = (
+      await app.inject({ method: 'GET', url: '/v1/price-history?limit=1', headers: as(store) })
+    ).json<{ items: { field?: string; newMinor: number }[]; nextCursor: string | null }>();
+    expect(first.items).toHaveLength(1);
+    expect(first.items[0]).toMatchObject({ field: 'wholesale', newMinor: 1_100_000 });
+    expect(first.nextCursor).toBeTruthy();
+    const second = (
+      await app.inject({
+        method: 'GET',
+        url: `/v1/price-history?limit=1&before=${encodeURIComponent(first.nextCursor!)}`,
+        headers: as(store),
+      })
+    ).json<{ items: { newMinor: number }[]; nextCursor: string | null }>();
+    expect(second.items[0]!.newMinor).toBe(1_000_000);
+  });
+
   it('refuses no percent, too much off, and an unknown category', async () => {
     const store = await openStore(app);
     const c = await category(store, 'صيفي');

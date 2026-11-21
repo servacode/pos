@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { PriceModes } from './parts';
 import { CatalogGate } from './CatalogGate';
 import {
   PRICE_LIST_CHUNK_MAX,
@@ -323,6 +324,7 @@ function PriceList() {
           title="تحديث الأسعار من ملف"
           subtitle="ارفع نشرة الأسعار من المستودع أو الوزارة: نطابق كل صف مع صنفك بالباركود ثم بالاسم، وترى السعر القديم والجديد قبل أن يتغيّر شيء."
         />
+        <PriceModes current="/price-list" />
         {error ? <Alert tone="error">{error}</Alert> : null}
 
         {step === 'file' ? (

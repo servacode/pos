@@ -36,6 +36,7 @@ export function productsPath(query: ProductListQuery): string {
   if (query.expiry) params.set('expiry', query.expiry);
   if (query.stock) params.set('stock', query.stock);
   if (query.sort && query.sort !== 'name') params.set('sort', query.sort);
+  if (query.detail) params.set('detail', query.detail);
   if (query.cursor) params.set('cursor', query.cursor);
   if (query.limit) params.set('limit', String(query.limit));
   const search = params.toString();

@@ -815,16 +815,24 @@ async function processGroup(
       );
     }
   }
-  const byNameAllowed = first.attributes.length > 0 || first.barcode === null;
+  // A row with sizes or colours and no code is another size of the same-named product; a plain row
+  // (no code, no size) is never allowed to patch a product that only shares its name.
+  const byNameAllowed = first.attributes.length > 0;
   if (productId === null && byNameAllowed) productId = await productOfName(tx, first.name);
+  if (productId === null && first.attributes.length === 0 && first.barcode === null) {
+    if ((await productOfName(tx, first.name)) !== null) {
+      state.sent = group;
+      throw fieldError(
+        'nameAr',
+        'يوجد منتج بهذا الاسم في المتجر. أضف الباركود ليُحدَّث ذلك المنتج، أو غيّر الاسم ليُضاف منتج جديد.',
+      );
+    }
+  }
 
   let current = productId ? await productDetail(tx, productId) : null;
   // A new product whose name a live product already carries: allowed, but said in the preview
   if (productId === null && !byNameAllowed && (await productOfName(tx, first.name)) !== null) {
-    results.note(
-      first.line,
-      'يوجد منتج بالاسم نفسه ببارکود آخر: تأكد أنه صنف مختلف وليس مكرراً'.replace('ببارکود', 'بباركود'),
-    );
+    results.note(first.line, 'يوجد منتج بالاسم نفسه بباركود آخر: تأكد أنه صنف مختلف وليس مكرراً');
   }
   if (current) {
     for (const p of group) {

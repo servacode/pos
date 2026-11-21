@@ -89,6 +89,31 @@ beforeEach(() => {
   vi.mocked(openWhatsApp).mockClear();
 });
 
+describe('round 48: the shop front', () => {
+  it('shows the store in a hero band when it has no cover, and a note when the page is cut', async () => {
+    mockFetch({
+      'GET /v1/shop/nour': {
+        status: 200,
+        body: { ...HOME, store: { ...HOME.store, coverUrl: null }, truncated: true },
+      },
+    });
+    renderApp('/shop/nour');
+    const hero = await screen.findByRole('region', { name: 'عن المتجر' });
+    expect(hero).toHaveTextContent('نور للأزياء');
+    expect(hero).toHaveTextContent('توصيل');
+    expect(await screen.findByRole('note')).toHaveTextContent('هذه أول البضاعة بالاسم');
+  });
+
+  it('has no hero band over a cover, and says a page that is not there is not there', async () => {
+    mockFetch({
+      'GET /v1/shop/nour': { status: 200, body: { ...HOME, store: { ...HOME.store, coverUrl: '/c.jpg' } } },
+    });
+    renderApp('/shop/nour/zzz');
+    expect(await screen.findByText('هذه الصفحة غير موجودة')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'عن المتجر' })).not.toBeInTheDocument();
+  });
+});
+
 describe('the shop’s look', () => {
   it('shows the logo, the tagline and the cover, and takes the accent from the identity’s tokens', async () => {
     mockFetch({ 'GET /v1/shop/nour': { status: 200, body: HOME } });
@@ -299,6 +324,20 @@ describe('the coupon in the cart', () => {
     await user.click(within(box).getByRole('button', { name: 'طبّق' }));
     expect(await screen.findByText('الكود لم يزد الخصم: عرض أفضل مطبّق على هذه القطع.')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'السلة' })).not.toHaveTextContent('خصم الكود');
+  });
+
+  it('says the discount cannot be worked out now, instead of waiting for ever', async () => {
+    const { user } = await toCart({
+      'GET /v1/shop/nour/coupon?code=ten': { status: 200, body: { name: 'عشرة', percentBp: 1000 } },
+      'POST /v1/shop/nour/quote': apiError(400, 'validation_failed', 'قطعة غير موجودة', {
+        'lines.0': 'قطعة غير موجودة',
+      }),
+    });
+    const box = screen.getByRole('form', { name: 'كود الخصم' });
+    await user.type(within(box).getByLabelText('كود الخصم (اختياري)'), 'ten');
+    await user.click(within(box).getByRole('button', { name: 'طبّق' }));
+    expect(await screen.findByText('تعذّر حساب الخصم الآن، ويُحسب عند إتمام الطلب.')).toBeInTheDocument();
+    expect(screen.queryByText('نحسب خصم الكود…')).not.toBeInTheDocument();
   });
 
   it('tells a buy-and-get code is applied when the order is collected', async () => {

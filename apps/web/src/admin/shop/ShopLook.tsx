@@ -35,6 +35,19 @@ const putImage = (slot: Slot, image: Awaited<ReturnType<typeof resizeImage>>) =>
 const dropImage = (slot: Slot) =>
   apiFetch<OnlineStoreSettings>(`/v1/online-store/image/${slot}`, { method: 'DELETE', auth: true });
 
+/** Where a picture will go: a dashed tile with the size that suits it, so the empty slot reads as a slot */
+function EmptyTile({ className, hint }: { className: string; hint: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex ${className} flex-col items-center justify-center gap-1 rounded-control border border-dashed border-line-control/60 bg-surface-muted text-xs text-ink-subtle`}
+    >
+      <CameraIcon size={16} />
+      {hint}
+    </span>
+  );
+}
+
 export function ShopLook({
   form,
   saved,
@@ -114,7 +127,9 @@ export function ShopLook({
                 alt="شعار المتجر"
                 className="size-20 rounded-control border border-line object-cover"
               />
-            ) : null}
+            ) : (
+              <EmptyTile className="size-20" hint="مربعة، 400×400" />
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <input
                 ref={logoInput}
@@ -158,7 +173,9 @@ export function ShopLook({
                 alt="غلاف المتجر"
                 className="h-20 w-full rounded-control border border-line object-cover"
               />
-            ) : null}
+            ) : (
+              <EmptyTile className="h-20 w-full" hint="عريضة، 1600×400" />
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <input
                 ref={coverInput}
@@ -200,6 +217,9 @@ export function ShopLook({
           onChange={(e) => onChange({ tagline: e.target.value.slice(0, 80) || null })}
         />
         <div className="flex flex-col gap-2 border-t border-line pt-4">
+          <p aria-hidden="true" className="text-sm font-semibold text-ink">
+            لون الأزرار
+          </p>
           <SegmentedControl
             label="لون الأزرار"
             value={accent}

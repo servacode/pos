@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import {
   convert,
   formatMoney,
@@ -231,6 +231,8 @@ export async function couponRule(tx: Transaction, code: string): Promise<Promoti
   return rules.find((r) => r.couponCode) ?? null;
 }
 
+/** The kinds of offer a code may open: the quote and the order agree on it */
+export const COUPON_KINDS: readonly PromotionRule['kind'][] = ['percent', 'buy_get'];
 export const COUPON_BAD = 'هذا الكود غير صحيح أو انتهت مدته.';
 
 function pricing(
@@ -279,6 +281,15 @@ const heldSql = sql`coalesce((select sum((x->>'qty')::bigint) * 1000 from online
 const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) - ${heldSql} > 0)`;
 /** What is left of the piece, in stock units; null for a service. Only «بقي 2 فقط» comes out of it. */
 const unitsLeftSql = sql`(case when p.type = 'service' then null else coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) - ${heldSql} end)`;
+/**
+ * The same as availableSql for a list of many pieces: the held units are summed once per request in a
+ * `held` CTE (one scan of the live orders) instead of once for every variant.
+ */
+const heldCte = sql`with held as materialized (
+  select x->>'variantId' as vid, sum((x->>'qty')::bigint) * 1000 as units from online_orders o
+  cross join lateral jsonb_array_elements(o.lines) x
+  where ${liveReservation} group by 1)`;
+const availableListSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) - coalesce((select h.units from held h where h.vid = v.id::text), 0) > 0)`;
 /** At most this many pieces left shows «بقي 2 فقط» */
 const LOW_STOCK = 3;
 /** The most one order may hold of a piece: what is on the shelf, whole pieces, at most 50; null for a service */
@@ -312,8 +323,9 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
         created_at: Date;
         attributes: { name: string; value: string }[] | null;
       }>(sql`
+        ${heldCte}
         select p.id, p.name_ar as name, p.category_id, pr.currency, pr.price_minor::text as price,
-               pr.was_price_minor::text as was, ${availableSql} as available,
+               pr.was_price_minor::text as was, ${availableListSql} as available,
                p.created_at, v.attributes,
                (select i.upload_id from product_images i where i.product_id = p.id
                 order by i.sort_order, i.created_at limit 1) as upload_id
@@ -324,6 +336,8 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
         order by p.name_ar, p.id
         limit ${SHOP_VARIANT_CAP}`);
       const byProduct = new Map<string, ShopHome['products'][number]>();
+      // The page holds the first SHOP_VARIANT_CAP pieces by name: the customer is told when there are more
+      const truncated = rows.length >= SHOP_VARIANT_CAP;
       for (const r of rows) {
         const priced = priceOf({ productId: r.id, categoryId: r.category_id, ...r });
         if (priced === null) continue;
@@ -405,6 +419,7 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
           .filter((c) => shown.has(c.id))
           .map((c) => ({ id: c.id, name: c.name, parentId: c.parent_id })),
         products,
+        ...(truncated ? { truncated: true } : {}),
       };
     }),
   );
@@ -763,7 +778,7 @@ export function placeShopOrder(
       await withTenant(db, tenantId, (tx) => draftShopOrder(tx, tenantId, input));
       await checkShopCode(app, tenantId, input);
     }
-    return withTenant(db, tenantId, async (tx) => {
+    const written = withTenant(db, tenantId, async (tx) => {
       const { store, base, coupon, couponSnapshot, lines, totalMinor, deliveryFeeMinor, deliveryArea } =
         await draftShopOrder(tx, tenantId, input);
       const order = {
@@ -802,6 +817,8 @@ export function placeShopOrder(
       };
       // The same order twice (a dropped answer, then a second tap): the first one is the answer, no second order
       if (mode === 'whatsapp') {
+        // The numbering lock first: two taps at once queue here, so the second one sees the first one's order
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('online_orders'), hashtext(${tenantId}))`);
         const [twin] = await tx
           .select({ token: onlineOrders.trackToken, number: onlineOrders.number })
           .from(onlineOrders)
@@ -837,6 +854,15 @@ export function placeShopOrder(
         })
         .returning({ token: onlineOrders.trackToken });
       return reply({ token: made!.token, number });
+    });
+    if (mode !== 'shop') return written;
+    // The code is already used up: a refusal now (the last piece sold, an offer that ended) must say the code is gone
+    return written.catch((e: unknown) => {
+      if (!(e instanceof AppError) || e.statusCode >= 500) throw e;
+      throw new AppError(e.statusCode, e.code, `${e.message} اطلب رمزاً جديداً ثم أعد الإرسال.`, {
+        ...(e.fields ?? {}),
+        code: 'انتهت صلاحية الرمز. اطلب رمزاً جديداً.',
+      });
     });
   });
 }
@@ -1170,10 +1196,17 @@ export function listOnlineOrders(
     cursor?: string | undefined;
     limit?: number | undefined;
   },
-): Promise<{ items: OnlineOrder[]; nextCursor: string | null }> {
+): Promise<{
+  items: OnlineOrder[];
+  nextCursor: string | null;
+  /** What each tab holds: waiting (with the cancel requests), accepted, and every order */
+  counts: { pending: number; accepted: number; all: number };
+}> {
   const status = query.status;
   const limit = query.limit ?? 200;
-  const offset = query.cursor ? Number(query.cursor) : 0;
+  // «s123»: the page after order 123 (a keyset, so an order decided meanwhile moves no other off its page); a bare number is the older offset form
+  const after = query.cursor?.startsWith('s') ? Number(query.cursor.slice(1)) : null;
+  const offset = after === null && query.cursor ? Number(query.cursor) : 0;
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.view');
     const rows = await tx
@@ -1188,13 +1221,28 @@ export function listOnlineOrders(
             : status
               ? [eq(onlineOrders.status, status)]
               : []),
+          ...(after !== null ? [lt(onlineOrders.seq, after)] : []),
         ),
       )
       .orderBy(desc(onlineOrders.createdAt), desc(onlineOrders.seq))
       .limit(limit + 1)
       .offset(offset);
     const more = rows.length > limit;
-    return { items: rows.slice(0, limit).map(orderOf), nextCursor: more ? String(offset + limit) : null };
+    const page = rows.slice(0, limit);
+    const tallies = await tx.execute<{ status: string; n: number }>(
+      sql`select status, count(*)::int as n from online_orders where tenant_id = ${auth.tenantId} group by status`,
+    );
+    const of = (...names: string[]) =>
+      tallies.filter((t) => names.includes(t.status)).reduce((n, t) => n + t.n, 0);
+    return {
+      items: page.map(orderOf),
+      nextCursor: more ? `s${page[page.length - 1]!.seq}` : null,
+      counts: {
+        pending: of('pending', 'cancel_requested'),
+        accepted: of('accepted'),
+        all: tallies.reduce((n, t) => n + t.n, 0),
+      },
+    };
   });
 }
 

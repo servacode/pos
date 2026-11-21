@@ -25,7 +25,7 @@ import type { NavSection } from './nav';
 import { trapTab } from './popover';
 import { useRecordSearch, warmRecordSearch, type RecordHit } from './recordSearch';
 
-/** What the box is for: «ابحث» (Ctrl K), or the list of new things to make (Ctrl N). */
+/** What the box is for: «ابحث» (Ctrl K), or the list of new things to make (Alt N). */
 export type PaletteIntent = 'search' | 'new';
 
 type Scope = 'all' | 'products' | 'customers' | 'invoices' | 'pages';
@@ -113,7 +113,7 @@ function Row({
  * منتجات، زبائن، فواتير، صفحات), results in titled groups, a hint line of keys at the foot. The
  * pages are matched here; the records (products, customers, invoices, serial numbers…) come from
  * recordSearch. With nothing typed it offers the quick actions: the till (F2) and the new things
- * (Ctrl N opens it on those).
+ * (Alt N opens it on those).
  */
 export function CommandPalette({
   open,
@@ -135,6 +135,13 @@ export function CommandPalette({
   const box = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
   const listId = useId();
+  // The mouse moving the active row must not scroll the list under it: only the keys do
+  const byMouse = useRef(false);
+
+  // The latest `me` is read by the effect below without restarting it: a refetched `me` must not
+  // clear what the person typed
+  const meRef = useRef(me);
+  meRef.current = me;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -143,13 +150,13 @@ export function CommandPalette({
     setScope('all');
     setActive(0);
     // The lists the search matches by hand start loading now, while the first letters are typed
-    warmRecordSearch(me);
+    warmRecordSearch(meRef.current);
     const focus = window.setTimeout(() => input.current?.focus(), 0);
     return () => {
       window.clearTimeout(focus);
       if (opener.current instanceof HTMLElement) opener.current.focus({ preventScroll: true });
     };
-  }, [open, me]);
+  }, [open]);
 
   const q = query.trim();
   const canSell = holdsAny(me, ['sale.create']);
@@ -196,9 +203,23 @@ export function CommandPalette({
         .filter((page) => !q || matchesArabic(page.label, q, section.label, PAGE_KEYWORDS[page.to]))
         .map((page) => ({ section, page })),
     );
+    // The pages whose own name matches come before the ones only a keyword reaches
+    if (q)
+      all.sort((a, b) => Number(!matchesArabic(a.page.label, q)) - Number(!matchesArabic(b.page.label, q)));
     // Nothing typed: a short list of places to jump to, not the whole menu
     return q === '' && scope === 'all' ? all.slice(0, 8) : all;
   }, [sections, q, showPages, scope, intent]);
+
+  // Only the tabs of what this person may search: a cashier is not offered customers or invoices
+  const scopes = SCOPES.filter(({ key }) =>
+    key === 'products'
+      ? holdsAny(me, ['catalog.manage'])
+      : key === 'customers'
+        ? holdsAny(me, ['customers.view'])
+        : key === 'invoices'
+          ? holdsAny(me, ['report.view', 'purchases.manage', 'sale.create'])
+          : true,
+  );
 
   const { hits: found, searching } = useRecordSearch(me, query, open && scope !== 'pages');
   const hits = useMemo(() => {
@@ -236,9 +257,11 @@ export function CommandPalette({
       event.preventDefault();
       close();
     } else if (event.key === 'ArrowDown') {
+      byMouse.current = false;
       event.preventDefault();
       setActive(Math.min(chosen + 1, total - 1));
     } else if (event.key === 'ArrowUp') {
+      byMouse.current = false;
       event.preventDefault();
       setActive(Math.max(chosen - 1, 0));
     } else if (event.key === 'Enter' && total > 0 && event.target === input.current) {
@@ -251,7 +274,7 @@ export function CommandPalette({
 
   // The arrow keys keep the active row in view inside the scrolling list
   useEffect(() => {
-    if (!open || total === 0) return;
+    if (!open || total === 0 || byMouse.current) return;
     const row = document.getElementById(`${listId}-opt-${String(chosen)}`);
     if (row && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
   }, [open, chosen, total, listId]);
@@ -259,7 +282,10 @@ export function CommandPalette({
   if (!open) return null;
 
   const optionId = (i: number) => `${listId}-opt-${String(i)}`;
-  const hover = (i: number) => () => setActive(i);
+  const hover = (i: number) => () => {
+    byMouse.current = true;
+    setActive(i);
+  };
   const groups: { name: string; items: { hit: RecordHit; index: number }[] }[] = [];
   hits.forEach((hit, n) => {
     const index = shownActions.length + pages.length + n;
@@ -293,9 +319,15 @@ export function CommandPalette({
             }}
             autoComplete="off"
             role="combobox"
-            aria-label="اسم الصفحة"
+            aria-label="ابحث في المتجر"
             aria-expanded={total > 0}
-            aria-controls={`${listId}-actions ${listId}-pages ${listId}-records`}
+            aria-controls={[
+              shownActions.length > 0 ? `${listId}-actions` : null,
+              pages.length > 0 ? `${listId}-pages` : null,
+              groups.length > 0 || (searching && scope !== 'pages') ? `${listId}-records` : null,
+            ]
+              .filter(Boolean)
+              .join(' ')}
             aria-autocomplete="list"
             aria-activedescendant={total > 0 ? optionId(chosen) : undefined}
             placeholder={intent === 'new' ? 'ماذا تريد أن تنشئ؟' : 'ابحث عن منتج أو زبون أو فاتورة أو صفحة…'}
@@ -303,7 +335,7 @@ export function CommandPalette({
           <kbd className="sh-kbd">Esc</kbd>
         </div>
         <div className="sh-scopes" role="group" aria-label="نطاق البحث">
-          {SCOPES.map(({ key, label }) => (
+          {scopes.map(({ key, label }) => (
             <button
               key={key}
               type="button"

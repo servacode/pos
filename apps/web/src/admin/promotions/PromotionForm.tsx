@@ -6,6 +6,7 @@ import {
   type CustomerKind,
   type Promotion,
   type PromotionInput,
+  type PromotionPreview,
   type PromotionKind,
   type PromotionScope,
 } from '@serva/core';
@@ -19,6 +20,7 @@ import {
   GiftIcon,
   PercentIcon,
   SearchField,
+  Money,
   Select,
   TextField,
   ToggleChip,
@@ -26,12 +28,13 @@ import {
   CONTROL_HEIGHT,
   useDensity,
 } from '@serva/ui';
+import { CURRENCIES } from '@serva/core/currencies';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, errorMessage } from '../../lib/api';
 import { DateField } from '../../lib/DateField';
 import { getProduct, listCategories, listProducts } from '../catalog/api';
 import { categoryTree, categoryOptionLabel } from '../catalog/catalog';
-import { createPromotion, updatePromotion } from './api';
+import { createPromotion, previewPromotion, updatePromotion } from './api';
 
 /** The store's clock: Syria keeps UTC+3 all year. */
 const OFFSET = '+03:00';
@@ -109,12 +112,52 @@ export function PromotionForm({
   const retailOnly = me.tenant.sectors.every((k) =>
     ['clothing', 'cafe', 'cosmetics', 'electronics', 'bakery'].includes(k),
   );
+  // «كما يراها الزبون»: a sample piece with the offer taken off, as the shop and the receipt will show it
+  const sampleBase = me.settings.baseCurrency;
+  const samplePercent = Number(digits(percent));
+  const sample =
+    kind === 'percent' && samplePercent > 0 && samplePercent <= 100
+      ? (() => {
+          const was = 100_000 * 10 ** CURRENCIES[sampleBase].decimals;
+          return { was, now: Math.round(was * (1 - samplePercent / 100)) };
+        })()
+      : null;
   const showKinds = !retailOnly || customerKinds.length > 0;
   const [categories, setCategories] = useState<Category[]>([]);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const density = useDensity();
+  const formRef = useRef<HTMLFormElement>(null);
+  // The first field that is wrong is brought into view and focused, so its sentence is never below the fold
+  useEffect(() => {
+    if (Object.keys(fields).length === 0) return;
+    const bad = formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    bad?.scrollIntoView?.({ block: 'center' });
+    bad?.focus?.({ preventScroll: true });
+  }, [fields]);
+  // How many products the offer reaches, asked of the server while the owner picks the scope
+  const [reach, setReach] = useState<PromotionPreview | null>(null);
+  useEffect(() => {
+    if (
+      (scope === 'categories' && categoryIds.length === 0) ||
+      (scope === 'products' && productIds.length === 0)
+    ) {
+      setReach(null);
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      previewPromotion({ scope, categoryIds, productIds }).then(
+        (r) => current && setReach(r),
+        () => current && setReach(null),
+      );
+    }, 300);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [scope, categoryIds, productIds]);
 
   useEffect(() => {
     listCategories()
@@ -192,6 +235,10 @@ export function PromotionForm({
   }
 
   async function save() {
+    if (name.trim().length < 2) {
+      setFields({ name: 'اسم العرض مطلوب' });
+      return;
+    }
     const bp = Math.round(Number(digits(percent)) * 100);
     if (kind === 'percent' && (!Number.isFinite(bp) || bp <= 0 || bp > 10_000)) {
       setFields({ percentBp: 'اكتب نسبة بين 1 و100' });
@@ -268,6 +315,7 @@ export function PromotionForm({
 
   return (
     <form
+      ref={formRef}
       aria-label={promotion ? 'عدّل العرض' : 'عرض جديد'}
       // Fills the sheet's body; the actions stay at its foot while the fields scroll under them.
       className="flex flex-1 flex-col gap-6"
@@ -288,7 +336,7 @@ export function PromotionForm({
         />
         <fieldset className="flex flex-col gap-1.5">
           <legend className="mb-1.5 text-sm font-semibold text-ink-muted">نوع العرض</legend>
-          <div className="grid gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <ChoiceCard
               name="promotion-kind"
               title="خصم بنسبة"
@@ -660,6 +708,23 @@ export function PromotionForm({
             : `يعمل فور الحفظ ${scope === 'all' ? 'على كل المنتجات' : scope === 'categories' ? 'على التصنيفات المختارة' : 'على المنتجات المختارة'}، وتراه الزبائن في المتجر الإلكتروني${
                 couponCode.trim() && (kind === 'percent' || kind === 'buy_get') ? ' بعد كتابة الكود' : ''
               }.`}
+          {sample ? (
+            <span data-testid="promotion-sample" className="block">
+              كما يراها الزبون: قطعة بـ{' '}
+              <Money minor={sample.was} currency={sampleBase} className="line-through" /> تصبح{' '}
+              <Money minor={sample.now} currency={sampleBase} className="font-semibold text-ink" />، وعليها
+              «خصم {samplePercent}%».
+            </span>
+          ) : null}
+          {reach ? (
+            <>
+              {' '}
+              <strong data-testid="promotion-reach" className="font-semibold text-ink">
+                يطال {reach.products === 0 ? 'لا منتجات' : `${reach.products} منتج`}
+                {reach.sample.length > 0 ? ` (مثل: ${reach.sample.join('، ')})` : ''}.
+              </strong>
+            </>
+          ) : null}
         </p>
         {promotion ? null : (
           <ToggleChip

@@ -145,7 +145,7 @@ export function CustomerMoneyDialog({
               date,
               ...(branchId ? { branchId } : {}),
             })
-          : await openDebt(customer.id, { amountMinor, date }),
+          : await openDebt(customer.id, { id: requestId, amountMinor, date }),
       );
     } catch (e) {
       if (e instanceof ApiError && e.fields) setFields(e.fields);

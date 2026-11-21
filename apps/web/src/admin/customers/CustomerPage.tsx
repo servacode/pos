@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import {
   CUSTOMER_KIND_LABELS,
   type CurrencyCode,
@@ -221,6 +221,14 @@ function LoadingCustomer() {
   );
 }
 
+/** The page's sections: one statement, the invoices, the instalments, and the rest on the overview */
+const TABS = [
+  { key: 'overview', label: 'نظرة عامة' },
+  { key: 'statement', label: 'الكشف' },
+  { key: 'invoices', label: 'الفواتير' },
+  { key: 'plans', label: 'الأقساط' },
+] as const;
+
 /** One customer (12 › كشف حساب زبون): what they owe, every sale on credit and every payment. */
 export function CustomerPage() {
   const { id = '' } = useParams();
@@ -235,7 +243,14 @@ export function CustomerPage() {
   const [money, setMoney] = useState<'payment' | 'opening' | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
-  const [allInvoices, setAllInvoices] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const tab = TABS.find((t) => t.key === params.get('tab'))?.key ?? 'overview';
+  const pickTab = (key: string) => {
+    const next = new URLSearchParams(params);
+    if (key === 'overview') next.delete('tab');
+    else next.set('tab', key);
+    setParams(next, { replace: true });
+  };
   const canReceive = me.user.permissions.includes('receipt.create');
   const canOpen = me.user.permissions.includes('accounting.post');
 
@@ -372,7 +387,6 @@ export function CustomerPage() {
   const statement: StatementRow[] = (customer?.statement ?? []).map((l, k) => ({ ...l, k })).reverse();
 
   const invoices = purchases?.invoices ?? [];
-  const shownInvoices = allInvoices ? invoices : invoices.slice(0, 5);
 
   return (
     <AppShell>
@@ -397,6 +411,11 @@ export function CustomerPage() {
               }
               actions={
                 <>
+                  {canReceive ? (
+                    <Button icon={<AddIcon />} onClick={() => setMoney('payment')}>
+                      استلم دفعة
+                    </Button>
+                  ) : null}
                   {seesInvoices ? (
                     <Link
                       to={`/sales/invoices?customerId=${encodeURIComponent(customer.id)}`}
@@ -447,6 +466,29 @@ export function CustomerPage() {
               {customer.kind ? (
                 <StatusPill kind="ok">{CUSTOMER_KIND_LABELS[customer.kind]}</StatusPill>
               ) : null}
+              {customer.groupName ? (
+                <StatusPill kind="ok">
+                  {customer.groupName}
+                  {customer.groupDiscountBps ? ` · خصم ${customer.groupDiscountBps / 100}%` : ''}
+                </StatusPill>
+              ) : null}
+            </div>
+            <div className="cx-tabs print:hidden" role="tablist" aria-label="أقسام صفحة الزبون">
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  className="cx-tab"
+                  aria-selected={tab === t.key}
+                  onClick={() => pickTab(t.key)}
+                >
+                  {t.label}
+                  {t.key === 'invoices' && invoices.length > 0 ? (
+                    <span className="cnt sx-n">{invoices.length}</span>
+                  ) : null}
+                </button>
+              ))}
             </div>
             {archiveError && !confirmArchive ? <Alert tone="error">{archiveError}</Alert> : null}
             {customer.archived ? (
@@ -464,139 +506,145 @@ export function CustomerPage() {
             ) : null}
             <div className="cx-head">
               <div className="cx-main">
-                <Panel title="بيانات الزبون">
-                  <dl className="cx-facts">
-                    <div>
-                      <dt>الجوال</dt>
-                      <dd>
-                        {customer.phone ? (
-                          <bdi dir="ltr" className="sx-n">
-                            {customer.phone}
-                          </bdi>
-                        ) : (
-                          '—'
-                        )}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>العنوان</dt>
-                      <dd>{customer.address ?? '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>الرقم الضريبي</dt>
-                      <dd>{customer.taxNumber ? <bdi className="sx-n">{customer.taxNumber}</bdi> : '—'}</dd>
-                    </div>
-                    {customer.contactName || customer.contactPhone ? (
+                {tab === 'overview' ? (
+                  <Panel title="بيانات الزبون">
+                    <dl className="cx-facts">
                       <div>
-                        <dt>المسؤول</dt>
+                        <dt>الجوال</dt>
                         <dd>
-                          {customer.contactName ?? '—'}
-                          {customer.contactPhone ? (
-                            <>
-                              {' · '}
-                              <bdi dir="ltr" className="sx-n">
-                                {customer.contactPhone}
-                              </bdi>
-                            </>
-                          ) : null}
+                          {customer.phone ? (
+                            <bdi dir="ltr" className="sx-n">
+                              {customer.phone}
+                            </bdi>
+                          ) : (
+                            '—'
+                          )}
                         </dd>
                       </div>
+                      {customer.birthDate ? (
+                        <div>
+                          <dt>تاريخ الميلاد</dt>
+                          <dd>{dayText(customer.birthDate, digits)}</dd>
+                        </div>
+                      ) : null}
+                      <div>
+                        <dt>العنوان</dt>
+                        <dd>{customer.address ?? '—'}</dd>
+                      </div>
+                      <div>
+                        <dt>الرقم الضريبي</dt>
+                        <dd>{customer.taxNumber ? <bdi className="sx-n">{customer.taxNumber}</bdi> : '—'}</dd>
+                      </div>
+                      {customer.contactName || customer.contactPhone ? (
+                        <div>
+                          <dt>المسؤول</dt>
+                          <dd>
+                            {customer.contactName ?? '—'}
+                            {customer.contactPhone ? (
+                              <>
+                                {' · '}
+                                <bdi dir="ltr" className="sx-n">
+                                  {customer.contactPhone}
+                                </bdi>
+                              </>
+                            ) : null}
+                          </dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                    {customer.notes ? (
+                      <p className="cx-notes">
+                        <span className="font-semibold text-ink">ملاحظات: </span>
+                        {customer.notes}
+                      </p>
                     ) : null}
-                  </dl>
-                  {customer.notes ? (
-                    <p className="cx-notes">
-                      <span className="font-semibold text-ink">ملاحظات: </span>
-                      {customer.notes}
-                    </p>
-                  ) : null}
-                </Panel>
-                <Panel
-                  title="كشف الحساب"
-                  aside={
-                    <>
-                      {canReceive ? (
-                        <Button icon={<AddIcon />} onClick={() => setMoney('payment')}>
-                          استلم دفعة
-                        </Button>
-                      ) : null}
-                      {canOpen && !customer.archived ? (
-                        <Button variant="secondary" onClick={() => setMoney('opening')}>
-                          سجّل دين افتتاحي
-                        </Button>
-                      ) : null}
-                      <Link to={`/customers/${customer.id}/statement`} className="sx-fbtn">
-                        <BookIcon size={16} /> كشف حساب بفترة، للطباعة
-                      </Link>
-                    </>
-                  }
-                  flush
-                >
-                  {phone && statement.length > 0 ? (
-                    <Paged
-                      rows={statement}
-                      size={15}
-                      noun="الحركات"
-                      render={(page) => (
-                        <ul className="cx-stm" aria-label="كشف الحساب">
-                          {page.map((l) => (
-                            <li key={l.k}>
-                              <span className="what">{statementTitle(l)}</span>
-                              <span className="num end font-semibold">
-                                {l.debitMinor ? (
-                                  <>
-                                    <span className="sx-sub text-xs">عليه </span>
-                                    <Amt minor={l.debitMinor} currency={base} />
-                                  </>
-                                ) : (
-                                  <span className="cx-ok">
-                                    <span className="text-xs">له </span>
-                                    <Amt minor={l.creditMinor} currency={base} />
-                                  </span>
-                                )}
-                              </span>
-                              <span className="row2">
-                                <span className="num">
+                  </Panel>
+                ) : null}
+                {tab === 'statement' ? (
+                  <Panel
+                    title="كشف الحساب"
+                    aside={
+                      <>
+                        {canOpen && !customer.archived ? (
+                          <Button variant="secondary" onClick={() => setMoney('opening')}>
+                            سجّل دين افتتاحي
+                          </Button>
+                        ) : null}
+                        <Link to={`/customers/${customer.id}/statement`} className="sx-fbtn">
+                          <BookIcon size={16} /> كشف حساب بفترة، للطباعة
+                        </Link>
+                      </>
+                    }
+                    flush
+                  >
+                    {phone && statement.length > 0 ? (
+                      <Paged
+                        rows={statement}
+                        size={15}
+                        noun="الحركات"
+                        render={(page) => (
+                          <ul className="cx-stm" aria-label="كشف الحساب">
+                            {page.map((l) => (
+                              <li key={l.k}>
+                                <span className="what">
+                                  {statementTitle(l)}
                                   {l.number ? (
                                     <>
-                                      <DocNumber value={l.number} /> ·{' '}
+                                      {' '}
+                                      <DocNumber value={l.number} />
                                     </>
                                   ) : null}
-                                  {dayText(l.date, digits)}
                                 </span>
-                                <span className="num">
-                                  الرصيد <Amt minor={l.balanceMinor} currency={base} />
+                                <span className="num end font-semibold">
+                                  {l.debitMinor ? (
+                                    <>
+                                      <span className="sx-sub text-xs">عليه </span>
+                                      <Amt minor={l.debitMinor} currency={base} />
+                                    </>
+                                  ) : (
+                                    <span className="cx-ok">
+                                      <span className="text-xs">له </span>
+                                      <Amt minor={l.creditMinor} currency={base} />
+                                    </span>
+                                  )}
                                 </span>
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    />
-                  ) : (
-                    <Paged
-                      rows={statement}
-                      size={25}
-                      noun="الحركات"
-                      render={(page) => (
-                        <SxTable
-                          bare
-                          caption="كشف الحساب"
-                          columns={columns}
-                          rows={page}
-                          rowKey={(l) => String(l.k)}
-                          empty={statementEmpty}
-                        />
-                      )}
-                    />
-                  )}
-                </Panel>
-                {purchases ? (
+                                <span className="row2">
+                                  <span className="num">{dayText(l.date, digits)}</span>
+                                  <span className="num">
+                                    الرصيد <Amt minor={l.balanceMinor} currency={base} />
+                                  </span>
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      />
+                    ) : (
+                      <Paged
+                        rows={statement}
+                        size={25}
+                        noun="الحركات"
+                        render={(page) => (
+                          <SxTable
+                            bare
+                            caption="كشف الحساب"
+                            columns={columns}
+                            rows={page}
+                            rowKey={(l) => String(l.k)}
+                            empty={statementEmpty}
+                          />
+                        )}
+                      />
+                    )}
+                  </Panel>
+                ) : null}
+                {tab === 'invoices' && purchases ? (
                   <Panel title="آخر الفواتير" aside="أحدث ما اشتراه، قطعة قطعة، وما رجع منه." flush>
-                    {shownInvoices.length === 0 ? (
+                    {invoices.length === 0 ? (
                       <Empty icon={<SalesIcon size={24} />} title="لم يشترِ شيئاً بعد." />
                     ) : (
                       <ul className="cx-stm" aria-label="آخر الفواتير">
-                        {shownInvoices.map((r) => (
+                        {invoices.map((r) => (
                           <li key={r.id}>
                             <span className="what">
                               <DocNumber value={r.number} />
@@ -614,17 +662,10 @@ export function CustomerPage() {
                         ))}
                       </ul>
                     )}
-                    {invoices.length > 5 ? (
-                      <div className="cx-more">
-                        <Button variant="secondary" onClick={() => setAllInvoices((v) => !v)}>
-                          {allInvoices ? 'اعرض أحدث 5 فقط' : `اعرض الكل (${invoices.length})`}
-                        </Button>
-                      </div>
-                    ) : null}
                   </Panel>
                 ) : null}
-                <CustomerPlans customerId={customer.id} />
-                {storeSells(me.tenant.sectors, ['electronics', 'medical_supplies']) ? (
+                {tab === 'plans' ? <CustomerPlans customerId={customer.id} /> : null}
+                {tab === 'overview' && storeSells(me.tenant.sectors, ['electronics', 'medical_supplies']) ? (
                   <WarrantyDevices
                     by={{ customerId: customer.id }}
                     storeName={me.tenant.name}

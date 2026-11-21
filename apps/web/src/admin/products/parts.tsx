@@ -31,7 +31,9 @@ export function SectionCard({
     <Card className={cn('min-w-0', className)}>
       <section id={anchor} aria-labelledby={id} className="flex scroll-mt-24 flex-col gap-5">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-          <div className={cn('flex min-w-0 flex-1 gap-3', description ? 'items-start' : 'items-center')}>
+          <div
+            className={cn('flex min-w-0 flex-1 basis-64 gap-3', description ? 'items-start' : 'items-center')}
+          >
             {icon ? <IconChip>{icon}</IconChip> : null}
             <div className="flex min-w-0 flex-col gap-0.5">
               <h2 id={id} className="text-lg font-semibold text-ink">
@@ -92,5 +94,35 @@ export function Fact({ label, children }: { label: ReactNode; children: ReactNod
       <dt className="text-sm text-ink-muted">{label}</dt>
       <dd className="text-sm font-semibold text-ink">{children}</dd>
     </div>
+  );
+}
+
+const PRICE_MODES = [
+  ['/prices', 'تغيير بنسبة'],
+  ['/price-list', 'تحديث من ملف'],
+  ['/price-history', 'السجل'],
+] as const;
+
+/** The three price screens as one: a switch at the top of each, so a price job is one place with three modes */
+export function PriceModes({ current }: { current: (typeof PRICE_MODES)[number][0] }) {
+  return (
+    <nav
+      aria-label="أوضاع الأسعار"
+      className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-control bg-surface-muted p-1"
+    >
+      {PRICE_MODES.map(([to, label]) => (
+        <Link
+          key={to}
+          to={to}
+          aria-current={to === current ? 'page' : undefined}
+          className={cn(
+            'inline-flex min-h-9 shrink-0 items-center rounded-small px-4 text-sm font-semibold',
+            to === current ? 'bg-surface text-ink shadow-e1' : 'text-ink-muted hover:text-ink',
+          )}
+        >
+          {label}
+        </Link>
+      ))}
+    </nav>
   );
 }

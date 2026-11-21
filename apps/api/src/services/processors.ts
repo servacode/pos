@@ -317,7 +317,7 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     );
   }
   // Vouchers spent (03 › قسيمة الاستبدال): never refused, flagged when unknown or overdrawn
-  flags.push(...(await redeemVouchers(tx, tenantId, sale)));
+  flags.push(...(await redeemVouchers(tx, tenantId, sale, doc.businessDate)));
   // Loyalty points (03 › نقاط الولاء): earned on what was not paid with points, spent at their value
   flags.push(...(await applyLoyalty(tx, tenantId, sale)));
   // An online order sold here (26 › حياة الطلب): it leaves the tills and its pieces their hold
@@ -584,7 +584,12 @@ async function reverseLoyalty(
 }
 
 /** A sale's voucher payments against the vouchers they name: their redeemed amount grows. */
-async function redeemVouchers(tx: Transaction, tenantId: string, sale: SalePayload): Promise<SyncFlag[]> {
+async function redeemVouchers(
+  tx: Transaction,
+  tenantId: string,
+  sale: SalePayload,
+  businessDate: string,
+): Promise<SyncFlag[]> {
   const flags = new Set<SyncFlag>();
   for (const p of sale.payments) {
     if (p.method !== 'voucher' || !p.reference) continue;
@@ -592,9 +597,17 @@ async function redeemVouchers(tx: Transaction, tenantId: string, sale: SalePaylo
       .update(vouchers)
       .set({ redeemedMinor: sql`${vouchers.redeemedMinor} + ${p.baseAmountMinor}` })
       .where(and(eq(vouchers.tenantId, tenantId), eq(vouchers.code, p.reference)))
-      .returning({ amount: vouchers.amountMinor, redeemed: vouchers.redeemedMinor });
+      .returning({
+        amount: vouchers.amountMinor,
+        redeemed: vouchers.redeemedMinor,
+        voidedAt: vouchers.voidedAt,
+        expiresOn: vouchers.expiresOn,
+      });
     if (!row) flags.add('unknown_voucher');
-    else if (row.redeemed > row.amount) flags.add('voucher_overdrawn');
+    else if (row.voidedAt !== null || (row.expiresOn !== null && row.expiresOn < businessDate)) {
+      // Spent after the owner voided it or past its last day: the sale stands, the owner is told
+      flags.add('voucher_expired');
+    } else if (row.redeemed > row.amount) flags.add('voucher_overdrawn');
   }
   return [...flags];
 }

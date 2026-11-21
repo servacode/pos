@@ -128,3 +128,48 @@ export function RadioChips<T extends string>({
     </div>
   );
 }
+
+/** «قبل 3 أيام»: how long ago a day was, from today (both YYYY-MM-DD), the long date in the tooltip */
+export function Ago({ day, today, long }: { day: string; today: string; long: string }) {
+  const n = Math.max(
+    0,
+    Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86_400_000),
+  );
+  const num = (v: number) => <bdi className="sx-n">{v}</bdi>;
+  let text: ReactNode;
+  if (n === 0) text = 'اليوم';
+  else if (n === 1) text = 'أمس';
+  else if (n === 2) text = 'قبل يومين';
+  else if (n < 11) text = <>قبل {num(n)} أيام</>;
+  else if (n < 30) text = <>قبل {num(n)} يوماً</>;
+  else if (n < 60) text = 'قبل شهر';
+  else if (n < 335) text = <>قبل {num(Math.round(n / 30))} أشهر</>;
+  else if (n < 730) text = 'قبل سنة';
+  else text = <>قبل {num(Math.round(n / 365))} سنوات</>;
+  return <span title={long}>{text}</span>;
+}
+
+/** A column title that sorts: a button with the direction said in words for a reader that does not see the arrow */
+export function SortHead({
+  label,
+  active,
+  dir,
+  onSort,
+}: {
+  label: string;
+  active: boolean;
+  dir: 'asc' | 'desc';
+  onSort: () => void;
+}) {
+  return (
+    <button type="button" className="cx-sorth" data-active={active || undefined} onClick={onSort}>
+      {label}
+      <span aria-hidden="true" className="ar">
+        {active ? (dir === 'asc' ? '▲' : '▼') : '↕'}
+      </span>
+      {active ? (
+        <span className="sr-only">{dir === 'asc' ? ' مرتّب تصاعدياً' : ' مرتّب تنازلياً'}</span>
+      ) : null}
+    </button>
+  );
+}

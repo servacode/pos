@@ -46,7 +46,7 @@ beforeEach(resetDatabase);
 
 const newId = createUuidV7();
 const as = (store: Pick<Store, 'accessToken'>) => ({ authorization: `Bearer ${store.accessToken}` });
-const Q = 'from=2026-11-01&to=2026-11-30';
+const Q = 'from=2026-10-30&to=2026-11-30';
 
 async function setup() {
   const store = await openStore(app);
@@ -78,7 +78,7 @@ const pay = (store: Store, customerId: string, body: Record<string, unknown>) =>
     method: 'POST',
     url: `/v1/customers/${customerId}/payments`,
     headers: as(store),
-    payload: { method: 'cash', date: '2026-11-05', ...body },
+    payload: { method: 'cash', date: '2026-10-30', ...body },
   });
 
 const trial = async (store: Store, branchId?: string) =>
@@ -212,7 +212,7 @@ describe('a customer payment from the admin names its branch', () => {
       method: 'POST',
       url: `/v1/installment-plans/${p!.id}/collect`,
       headers: as(store),
-      payload: { amountMinor: 30_000, method: 'cash', branchId: second, date: '2026-11-05' },
+      payload: { amountMinor: 30_000, method: 'cash', branchId: second, date: '2026-10-30' },
     });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json<PlanDetail>().instalments.map((i) => i.paidMinor)).toEqual([28_000, 2_000, 0]);

@@ -16,7 +16,8 @@ import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { postOpeningBalance } from './import/opening';
 import { postEntry, type DraftLine } from './posting';
-import { baseCurrency, nextNumber } from './purchases';
+import { baseCurrency, documentLock, nextNumber } from './purchases';
+import { assertDateOpen } from './period-close';
 
 /**
  * Money a customer's account takes from the admin screen (the customer page and the statement):
@@ -47,6 +48,17 @@ async function dayOf(tx: Transaction, now: Date, date?: string): Promise<string>
   return row ? businessDateOf(now, row.timezone, row.cutoff) : now.toISOString().slice(0, 10);
 }
 
+/** A payment cannot be dated after the store's business day: it would sit in a day that has not happened */
+async function refuseFuture(tx: Transaction, now: Date, date: string | undefined): Promise<void> {
+  if (!date) return;
+  const today = await dayOf(tx, now);
+  if (date > today) {
+    throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
+      date: 'التاريخ بعد اليوم. اختر اليوم أو تاريخاً سابقاً.',
+    });
+  }
+}
+
 /** A payment from a customer, into the safe or the method's account, against what they owe. */
 export async function receiveCustomerPayment(
   db: Database,
@@ -70,10 +82,13 @@ export async function receiveCustomerPayment(
         });
       }
     }
+    await refuseFuture(tx, now, input.date);
     const customer = await customerFor(tx, customerId);
     const currency: CurrencyCode = await baseCurrency(tx);
     const date = await dayOf(tx, now, input.date);
     const id = input.id ?? newId();
+    // Two requests with the same id at once: the second waits here, then finds the first one's receipt
+    if (input.id) await documentLock(tx, 'customer_payment', id);
     // The same id sent again (a lost answer): answer with the receipt already posted, burn no number
     if (input.id) {
       const [again] = await tx.execute<{ number: string | null; date: string; amount: string }>(sql`
@@ -169,7 +184,8 @@ export async function receiveCustomerPayment(
       baseCurrency: currency,
       ...(branchId ? { branchId } : {}),
     };
-    if (inside) await inside(tx, result);
+    // A request that lost the race to the same id posted nothing: it settles nothing either
+    if (inside && posted !== null) await inside(tx, result);
     return result;
   });
 }
@@ -185,7 +201,43 @@ export async function openCustomerDebt(
 ): Promise<CustomerMoneyResult> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'accounting.post');
+    const id = input.id ?? newId();
+    await documentLock(tx, 'customer_opening_debt', id);
     const customer = await customerFor(tx, customerId);
+    const currency: CurrencyCode = await baseCurrency(tx);
+    // The same id sent again (a double click, a lost answer): answer with the entry already made, post nothing
+    const [again] = await tx.execute<{
+      number: string;
+      date: string;
+      amount: string;
+      customer_id: string | null;
+    }>(sql`
+      select e.number, e.entry_date::text as date,
+             (select coalesce(sum(l.debit_minor - l.credit_minor), 0)::text from journal_lines l
+               join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+               where l.tenant_id = e.tenant_id and l.entry_id = e.id and a.code = '1200') as amount,
+             (select l.party_id::text from journal_lines l where l.tenant_id = e.tenant_id and l.entry_id = e.id
+               and l.party_type = 'customer' limit 1) as customer_id
+      from journal_entries e where e.source_type = 'manual' and e.source_id = ${id} and e.kind = 'manual'`);
+    if (again) {
+      if (again.customer_id !== customer.id) {
+        throw new AppError(409, 'conflict', 'هذا المعرّف استُعمل لقيد آخر.');
+      }
+      return {
+        kind: 'opening_debt',
+        number: again.number,
+        date: again.date,
+        customerId: customer.id,
+        customerName: customer.name,
+        amountMinor: Number(again.amount) || input.amountMinor,
+        method: null,
+        reference: null,
+        note: null,
+        balanceBeforeMinor: customer.balance - (Number(again.amount) || input.amountMinor),
+        balanceAfterMinor: customer.balance,
+        baseCurrency: currency,
+      };
+    }
     // An archived customer is off the till and out of the lists: a new debt there would be lost from view
     const [state] = await tx.execute<{ archived_at: string | null }>(
       sql`select archived_at from customers where id = ${customerId}`,
@@ -193,20 +245,19 @@ export async function openCustomerDebt(
     if (state?.archived_at) {
       throw new AppError(409, 'conflict', 'هذا الزبون مؤرشف. أعده أولاً ثم سجّل الدين.');
     }
-    const currency: CurrencyCode = await baseCurrency(tx);
     const date = await dayOf(tx, now, input.date);
+    await assertDateOpen(tx, auth.tenantId, date);
     await postOpeningBalance(tx, auth, meta, {
       party: 'customer',
       partyId: customer.id,
       name: customer.name,
       balanceMinor: input.amountMinor,
       date,
+      entryId: id,
     });
     const [entry] = await tx.execute<{ number: string }>(sql`
       select e.number from journal_entries e
-      join journal_lines l on l.tenant_id = e.tenant_id and l.entry_id = e.id
-      where e.kind = 'manual' and l.party_type = 'customer' and l.party_id = ${customer.id}
-      order by e.created_at desc, e.seq desc limit 1`);
+      where e.source_type = 'manual' and e.source_id = ${id} and e.kind = 'manual'`);
     const after = await customerFor(tx, customerId);
     return {
       kind: 'opening_debt',

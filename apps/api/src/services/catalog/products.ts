@@ -1,3 +1,4 @@
+import { permissionScope } from '../../auth/permissions';
 import { and, asc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import {
   INTERNAL_BARCODE_PREFIX,
@@ -212,6 +213,11 @@ interface ListRow extends Record<string, unknown> {
   has_image: boolean;
   image_upload: string | null;
   nearest_expiry: string | null;
+  unit_name?: string | null;
+  wh_min?: string | null;
+  wh_max?: string | null;
+  cost_qty?: string | null;
+  cost_value?: string | null;
 }
 
 const encodeCursor = (name: string, id: string, stock?: string) =>
@@ -362,6 +368,28 @@ export async function listProducts(
         filters.push(sql`(p.name_ar, p.id) > (${name}, ${id}::uuid)`);
       }
     }
+    // The export's extra columns; the cost only for who may see costs
+    const detail = query.detail === '1';
+    const seesCost =
+      detail &&
+      (await permissionScope(tx, ctx.auth.userId, 'cost.view').then((x) => x.all || x.branchIds.size > 0));
+    const detailCols = detail
+      ? sql`,
+             (select u.name from units u where u.id = p.unit_id) as unit_name,
+             (select min(x.wholesale_price_minor)::text from variants v join prices x on x.tenant_id = v.tenant_id and x.id = v.id
+              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as wh_min,
+             (select max(x.wholesale_price_minor)::text from variants v join prices x on x.tenant_id = v.tenant_id and x.id = v.id
+              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as wh_max
+             ${
+               seesCost
+                 ? sql`,
+             (select coalesce(sum(sv.qty), 0)::text from variants v join stock_values sv on sv.tenant_id = v.tenant_id and sv.variant_id = v.id
+              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and sv.qty > 0) as cost_qty,
+             (select coalesce(sum(sv.value_minor), 0)::text from variants v join stock_values sv on sv.tenant_id = v.tenant_id and sv.variant_id = v.id
+              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and sv.qty > 0) as cost_value`
+                 : sql``
+             }`
+      : sql``;
     const movementBranch = query.branchId ? sql`and m.branch_id = ${query.branchId}` : sql``;
     const rows = await tx.execute<ListRow>(sql`
       select p.id, p.name_ar, p.name_en, p.category_id, c.name as category_name, p.season, p.type, p.status,
@@ -395,6 +423,7 @@ export async function listProducts(
               order by pi.sort_order, pi.created_at, pi.id limit 1) as image_upload,
              (select min(v.nearest_expiry)::text from variants v
               where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as nearest_expiry
+             ${detailCols}
       from products p
       left join categories c on c.tenant_id = p.tenant_id and c.id = p.category_id
       cross join lateral (
@@ -434,6 +463,19 @@ export async function listProducts(
       hasImage: r.has_image,
       thumbUrl: r.image_upload ? imageUrl(ctx.auth.tenantId, r.image_upload, true) : null,
       nearestExpiry: r.nearest_expiry,
+      ...(detail
+        ? {
+            unitName: r.unit_name ?? null,
+            wholesale:
+              r.wh_min !== undefined && r.wh_min !== null && r.wh_max !== undefined && r.wh_max !== null
+                ? { minMinor: Number(r.wh_min), maxMinor: Number(r.wh_max) }
+                : null,
+            costMinor:
+              r.cost_qty !== undefined && r.cost_qty !== null && Number(r.cost_qty) > 0
+                ? Math.round((Number(r.cost_value) * 1000) / Number(r.cost_qty))
+                : null,
+          }
+        : {}),
       version: r.version,
     }));
     const last = page.at(-1);

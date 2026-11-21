@@ -68,7 +68,7 @@ const statement = (overrides: Partial<PartyStatement> = {}): PartyStatement => (
 
 describe('«كشف حساب»', () => {
   it('shows the opening balance, each movement with its running balance, and the closing balance', async () => {
-    signIn(
+    const { user } = signIn(
       '/customers/c1/statement',
       { [`GET /v1/customers/c1/statement?from=2026-01-01&to=${TODAY}`]: { status: 200, body: statement() } },
       ['customers.view'],
@@ -81,8 +81,12 @@ describe('«كشف حساب»', () => {
     expect(rows[1]).toContain('سند قبض');
     expect(screen.getByText('رصيد أول المدة')).toBeInTheDocument();
     expect(screen.getByText('رصيد آخر المدة')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'صدّر إلى إكسل' })).toBeEnabled();
+    // One main action; the rest is in «المزيد». Dates are written long, not as 2026-10-20.
     expect(screen.getByRole('button', { name: 'اطبع' })).toBeEnabled();
+    expect(rows[0]).toContain('تشرين الأول');
+    expect(rows[0]).not.toContain('2026-10-20');
+    await user.click(screen.getByRole('button', { name: 'المزيد' }));
+    expect(await screen.findByRole('menuitem', { name: 'صدّر إلى إكسل' })).toBeInTheDocument();
   });
 
   it('is closed to someone without customers.view', async () => {

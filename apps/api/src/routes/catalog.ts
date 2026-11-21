@@ -25,7 +25,7 @@ import { postProductOpening, productCosts } from '../services/catalog/opening-co
 import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { createTillProduct } from '../services/till-products';
-import { bulkPrices } from '../services/catalog/bulk-prices';
+import { bulkPrices, undoBulkPrices } from '../services/catalog/bulk-prices';
 import { applyPriceList, previewPriceList } from '../services/catalog/price-list';
 import {
   addProductImage,
@@ -196,6 +196,10 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/prices/bulk', signedIn, async (request) =>
     bulkPrices(db, parseCatalog(bulkPriceInput, request.body), ctxOf(request)),
+  );
+
+  app.post('/v1/prices/bulk/:id/undo', signedIn, async (request) =>
+    undoBulkPrices(db, idOf(request, 'هذا التغيير غير موجود.'), ctxOf(request)),
   );
 
   // «تحديث الأسعار من ملف»: 5,000 rows of a price list are a megabyte or two

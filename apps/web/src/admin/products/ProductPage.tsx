@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { CatalogGate } from './CatalogGate';
 import { PageTop } from '../sales/ui';
-import { useUnsavedGuard } from './unsaved';
+import { UNSAVED_TEXT, useUnsavedGuard } from './unsaved';
 import { CostStockSection, qtyThousandths } from './CostStockSection';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { catalogOptionsOf } from '@serva/core';
@@ -45,6 +45,7 @@ import {
   addProductImage,
   createProduct,
   getProduct,
+  listProducts,
   postProductOpening,
   listCategories,
   listTaxRates,
@@ -223,7 +224,7 @@ export function ProductPage() {
   // The card keeps its state below the shell, so typing in it never redraws the menu and the top bar.
   return (
     <AppShell>
-      <CatalogGate>
+      <CatalogGate viewOnly>
         <ProductCard />
       </CatalogGate>
     </AppShell>
@@ -251,6 +252,7 @@ function ProductCard() {
   const [askFree, setAskFree] = useState(false);
   const [categoryQuery, setCategoryQuery] = useState('');
   const freeOk = useRef(false);
+  const dupOk = useRef(false);
   // «ولّد باركود عند الحفظ»: the store's setting (catalogOptions), saved when it is switched
   const [options, setOptions] = useState<CatalogOptions>(() => catalogOptionsOf(me.settings.catalogOptions));
   const autoBarcode = options.autoBarcode;
@@ -446,6 +448,21 @@ function ProductCard() {
     }
     freeOk.current = false;
     setAskFree(false);
+    // A new product whose name a live product already has: said once, the second «احفظ» goes on
+    if (!product && !dupOk.current) {
+      const wanted = normalizeArabic(draft.nameAr);
+      const same = await listProducts({ q: draft.nameAr.trim(), limit: 10 })
+        .then((r) => r.items.find((i) => normalizeArabic(i.nameAr) === wanted))
+        .catch(() => undefined);
+      if (same) {
+        dupOk.current = true;
+        setFormError(
+          `يوجد منتج باسم «${same.nameAr}» في المتجر. إن كان صنفاً مختلفاً اضغط «احفظ» مرة أخرى، وإلا افتح المنتج الموجود وعدّله.`,
+        );
+        return;
+      }
+    }
+    dupOk.current = false;
     setErrors({});
     setSaving(true);
     try {
@@ -513,8 +530,11 @@ function ProductCard() {
   }
 
   /** «اعتمد الصنف»: the owner has looked at a product made at the till; it joins the shop and leaves the review list */
+  /** The server's answer to approve/archive replaces the form: typed-but-unsaved edits are asked about first */
+  const discardOk = () => !edited || window.confirm(UNSAVED_TEXT);
+
   async function approve() {
-    if (!product) return;
+    if (!product || !discardOk()) return;
     setArchiving('busy');
     setFormError(null);
     try {
@@ -717,12 +737,20 @@ function ProductCard() {
                         variant="secondary"
                         icon={<UndoIcon />}
                         loading={archiving === 'busy'}
-                        onClick={() => void toggleArchive(false)}
+                        onClick={() => {
+                          if (discardOk()) void toggleArchive(false);
+                        }}
                       >
                         أعد المنتج إلى البيع
                       </Button>
                     ) : (
-                      <Button variant="ghost" icon={<ArchiveIcon />} onClick={() => setArchiving('ask')}>
+                      <Button
+                        variant="ghost"
+                        icon={<ArchiveIcon />}
+                        onClick={() => {
+                          if (discardOk()) setArchiving('ask');
+                        }}
+                      >
                         أرشف
                       </Button>
                     )}
@@ -751,9 +779,11 @@ function ProductCard() {
           </nav>
 
           <div className={COLUMNS}>
-            <div className="flex min-w-0 flex-col gap-6">
-              <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
+            {/* On a phone the two columns melt into one list and «التنظيم» comes right after the basics */}
+            <div className="flex min-w-0 flex-col gap-6 max-xl:contents">
+              <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6 max-xl:contents">
                 <SectionCard
+                  className="max-xl:-order-2"
                   anchor="basic"
                   title="البيانات الأساسية"
                   icon={<Kind />}
@@ -1091,8 +1121,8 @@ function ProductCard() {
               ) : null}
             </div>
 
-            <div className="flex min-w-0 flex-col gap-6">
-              <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
+            <div className="flex min-w-0 flex-col gap-6 max-xl:contents">
+              <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6 max-xl:contents">
                 <SectionCard title="الحالة" icon={<StoreIcon />}>
                   <Switch
                     label="يُباع على الكاشير"
@@ -1125,7 +1155,12 @@ function ProductCard() {
                   ) : null}
                 </SectionCard>
 
-                <SectionCard anchor="organise" title="التنظيم" icon={<CategoriesIcon />}>
+                <SectionCard
+                  className="max-xl:-order-1"
+                  anchor="organise"
+                  title="التنظيم"
+                  icon={<CategoriesIcon />}
+                >
                   <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2 xl:grid-cols-1">
                     <div className="flex flex-col gap-2">
                       {tree.length > 6 ? (

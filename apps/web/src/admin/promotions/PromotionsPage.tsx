@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { promotionActive, type Promotion } from '@serva/core';
 import { AddIcon, Badge, Button, CheckIcon, EmptyState, InfoIcon, OfferIcon, Sheet } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
+import { useIsPhone } from '../../lib/useIsPhone';
 import { PageTop, Panel, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
 import { archivePromotion, listPromotions } from './api';
 import { localDate, PromotionForm, WEEKDAY_NAMES } from './PromotionForm';
+
+const PromotionReportPanel = lazy(() =>
+  import('./PromotionReportPanel').then((m) => ({ default: m.PromotionReportPanel })),
+);
 
 /** What the promotion gives, as the owner says it. */
 export function promotionSummary(p: Promotion): string {
@@ -124,6 +129,10 @@ export function PromotionsPage() {
   const [editing, setEditing] = useState<Promotion | 'new' | null>(null);
   // The offers being stopped or started: their button is off until the answer, so a double click is one request
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  // Stopped and ended offers stay out of sight until asked for: a list of old tests would bury the live ones
+  const [showOff, setShowOff] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const phone = useIsPhone();
   const newest = useRef(0);
   const inflight = useRef(new Set<string>());
 
@@ -142,8 +151,10 @@ export function PromotionsPage() {
     inflight.current.add(p.id);
     setBusy((b) => new Set(b).add(p.id));
     setActionError(null);
+    setNotice(null);
     try {
       await archivePromotion(p.id, { version: p.version, archived: !p.archived });
+      setNotice(p.archived ? `شُغّل «${p.name}».` : `أُوقف «${p.name}»، وتجده تحت «المتوقفة والمنتهية».`);
     } catch (e) {
       setActionError(errorMessage(e));
     } finally {
@@ -158,7 +169,9 @@ export function PromotionsPage() {
   }
 
   const now = Date.now();
-  const rows = (items ?? []).slice().sort((a, b) => Number(isOff(a, now)) - Number(isOff(b, now)));
+  const all = (items ?? []).slice().sort((a, b) => Number(isOff(a, now)) - Number(isOff(b, now)));
+  const offCount = all.filter((p) => isOff(p, now)).length;
+  const rows = showOff ? all : all.filter((p) => !isOff(p, now));
   const running = items?.filter((p) => !isOff(p, now) && promotionState(p, now) !== 'scheduled').length ?? 0;
 
   const columns: SxColumn<Promotion>[] = [
@@ -215,7 +228,9 @@ export function PromotionsPage() {
           <span style={{ display: 'flex', flexDirection: 'column', gap: 2, whiteSpace: 'normal' }}>
             <span>
               <span className="sr-only">متى: </span>
-              {promotionWhen(p)}
+              <span style={promotionWhen(p) === 'دائماً' ? { color: 'var(--ink-muted)' } : undefined}>
+                {promotionWhen(p)}
+              </span>
             </span>
             {soon && promotionState(p, now) === 'active' ? (
               <span style={{ fontSize: 12, color: 'var(--warning-ink)', fontWeight: 600 }}>{soon}</span>
@@ -264,41 +279,68 @@ export function PromotionsPage() {
             </Button>
           }
         />
+        {notice ? (
+          <p role="status" style={{ color: 'var(--ink-muted)', fontWeight: 600 }}>
+            {notice}
+          </p>
+        ) : null}
         {actionError ? (
           <p role="alert" style={{ color: 'var(--danger-ink)', fontWeight: 600 }}>
             {actionError}
           </p>
         ) : null}
         <Panel title="كل العروض" flush>
-          <SxTable
-            bare
-            caption="العروض"
-            columns={columns}
-            rows={rows}
-            rowKey={(p) => p.id}
-            loading={items === null && !error}
-            {...(error ? { error } : {})}
-            onRetry={load}
-            groupOf={(p) => (isOff(p, now) ? 'off' : 'running')}
-            groupLabel={(key, count) => (
-              <>
-                {GROUPS[key as keyof typeof GROUPS]} · <span className="num">{count}</span>
-              </>
-            )}
-            empty={
-              <EmptyState
-                icon={OfferIcon}
-                title="لا عروض بعد."
-                description="أضف أول عرض: خصم على تصنيف، أو «اشترِ 2 والثالث مجاناً»."
-                action={
-                  <Button variant="secondary" icon={<AddIcon />} onClick={() => setEditing('new')}>
-                    أضف عرضاً
-                  </Button>
-                }
-              />
-            }
-          />
+          {phone && rows.length > 0 && !error ? (
+            <PromotionCards
+              rows={rows}
+              all={items ?? []}
+              now={now}
+              busy={busy}
+              onEdit={setEditing}
+              onToggle={(p) => void toggle(p)}
+            />
+          ) : (
+            <SxTable
+              bare
+              caption="العروض"
+              columns={columns}
+              rows={rows}
+              rowKey={(p) => p.id}
+              loading={items === null && !error}
+              {...(error ? { error } : {})}
+              onRetry={load}
+              groupOf={(p) => (isOff(p, now) ? 'off' : 'running')}
+              groupLabel={(key, count) => (
+                <>
+                  {GROUPS[key as keyof typeof GROUPS]} · <span className="num">{count}</span>
+                </>
+              )}
+              empty={
+                <EmptyState
+                  icon={OfferIcon}
+                  title="لا عروض بعد."
+                  description="أضف أول عرض: خصم على تصنيف، أو «اشترِ 2 والثالث مجاناً»."
+                  action={
+                    <Button variant="secondary" icon={<AddIcon />} onClick={() => setEditing('new')}>
+                      أضف عرضاً
+                    </Button>
+                  }
+                />
+              }
+            />
+          )}
+          {offCount > 0 ? (
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line)' }}>
+              <Button variant="secondary" aria-expanded={showOff} onClick={() => setShowOff((v) => !v)}>
+                {showOff ? 'أخفِ المتوقفة والمنتهية' : `أظهر المتوقفة والمنتهية (${offCount})`}
+              </Button>
+            </div>
+          ) : null}
         </Panel>
+        <Suspense fallback={null}>
+          <PromotionReportPanel />
+        </Suspense>
+
         <p style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: 'var(--ink-muted)' }}>
           <InfoIcon size={16} />
           الكاشير يطبّق العرض بنفسه على كل سطر ينطبق عليه، ويختار الأفضل للزبون إن انطبق أكثر من عرض. الخصم
@@ -317,7 +359,9 @@ export function PromotionsPage() {
           <PromotionForm
             key={editing === 'new' ? 'new' : editing.id}
             {...(editing === 'new' ? {} : { promotion: editing })}
-            onSaved={() => {
+            onSaved={(saved) => {
+              // An offer saved stopped would vanish from the list: show the stopped ones so the owner sees it
+              if (saved.archived) setShowOff(true);
               setEditing(null);
               load();
             }}
@@ -326,5 +370,94 @@ export function PromotionsPage() {
         ) : null}
       </Sheet>
     </AppShell>
+  );
+}
+
+/**
+ * The same offers as cards, for a phone: the figure on the leading edge, the name with its words, the
+ * state and the stop or start button under them (a table's five columns leave the name three letters wide).
+ */
+function PromotionCards({
+  rows,
+  all,
+  now,
+  busy,
+  onEdit,
+  onToggle,
+}: {
+  rows: readonly Promotion[];
+  all: readonly Promotion[];
+  now: number;
+  busy: ReadonlySet<string>;
+  onEdit: (p: Promotion) => void;
+  onToggle: (p: Promotion) => void;
+}) {
+  return (
+    <ul
+      aria-label="العروض"
+      style={{ display: 'flex', flexDirection: 'column', margin: 0, padding: 0, listStyle: 'none' }}
+    >
+      {rows.map((p) => {
+        const other = overlapsWith(p, all, now);
+        const soon = endsSoon(p, now);
+        return (
+          <li
+            key={p.id}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'auto minmax(0, 1fr)',
+              gap: '4px 14px',
+              padding: 16,
+              borderBottom: '1px solid var(--line)',
+            }}
+          >
+            <bdi
+              dir="ltr"
+              className="num"
+              style={{ fontWeight: 700, fontSize: 22, minWidth: 56, gridRow: 'span 2' }}
+            >
+              {stampOf(p)}
+            </bdi>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+              <button
+                type="button"
+                onClick={() => onEdit(p)}
+                style={{ font: 'inherit', fontWeight: 600, textAlign: 'start' }}
+              >
+                {p.name}
+              </button>
+              {p.couponCode ? (
+                <span>
+                  <Badge tone="brand">
+                    كود <bdi dir="ltr">{p.couponCode}</bdi>
+                  </Badge>
+                </span>
+              ) : null}
+              <span style={{ fontSize: 13, color: 'var(--ink-muted)' }}>{promotionSummary(p)}</span>
+              <span style={{ fontSize: 13, color: 'var(--ink-muted)' }}>{promotionWhen(p)}</span>
+              {soon && promotionState(p, now) === 'active' ? (
+                <span style={{ fontSize: 12, color: 'var(--warning-ink)', fontWeight: 600 }}>{soon}</span>
+              ) : null}
+              {other ? (
+                <span style={{ fontSize: 12, color: 'var(--warning-ink)' }}>
+                  يتقاطع مع «{other.name}»: يُطبَّق الأفضل للزبون.
+                </span>
+              ) : null}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <StateBadge state={promotionState(p, now)} />
+              <Button
+                variant="secondary"
+                loading={busy.has(p.id)}
+                disabled={busy.has(p.id)}
+                onClick={() => onToggle(p)}
+              >
+                {p.archived ? 'شغّل' : 'أوقف'}
+              </Button>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

@@ -335,7 +335,7 @@ const SHOP_WORDS = new Set(['متجر', 'محل', 'محلات', 'شركة', 'م�
 
 /** The first letters of the store's name, for the sidebar's store square. */
 export function initials(name: string): string {
-  const words = name.split(/\s+/).filter(Boolean);
+  const words = name.split(/\s+/).filter((word) => /\p{L}/u.test(word));
   const named = words.filter((word) => !SHOP_WORDS.has(word));
   return (named.length > 0 ? named : words)
     .slice(0, 2)

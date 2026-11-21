@@ -140,7 +140,7 @@ export function CatalogueFilters({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
-        {search ? <div className="min-w-0 basis-full sm:basis-64 sm:flex-1">{search}</div> : null}
+        {search ? <div className="min-w-0 basis-40 flex-1 sm:basis-64">{search}</div> : null}
         {hasAnything ? (
           <button
             type="button"
@@ -168,7 +168,7 @@ export function CatalogueFilters({
           hideLabel
           value={sort}
           onChange={(e) => onSort(e.target.value as ShopSort)}
-          className="min-w-0 flex-1 sm:w-44 sm:flex-none"
+          className="w-28 flex-none sm:w-44"
         >
           <option value="newest">الأحدث</option>
           {showPrices ? <option value="price-asc">السعر: الأقل أولاً</option> : null}

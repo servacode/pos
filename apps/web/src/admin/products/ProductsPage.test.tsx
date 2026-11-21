@@ -109,13 +109,13 @@ describe('/products list on a phone and the export', () => {
 });
 
 describe('/products list: attention and sellable stock', () => {
-  it('shows the available number, with the shelf total under it, when expired or blocked batches hold some back', async () => {
+  it('shows the shelf total as the number, with what can be sold under it, when expired or blocked batches hold some back', async () => {
     openProducts({
       [list()]: page([listItem({ stockQty: 319_000, sellableQty: 219_000 })]),
     });
     const table = await screen.findByRole('table', { name: 'المنتجات' });
-    expect(await within(table).findByText(/في المخزن/)).toHaveTextContent('في المخزن 319');
-    expect(within(table).getByText('219')).toBeInTheDocument();
+    expect(await within(table).findByText(/متوفر للبيع/)).toHaveTextContent('متوفر للبيع 219');
+    expect(within(table).getByText('319', { exact: false })).toBeInTheDocument();
   });
 
   it('keeps the uncategorised banner to one line with the services left out, and lets «بلا صورة» be dismissed', async () => {
@@ -525,14 +525,13 @@ describe('/products list: photos, expiry and stock', () => {
     );
   });
 
-  it('shows one number (the available), with the minus told once under it, and a kind icon where there is no photo', async () => {
+  it('shows the net number, with what can be sold told once under it, and a kind icon where there is no photo', async () => {
     openProducts({
       [list()]: page([listItem({ stockQty: 14_000, sellableQty: 16_000, hasImage: false, thumbUrl: null })]),
     });
     const table = await screen.findByRole('table', { name: 'المنتجات' });
-    expect(await within(table).findByText(/سالب قطعتان/)).toBeInTheDocument();
-    expect(within(table).getByText('16')).toBeInTheDocument();
-    expect(within(table).queryByText('14')).not.toBeInTheDocument();
+    expect(await within(table).findByText(/متوفر للبيع/)).toHaveTextContent('متوفر للبيع 16');
+    expect(within(table).getByText('14', { exact: false })).toBeInTheDocument();
     // no letter box: the picture's place holds an icon
     expect(table.querySelector('a[href$="#images"] svg')).not.toBeNull();
   });
@@ -606,5 +605,25 @@ describe('/products list: photos in bulk', () => {
     expect(within(dialog).getByText(/سمِّ كل ملف باسم المنتج أو باركوده/)).toBeInTheDocument();
     expect(within(dialog).getByLabelText('ملفات الصور')).toHaveAttribute('multiple');
     expect(within(dialog).getByRole('button', { name: 'ارفع الصور' })).toBeDisabled();
+  });
+});
+
+describe('/products list: round 48', () => {
+  it('a tile applies the filter it counts', async () => {
+    const { user, requestsTo } = openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [listItem()],
+          nextCursor: null,
+          totals: { products: 3, variants: 3, pieces: 9_000, negative: 0, runOut: 2, lowest: null },
+        },
+      },
+      [list({ stock: 'out' })]: page([listItem()]),
+    });
+    await user.click(await screen.findByRole('button', { name: 'اعرض ما نفد فقط' }));
+    await vi.waitFor(() =>
+      expect(requestsTo('GET', productsPath({ status: 'active', limit: 50, stock: 'out' }))).toHaveLength(1),
+    );
   });
 });

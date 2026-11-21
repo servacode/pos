@@ -361,6 +361,25 @@ describe('round 44: who decides, the server’s stock check, pages and fees', ()
   });
 });
 
+describe('round 48: the tabs say how many orders each holds', () => {
+  it('counts the waiting, the accepted and all orders on the pills, and a skeleton shaped like an order meanwhile', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: owner() },
+      'GET /v1/online-store': { status: 200, body: settings },
+      'GET /v1/online-orders?status=pending': {
+        status: 200,
+        body: { items: [order('pending')], nextCursor: null, counts: { pending: 3, accepted: 5, all: 12 } },
+      },
+      'GET /v1/online-orders/cod': { status: 200, body: { currency: 'SYP', couriers: [] } },
+    });
+    renderApp('/online-store');
+    expect(await screen.findByRole('radio', { name: 'بانتظار المحل (3)' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'مقبولة (5)' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'الكل (12)' })).toBeInTheDocument();
+  });
+});
+
 describe('a delivery fee as typed', () => {
   it('reads digits (Arabic too) and refuses what is not a fee instead of making it free or tenfold', () => {
     expect(feeOf('1500', 0)).toBe(1500);

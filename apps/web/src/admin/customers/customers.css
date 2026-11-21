@@ -444,3 +444,72 @@
 .cx-inv li {
   border: 0;
 }
+
+/* round 48: sortable column titles, the groups and bulk-reminder lists */
+.cx-sorth {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.cx-sorth .ar {
+  font-size: 10px;
+  color: var(--ink-subtle);
+}
+.cx-sorth[data-active] .ar,
+.cx-sorth:hover .ar {
+  color: var(--ink);
+}
+.cx-sorth:focus-visible {
+  outline: 2px solid var(--focus, currentColor);
+  outline-offset: 2px;
+}
+.cx-groups {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.cx-groups li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.cx-groups li:last-child {
+  border-bottom: 0;
+}
+.cx-groups .nm {
+  flex: 1 1 140px;
+  min-width: 0;
+  font-weight: 600;
+}
+
+/* round 48: on a phone the instalment row keeps its WhatsApp button inside the card (it was cut by the screen edge) */
+@media (max-width: 640px) {
+  .cx-icbtn {
+    width: 36px;
+    height: 36px;
+  }
+  /* the plan's table: tighter cells so «تذكير» fits inside the card with the date and the amount */
+  .sx-tbl:has(.cx-icbtn) th,
+  .sx-tbl:has(.cx-icbtn) td {
+    padding-inline: 8px;
+  }
+  .sx-tbl:has(.cx-icbtn) td:has(> .cx-icbtn) {
+    width: 1%;
+    padding-inline: 4px;
+  }
+}

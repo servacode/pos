@@ -31,6 +31,7 @@ import {
   LinkIcon,
   SegmentedControl,
   SendIcon,
+  Skeleton,
   SkeletonText,
   StoreIcon,
   Switch,
@@ -55,10 +56,15 @@ const listOrders = (status: OnlineOrderStatus | 'all', cursor: string | null = n
   const query = [status === 'all' ? '' : `status=${status}`, cursor ? `cursor=${cursor}` : '']
     .filter(Boolean)
     .join('&');
-  return apiFetch<{ items: OnlineOrder[]; nextCursor?: string | null }>(
-    `/v1/online-orders${query ? `?${query}` : ''}`,
-    { auth: true },
-  ).then((r) => ({ items: r.items, nextCursor: r.nextCursor ?? null }));
+  return apiFetch<{
+    items: OnlineOrder[];
+    nextCursor?: string | null;
+    counts?: { pending: number; accepted: number; all: number };
+  }>(`/v1/online-orders${query ? `?${query}` : ''}`, { auth: true }).then((r) => ({
+    items: r.items,
+    nextCursor: r.nextCursor ?? null,
+    counts: r.counts ?? null,
+  }));
 };
 const getStock = () => apiFetch<InventoryResponse>('/v1/inventory', { auth: true });
 const setStatus = (order: OnlineOrder, status: 'accepted' | 'rejected' | 'done', force = false) =>
@@ -559,7 +565,7 @@ function SettingsCard() {
                   name="order-mode"
                   value="whatsapp"
                   title="رسالة واتساب"
-                  description="يُحفظ الطلب هنا ويفتح واتساب عند الزبون برسالة جاهزة إلى رقمك."
+                  description="يُحفظ الطلب هنا بحالة «بانتظار المحل» ولا يحجز شيئاً من المخزون حتى تقبله، ويفتح واتساب عند الزبون برسالة جاهزة إلى رقمك."
                   leading={<SendIcon />}
                   checked={form.orderMode === 'whatsapp'}
                   onChange={() => set({ orderMode: 'whatsapp' })}
@@ -716,6 +722,7 @@ function useOrderPages(status: OnlineOrderStatus | 'all') {
     key: string;
     items: OnlineOrder[];
     nextCursor: string | null;
+    counts: { pending: number; accepted: number; all: number } | null;
   } | null>(null);
   const [error, setError] = useState<{ key: string; text: string } | null>(null);
   const cursor = stack.length > 0 ? stack[stack.length - 1]! : null;
@@ -757,6 +764,8 @@ function useOrderPages(status: OnlineOrderStatus | 'all') {
   };
   return {
     items,
+    // The tabs' tallies come with every page; the last ones heard stay while a new page loads
+    counts: answer?.counts ?? null,
     error: error?.key === key ? error.text : null,
     /** Asks again without emptying the list */
     refresh: useCallback(() => setTick((n) => n + 1), []),
@@ -770,7 +779,7 @@ function useOrderPages(status: OnlineOrderStatus | 'all') {
 function OrdersCard({ canDecide }: { canDecide: boolean }) {
   const me = useMe();
   const [status, setFilter] = useState<OnlineOrderStatus | 'all'>('pending');
-  const { items, error, refresh: load, first, topRef, pager } = useOrderPages(status);
+  const { items, counts, error, refresh: load, first, topRef, pager } = useOrderPages(status);
   const [moveError, setError] = useState<string | null>(null);
 
   // The delivery card below asks again whenever an order changes
@@ -844,17 +853,29 @@ function OrdersCard({ canDecide }: { canDecide: boolean }) {
             first();
           }}
           options={[
-            { value: 'pending', label: 'بانتظار المحل' },
-            { value: 'accepted', label: 'مقبولة' },
-            { value: 'all', label: 'الكل' },
+            { value: 'pending', label: counts ? `بانتظار المحل (${counts.pending})` : 'بانتظار المحل' },
+            { value: 'accepted', label: counts ? `مقبولة (${counts.accepted})` : 'مقبولة' },
+            { value: 'all', label: counts ? `الكل (${counts.all})` : 'الكل' },
           ]}
         />
       </div>
       {error || moveError ? <Alert tone="error">{error ?? moveError}</Alert> : null}
       {items === null && !error ? (
-        <Card aria-busy="true">
-          <SkeletonText lines={4} />
-        </Card>
+        <ul
+          aria-busy="true"
+          aria-label="جارٍ تحميل الطلبات"
+          className="grid items-start gap-4 xl:grid-cols-2"
+        >
+          {[0, 1].map((n) => (
+            <li key={n}>
+              <Card className="flex flex-col gap-4">
+                <SkeletonText lines={1} />
+                <SkeletonText lines={3} />
+                <Skeleton className="h-11 w-40 rounded-control" />
+              </Card>
+            </li>
+          ))}
+        </ul>
       ) : null}
       {items && items.length === 0 ? (
         <EmptyState
@@ -865,7 +886,7 @@ function OrdersCard({ canDecide }: { canDecide: boolean }) {
       ) : null}
       {items && items.length > 0 ? (
         <div ref={topRef} className="flex flex-col gap-4">
-          <ul aria-label="طلبات المتجر" className="grid gap-4 xl:grid-cols-2">
+          <ul aria-label="طلبات المتجر" className="grid items-start gap-4 xl:grid-cols-2">
             {items.map((o) => (
               <li
                 key={o.id}

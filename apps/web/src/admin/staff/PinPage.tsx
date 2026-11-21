@@ -85,10 +85,14 @@ export function PinPage() {
         </div>
 
         <Card className="flex flex-col gap-6">
-          <Alert tone="info" title={sixDigits ? 'رمزك 6 أرقام.' : 'رمزك 4 أرقام أو 6.'}>
-            <strong>الكاشير يكفيه 4 أرقام، والمالك والمدير 6 أرقام.</strong> وكذلك من يوافق على خصم أو إرجاع
-            أو سحب نقد، لأن رمزه يفتح عمليات غيره.
-          </Alert>
+          {/* The brand tint, not the blue info box: blue is outside the identity */}
+          <div className="flex flex-col gap-1 rounded-card bg-brand-soft p-4 text-brand-ink">
+            <p className="font-semibold">{sixDigits ? 'رمزك 6 أرقام.' : 'رمزك 4 أرقام أو 6.'}</p>
+            <p>
+              <strong>الكاشير يكفيه 4 أرقام، والمالك والمدير 6 أرقام.</strong> وكذلك من يوافق على خصم أو إرجاع
+              أو سحب نقد، لأن رمزه يفتح عمليات غيره.
+            </p>
+          </div>
 
           {saved ? (
             <Alert tone="success">

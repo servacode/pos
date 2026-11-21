@@ -155,6 +155,8 @@ export interface ShopHome {
   store: ShopStore;
   categories: { id: string; name: string; parentId: string | null }[];
   products: ShopProductCard[];
+  /** True when the store has more pieces than the page carries (the first ones by name are shown) */
+  truncated?: boolean;
 }
 
 export interface ShopProduct {
@@ -381,7 +383,7 @@ export const onlineOrderListQuery = z.object({
   /** Where the next page starts (the `nextCursor` of the page before); absent: the first page */
   cursor: z
     .string()
-    .regex(/^\d{1,6}$/)
+    .regex(/^(\d{1,6}|s\d{1,9})$/)
     .optional(),
   /** A page's size; absent: 200 */
   limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -504,6 +506,8 @@ export const priceHistoryQuery = z.object({
   from: z.iso.date().optional(),
   to: z.iso.date().optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(300),
+  /** The `nextCursor` of the previous page */
+  before: z.string().max(100).optional(),
 });
 export type PriceChangeSource = 'product_edit' | 'price_list' | 'bulk' | 'price_list_summary';
 export interface PriceChange {
@@ -520,4 +524,6 @@ export interface PriceChange {
   oldMinor: number | null;
   newMinor: number | null;
   note: string | null;
+  /** Which price moved on a product edit; absent (the selling price) on older rows */
+  field?: 'price' | 'floor' | 'wholesale';
 }

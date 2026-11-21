@@ -52,6 +52,10 @@ type Row = {
   approval_status: string;
   lat: number | null;
   lng: number | null;
+  group_id?: string | null;
+  group_name?: string | null;
+  group_discount_bps?: number | null;
+  birth_date?: string | null;
   balance: string;
 };
 
@@ -79,6 +83,10 @@ const item = (r: Row): CustomerListItem => ({
     r.approval_status === 'pending' || r.approval_status === 'rejected' ? r.approval_status : 'approved',
   lat: r.lat,
   lng: r.lng,
+  groupId: r.group_id ?? null,
+  groupName: r.group_name ?? null,
+  groupDiscountBps: r.group_discount_bps ?? null,
+  birthDate: r.birth_date ?? null,
 });
 
 const decodeOffset = (cursor: string | undefined): number => {
@@ -95,11 +103,19 @@ const uuidList = (ids: string[]) =>
     sql`, `,
   )}]::uuid[]`;
 
+const FOLD_FROM = 'أإآٱؤئىةیک٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹';
+const FOLD_TO = 'ااااوييهيك01234567890123456789';
+const escapeLike = (word: string): string => word.replace(/[\\%_]/g, (c) => '\\' + c);
+
+/** The customer's name in the search form (diacritics out, hamza and ة/ى folded, digits Latin), done by the database */
+const foldedName = sql`translate(lower(regexp_replace(regexp_replace(c.name, ${'[ً-ٰٟـ]'}, '', 'g'), '\\s+', ' ', 'g')), ${FOLD_FROM}, ${FOLD_TO})`;
+
 /**
- * The list: one page at a time when `limit` is sent (balance high first, then name), the search and
- * «من عليه دين» applied here. What a customer bought (last day, spend, size) is worked out only for
- * the rows of the page, and only when `limit` is sent: a picker (no `limit`) gets the name, phone and
- * balance and nothing that costs a query over the invoices.
+ * The list: one page at a time when `limit` is sent (balance high first, then name, or the order the
+ * owner chose), the search, «من عليه دين», the group and the birthday month applied in SQL with a
+ * LIMIT, so a store with thousands of customers reads one page, not all. What a customer bought (last
+ * day, spend, size) is worked out only for the rows of the page, and only when `limit` is sent: a
+ * picker (no `limit`) gets the name, phone and balance and nothing that costs a query over the invoices.
  * `totalOwedMinor` is every debt of the store (the filters of kind, region and approval apply, the
  * search does not), so the tile does not shrink while the owner types.
  */
@@ -117,6 +133,10 @@ export async function listCustomers(
     lite?: boolean;
     /** Only customers who bought before and not since this day (YYYY-MM-DD): «لم يزر منذ 90 يوماً» */
     lastBefore?: string;
+    sort?: 'balance' | 'name' | 'last' | 'spent';
+    dir?: 'asc' | 'desc';
+    groupId?: string;
+    birthMonth?: number;
   },
 ): Promise<CustomerListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
@@ -124,76 +144,77 @@ export async function listCustomers(
     const offset = decodeOffset(query.cursor);
     const filter = sql`${query.kind ? sql`c.kind = ${query.kind}` : sql`true`}
         and ${query.regionId ? sql`c.region_id = ${query.regionId}` : sql`true`}
-        and ${query.approval ? sql`c.approval_status = ${query.approval}` : sql`true`}`;
-    const base = await tx.execute<Omit<Row, 'balance'>>(sql`
-      select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at,
-             c.kind, c.contact_name, c.contact_phone, c.region_id, g.name as region_name,
-             c.approval_status, c.lat, c.lng
-      from customers c
-      left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
-      where ${filter}
+        and ${query.approval ? sql`c.approval_status = ${query.approval}` : sql`true`}
+        and ${query.groupId ? sql`c.group_id = ${query.groupId}` : sql`true`}
+        and ${query.birthMonth ? sql`extract(month from c.birth_date) = ${query.birthMonth}` : sql`true`}
         and ${
           query.lastBefore
             ? sql`exists (select 1 from invoices i where i.customer_id = c.id)
                 and not exists (select 1 from invoices i where i.customer_id = c.id
                   and i.business_date >= ${query.lastBefore}::date)`
             : sql`true`
-        }`);
+        }`;
     const q = query.q ? normalizeArabic(query.q) : '';
     // Arabic-Indic digits are digits too: «٠٩٤٤…» finds the same phone as «0944…»
     const digits = query.q ? toLatinDigits(query.q).replace(/\D/g, '') : '';
     const phoneNeedle = digits.replace(/^0/, '');
-    const matched = base.filter(
-      (c) =>
-        !q ||
-        normalizeArabic(c.name).includes(q) ||
-        (digits.length >= 3 && (c.phone ?? '').replace(/\D/g, '').includes(phoneNeedle)),
-    );
-    // The balances of the matches only; the whole store's when nothing narrows the list
-    const narrowed = q !== '' && matched.length < base.length;
-    const owed =
-      narrowed && matched.length === 0
-        ? []
-        : await tx.execute<{ customer_id: string; balance: string }>(
-            narrowed
-              ? sql`select customer_id, balance::text from (${balances}) b where b.customer_id = any(${uuidList(matched.map((c) => c.id))})`
-              : sql`select customer_id, balance::text from (${balances}) b`,
-          );
-    const balanceBy = new Map(owed.map((r) => [r.customer_id, r.balance]));
-    const baseIds = new Set(base.map((c) => c.id));
-    let totalOwedMinor = 0;
-    let owingCount = 0;
-    if (!narrowed) {
-      for (const r of owed) {
-        if (baseIds.has(r.customer_id) && Number(r.balance) > 0) {
-          totalOwedMinor += Number(r.balance);
-          owingCount += 1;
-        }
-      }
-    } else {
-      const [all] = await tx.execute<{ owed: string; n: string }>(sql`
-        select coalesce(sum(b.balance) filter (where b.balance > 0), 0)::text as owed,
-               count(*) filter (where b.balance > 0)::text as n
-        from customers c join (${balances}) b on b.customer_id = c.id
-        where ${filter}`);
-      totalOwedMinor = Number(all?.owed ?? 0);
-      owingCount = Number(all?.n ?? 0);
-    }
+    const search = !q
+      ? sql`true`
+      : digits.length >= 3
+        ? sql`(${foldedName} like ${`%${escapeLike(q)}%`}
+               or regexp_replace(coalesce(c.phone, ''), '\\D', '', 'g') like ${`%${escapeLike(phoneNeedle)}%`})`
+        : sql`${foldedName} like ${`%${escapeLike(q)}%`}`;
+    const balance = sql`coalesce(b.balance, 0)`;
+    const owingWhere = query.owing ? sql`${balance} > 0` : sql`true`;
+    // A picker's search (a `q` and no `limit`) gets the best 50 matches, not every customer with that letter
+    const cap = query.limit ?? (q ? 50 : undefined);
+    const sort = query.sort ?? (query.birthMonth ? 'birth' : 'balance');
+    const flip = query.dir === 'asc' ? sql`asc` : query.dir === 'desc' ? sql`desc` : null;
+    const order =
+      sort === 'name'
+        ? sql`c.name ${flip ?? sql`asc`}, c.id`
+        : sort === 'last'
+          ? sql`s.last ${flip ?? sql`desc`} nulls last, c.name, c.id`
+          : sort === 'spent'
+            ? sql`coalesce(s.spent, 0) ${flip ?? sql`desc`}, c.name, c.id`
+            : sort === 'birth'
+              ? sql`extract(day from c.birth_date), c.name, c.id`
+              : sql`${balance} ${flip ?? sql`desc`}, c.name, c.id`;
+    const needSold = sort === 'last' || sort === 'spent';
+    const soldJoin = needSold
+      ? sql`left join (
+          select i.customer_id, max(i.business_date) as last,
+                 sum(i.total_minor) - coalesce(sum((select sum(r.total_minor) from sale_returns r
+                   where r.tenant_id = i.tenant_id and r.sale_id = i.id)), 0) as spent
+          from invoices i where i.customer_id is not null group by i.customer_id) s on s.customer_id = c.id`
+      : sql``;
+    const rows = await tx.execute<Row>(sql`
+      select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at,
+             c.kind, c.contact_name, c.contact_phone, c.region_id, g.name as region_name,
+             c.approval_status, c.lat, c.lng, c.group_id, cg.name as group_name,
+             cg.discount_bps as group_discount_bps, c.birth_date::text as birth_date,
+             ${balance}::text as balance
+      from customers c
+      left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
+      left join customer_groups cg on cg.tenant_id = c.tenant_id and cg.id = c.group_id
+      left join (${balances}) b on b.customer_id = c.id
+      ${soldJoin}
+      where ${filter} and ${search} and ${owingWhere}
+      order by ${order}
+      ${cap ? sql`limit ${cap + 1} offset ${offset}` : sql``}`);
+    const hasMore = cap !== undefined && rows.length > cap;
+    const page = (cap ? rows.slice(0, cap) : rows).map(item);
+    const nextCursor = hasMore && cap ? encodeOffset(offset + cap) : null;
+    const [totals] = await tx.execute<{ all_n: string; owing_n: string; owed: string; matched: string }>(sql`
+      select count(*)::text as all_n,
+             count(*) filter (where ${balance} > 0)::text as owing_n,
+             coalesce(sum(${balance}) filter (where ${balance} > 0), 0)::text as owed,
+             count(*) filter (where ${search} and ${owingWhere})::text as matched
+      from customers c left join (${balances}) b on b.customer_id = c.id
+      where ${filter}`);
     const [pending] = await tx.execute<{ n: string }>(
       sql`select count(*)::text as n from customers where approval_status = 'pending'`,
     );
-    const ranked = matched
-      .map((r) => item({ ...r, balance: balanceBy.get(r.id) ?? '0' }))
-      .filter((c) => !query.owing || c.balanceMinor > 0)
-      .sort(
-        (x, y) =>
-          y.balanceMinor - x.balanceMinor ||
-          (x.name < y.name ? -1 : x.name > y.name ? 1 : 0) ||
-          (x.id < y.id ? -1 : x.id > y.id ? 1 : 0),
-      );
-    const page = query.limit ? ranked.slice(offset, offset + query.limit) : ranked;
-    const nextCursor =
-      query.limit && offset + query.limit < ranked.length ? encodeOffset(offset + query.limit) : null;
 
     // The last purchase, spend and size cost a query over the invoices: only the paged list (`limit`) asks for them
     const extras = query.limit !== undefined && !query.lite;
@@ -234,10 +255,10 @@ export async function listCustomers(
         }));
     return {
       items,
-      totalOwedMinor,
-      totalCount: ranked.length,
-      allCount: base.length,
-      owingCount,
+      totalOwedMinor: Number(totals?.owed ?? 0),
+      totalCount: Number(totals?.matched ?? 0),
+      allCount: Number(totals?.all_n ?? 0),
+      owingCount: Number(totals?.owing_n ?? 0),
       pendingCount: Number(pending?.n ?? 0),
       nextCursor,
       baseCurrency: await baseCurrency(tx),
@@ -257,10 +278,12 @@ async function detail(tx: Transaction, id: string): Promise<CustomerDetail> {
   >(sql`
     select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at, c.tax_number, c.address,
            c.kind, c.contact_name, c.contact_phone, c.region_id, g.name as region_name,
-           c.approval_status, c.lat, c.lng,
+           c.approval_status, c.lat, c.lng, c.group_id, cg.name as group_name,
+           cg.discount_bps as group_discount_bps, c.birth_date::text as birth_date,
            c.notes, c.created_at, c.loyalty_points, coalesce(b.balance, 0)::text as balance
     from customers c left join (${balances}) b on b.customer_id = c.id
     left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
+    left join customer_groups cg on cg.tenant_id = c.tenant_id and cg.id = c.group_id
     where c.id = ${id}`);
   if (!row) throw notFound();
   const lines = await tx.execute<{
@@ -327,6 +350,8 @@ const fields = (input: CustomerInput, now: Date) => ({
   ...(input.regionId !== undefined ? { regionId: input.regionId } : {}),
   ...(input.lat !== undefined ? { lat: input.lat } : {}),
   ...(input.lng !== undefined ? { lng: input.lng } : {}),
+  ...(input.groupId !== undefined ? { groupId: input.groupId } : {}),
+  ...(input.birthDate !== undefined ? { birthDate: input.birthDate } : {}),
   ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
 });
 
@@ -338,8 +363,32 @@ async function checkPlace(tx: Transaction, input: CustomerInput): Promise<void> 
     );
     if (!region) throw invalid({ regionId: 'منطقة غير موجودة' });
   }
+  if (input.groupId) {
+    const [group] = await tx.execute<{ id: string }>(
+      sql`select id from customer_groups where id = ${input.groupId} and archived_at is null`,
+    );
+    if (!group) throw invalid({ groupId: 'مجموعة غير موجودة' });
+  }
   if ((input.lat === undefined || input.lat === null) !== (input.lng === undefined || input.lng === null)) {
     throw invalid({ lng: 'الموقع خط عرض وخط طول معاً' });
+  }
+}
+
+/**
+ * Another live customer with this phone (already in the international form): the owner is told and
+ * may save anyway (`confirmDuplicate`). The phone reaches here normalised, Arabic digits included.
+ */
+async function assertPhoneFree(tx: Transaction, input: CustomerInput, selfId?: string): Promise<void> {
+  if (!input.phone || input.confirmDuplicate) return;
+  const [twin] = await tx.execute<{ id: string; name: string }>(sql`
+    select id, name from customers
+    where phone = ${input.phone} and archived_at is null ${selfId ? sql`and id <> ${selfId}` : sql``}
+    order by created_at limit 1`);
+  if (twin) {
+    throw new AppError(409, 'conflict', `هذا الرقم مسجّل للزبون «${twin.name}». افتح حسابه أو أكّد الحفظ.`, {
+      phone: 'الرقم مسجّل لزبون آخر',
+      duplicateOf: twin.id,
+    });
   }
 }
 
@@ -352,6 +401,7 @@ export async function createCustomer(
 ): Promise<CustomerDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
+    await assertPhoneFree(tx, input);
     return createCustomerTx(tx, auth, input, meta, now);
   });
 }
@@ -393,6 +443,10 @@ export async function updateCustomer(
 ): Promise<CustomerDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
+    const [was] = await tx.execute<{ phone: string | null }>(
+      sql`select phone from customers where id = ${id}`,
+    );
+    if (was && input.phone !== undefined && input.phone !== was.phone) await assertPhoneFree(tx, input, id);
     return updateCustomerTx(tx, auth, id, input, meta, now);
   });
 }
@@ -430,6 +484,8 @@ export async function updateCustomerTx(
     'regionId',
     'lat',
     'lng',
+    'groupId',
+    'birthDate',
     'archived',
   ] as const) {
     if (before[key] !== after[key]) changes[key] = [before[key], after[key]];

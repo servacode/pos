@@ -28,10 +28,12 @@ export function priceHistory(
   db: Database,
   auth: AccessClaims,
   query: z.output<typeof priceHistoryQuery>,
-): Promise<{ items: PriceChange[] }> {
+): Promise<{ items: PriceChange[]; nextCursor: string | null }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'catalog.manage');
     const product = query.productId ?? null;
+    const [cursorAt, cursorId] = (query.before ?? '').split('|');
+    const cursor = cursorAt && cursorId ? { at: cursorAt, id: cursorId } : null;
     // A day is the store's own: from the start of `from` to the end of `to`, in the store's time zone
     const [tenant] = await tx.execute<{ tz: string | null }>(sql`select timezone as tz from tenants limit 1`);
     const tz = tenant?.tz ?? 'Asia/Damascus';
@@ -42,17 +44,26 @@ export function priceHistory(
         ACTIONS.map((a) => sql`${a}`),
         sql`, `,
       )})
-        and (action <> 'product.updated' or jsonb_path_exists(data, '$.variants[*].priceMinor'))
+        and (action <> 'product.updated' or jsonb_path_exists(data,
+              '$.variants[*] ? (exists(@.priceMinor) || exists(@.minPriceMinor) || exists(@.wholesalePriceMinor))'))
+        ${cursor ? sql`and (created_at, id) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)` : sql``}
         ${query.from ? sql`and created_at >= (${query.from}::date)::timestamp at time zone ${tz}` : sql``}
         ${query.to ? sql`and created_at < ((${query.to}::date + 1)::timestamp at time zone ${tz})` : sql``}
         ${
           product
             ? sql`and ((action = 'price.changed' and data->>'productId' = ${product})
-                    or (action = 'product.updated' and entity_id = ${product}))`
+                    or (action = 'product.updated' and entity_id = ${product})
+                    or (action = 'prices.bulk_changed' and exists (
+                          select 1 from jsonb_array_elements(coalesce(data->'moves', '[]'::jsonb)) m
+                          where (m->>'id') in (select id::text from variants where product_id = ${product}::uuid))))`
             : sql``
         }
       order by created_at desc, id desc
-      limit ${query.limit * 3}`);
+      limit ${query.limit + 1}`);
+    const more = rows.length > query.limit;
+    if (more) rows.length = query.limit;
+    const last = rows[rows.length - 1];
+    const nextCursor = more && last ? `${new Date(last.created_at).toISOString()}|${last.id}` : null;
 
     // What the rows name: the pieces' products and labels, and who did it
     const variantIds = new Set<string>();
@@ -116,7 +127,11 @@ export function priceHistory(
     const push = (
       r: AuditRow,
       source: PriceChangeSource,
-      fields: Pick<PriceChange, 'productId' | 'variantLabel' | 'currency' | 'oldMinor' | 'newMinor' | 'note'>,
+      fields: Pick<
+        PriceChange,
+        'productId' | 'variantLabel' | 'currency' | 'oldMinor' | 'newMinor' | 'note'
+      > &
+        Partial<Pick<PriceChange, 'field'>>,
       suffix: string,
     ) =>
       items.push({
@@ -148,24 +163,34 @@ export function priceHistory(
         );
       } else if (r.action === 'product.updated') {
         for (const v of variantsOf(r)) {
-          if (!v.priceMinor) continue;
-          push(
-            r,
-            'product_edit',
-            {
-              productId: r.entity_id,
-              variantLabel: labels.get(v.id)?.label ?? null,
-              currency: labels.get(v.id)?.currency ?? null,
-              oldMinor: v.priceMinor[0],
-              newMinor: v.priceMinor[1],
-              note: null,
-            },
-            `:${v.id}`,
-          );
+          for (const [key, field, note] of [
+            ['priceMinor', 'price', null],
+            ['minPriceMinor', 'floor', 'السعر الأدنى'],
+            ['wholesalePriceMinor', 'wholesale', 'سعر الجملة'],
+          ] as const) {
+            const pair = v.pairs[key];
+            if (!pair) continue;
+            push(
+              r,
+              'product_edit',
+              {
+                productId: r.entity_id,
+                variantLabel: labels.get(v.id)?.label ?? null,
+                currency: labels.get(v.id)?.currency ?? null,
+                oldMinor: pair[0],
+                newMinor: pair[1],
+                note,
+                field,
+              },
+              field === 'price' ? `:${v.id}` : `:${v.id}:${field}`,
+            );
+          }
         }
-      } else if (!product && r.action === 'prices.bulk_changed' && movesOf(r).length > 0) {
+      } else if (r.action === 'prices.bulk_changed' && movesOf(r).length > 0) {
         // A bulk change written with its pieces: one row for each, as a price edit shows
-        for (const m of movesOf(r)) {
+        const all = movesOf(r).filter((m) => !product || labels.get(m.id)?.productId === product);
+        // A change of thousands of pieces shows its first 300 and says how many more it moved
+        for (const m of all.slice(0, 300)) {
           const piece = labels.get(m.id);
           push(
             r,
@@ -184,6 +209,21 @@ export function priceHistory(
             `:${m.id}`,
           );
         }
+        if (all.length > 300) {
+          push(
+            r,
+            'bulk',
+            {
+              productId: null,
+              variantLabel: null,
+              currency: null,
+              oldMinor: null,
+              newMinor: null,
+              note: `و${String(all.length - 300)} قطعة أخرى في التغيير نفسه`,
+            },
+            ':more',
+          );
+        }
       } else if (!product) {
         const count = Number(r.data?.pieces ?? 0);
         const note =
@@ -200,7 +240,7 @@ export function priceHistory(
         );
       }
     }
-    return { items: items.slice(0, query.limit) };
+    return { items, nextCursor };
   });
 }
 
@@ -216,19 +256,26 @@ function movesOf(row: AuditRow): { id: string; old: number; new: number }[] {
   });
 }
 
-/** The pieces a `product.updated` row changed the price of, with their price move */
-function variantsOf(row: AuditRow): { id: string; priceMinor?: [number, number] }[] {
+/** The pieces a `product.updated` row changed a price, floor or wholesale price of, with each move */
+function variantsOf(row: AuditRow): {
+  id: string;
+  pairs: Partial<
+    Record<'priceMinor' | 'minPriceMinor' | 'wholesalePriceMinor', [number | null, number | null]>
+  >;
+}[] {
   const list = row.data?.variants;
   if (!Array.isArray(list)) return [];
   return list.flatMap((v: unknown) => {
-    const x = v as { id?: unknown; priceMinor?: unknown };
+    const x = v as Record<string, unknown>;
     if (typeof x.id !== 'string') return [];
-    const p = x.priceMinor;
-    return [
-      Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number'
-        ? { id: x.id, priceMinor: [p[0], p[1]] as [number, number] }
-        : { id: x.id },
-    ];
+    const pairs: ReturnType<typeof variantsOf>[number]['pairs'] = {};
+    for (const key of ['priceMinor', 'minPriceMinor', 'wholesalePriceMinor'] as const) {
+      const p = x[key];
+      const ok = (n: unknown) => n === null || typeof n === 'number';
+      if (Array.isArray(p) && ok(p[0]) && ok(p[1]))
+        pairs[key] = [p[0] as number | null, p[1] as number | null];
+    }
+    return [{ id: x.id, pairs }];
   });
 }
 

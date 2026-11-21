@@ -92,6 +92,12 @@ export interface NumberFieldProps extends Omit<
   unit?: string;
   /** Called when the typed text had a fraction the field cannot keep (the currency has none). */
   onFractionDropped?: () => void;
+  /**
+   * When given, a typed or pasted text that would be silently changed (a minus where none is allowed,
+   * more fraction digits than `decimals`) is refused whole instead: the number stays as it was and
+   * this is told why.
+   */
+  onRefuse?: (reason: 'minus' | 'fraction') => void;
 }
 
 /**
@@ -106,6 +112,7 @@ export function NumberField({
   allowNegative = false,
   unit,
   onFractionDropped,
+  onRefuse,
   inputClassName,
   ...rest
 }: NumberFieldProps) {
@@ -130,6 +137,13 @@ export function NumberField({
     if (NOT_NUMERIC.test(typed)) {
       setJunk(true);
       return;
+    }
+    if (onRefuse) {
+      const latin = stripBidiControls(toLatinDigits(typed));
+      if (!allowNegative && /[-−]/.test(typed)) return onRefuse('minus');
+      const dot = latin.indexOf('.');
+      if (dot !== -1 && (decimals === 0 || latin.slice(dot + 1).replace(/[^0-9]/g, '').length > decimals))
+        return onRefuse('fraction');
     }
     setJunk(false);
     caret.current = significantBefore(typed, selectionStart ?? typed.length);
@@ -219,6 +233,7 @@ export function MoneyField({
   const info = getCurrency(currency);
   const [noFraction, setNoFraction] = useState(false);
   const [tooLarge, setTooLarge] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
   const shown = decimals ?? info.displayDecimals;
   const [text, setText] = useState(() => minorToCanonical(valueMinor, currency, shown));
   const [lastMinor, setLastMinor] = useState(valueMinor);
@@ -236,6 +251,20 @@ export function MoneyField({
       value={text}
       decimals={shown}
       unit={info.symbolAr}
+      error={refusal ?? rest.error}
+      onRefuse={(reason) =>
+        setRefusal(
+          reason === 'minus'
+            ? 'لا يُقبل مبلغ سالب'
+            : info.decimals === 0 || shown === 0
+              ? 'هذه العملة تُعرض بلا كسور: اكتب المبلغ كاملاً بلا جزء عشري'
+              : `أكثر من ${String(shown)} خانات بعد الفاصلة غير مقبول`,
+        )
+      }
+      onBlur={(e) => {
+        setRefusal(null);
+        rest.onBlur?.(e);
+      }}
       hint={
         tooLarge
           ? 'المبلغ كبير جداً: تحقّق من الأصفار'
@@ -245,6 +274,9 @@ export function MoneyField({
       }
       onFractionDropped={() => setNoFraction(true)}
       onValueChange={(next) => {
+        // The reason stays while more is typed (the next digit would otherwise hide that a point was
+        // refused); it goes on blur or when something is deleted.
+        if (next.length < text.length) setRefusal(null);
         setText(next);
         let minor: number | null = null;
         try {

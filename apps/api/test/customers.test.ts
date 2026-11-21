@@ -264,7 +264,7 @@ describe('money taken from the admin: a payment and an opening debt', () => {
       method: 'POST',
       url: `/v1/customers/${c.id}/opening-debt`,
       headers: as(store),
-      payload: { amountMinor: 80_000, date: '2026-11-01' },
+      payload: { amountMinor: 80_000, date: '2026-10-27' },
     });
     expect(debt.statusCode, debt.body).toBe(201);
     expect(debt.json()).toMatchObject({
@@ -277,7 +277,7 @@ describe('money taken from the admin: a payment and an opening debt', () => {
       amountMinor: 30_000,
       method: 'cash',
       note: 'دفعة أولى',
-      date: '2026-11-02',
+      date: '2026-10-28',
     });
     expect(paid.statusCode, paid.body).toBe(201);
     const voucher = paid.json<{ number: string; balanceBeforeMinor: number; balanceAfterMinor: number }>();
@@ -288,7 +288,7 @@ describe('money taken from the admin: a payment and an opening debt', () => {
       amountMinor: 10_000,
       method: 'transfer',
       reference: 'TR-77',
-      date: '2026-11-03',
+      date: '2026-10-29',
     });
     expect(bank.statusCode, bank.body).toBe(201);
 

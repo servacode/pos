@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MeResponse, Permission, SectorKey } from '@serva/core';
 import { THEME_STORAGE_KEY } from '@serva/ui';
@@ -192,7 +192,7 @@ describe('AppShell', () => {
     await user.keyboard('{Control>}k{/Control}');
     const list = await screen.findByRole('listbox', { name: 'الصفحات' });
     expect(within(list).queryByRole('button', { name: /الورديات/ })).not.toBeInTheDocument();
-    await user.type(screen.getByRole('combobox', { name: 'اسم الصفحة' }), 'الأسعار');
+    await user.type(screen.getByRole('combobox', { name: 'ابحث في المتجر' }), 'الأسعار');
     await user.keyboard('{Enter}');
     expect(await screen.findByRole('navigation', { name: 'صفحات المنتجات' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'تغيير الأسعار' })).toHaveAttribute('aria-current', 'page');
@@ -348,6 +348,8 @@ describe('AppShell', () => {
     expect(initials('متجر أحمد نور')).toBe('أن');
     expect(initials('سوبرماركت الياسمين')).toBe('ا');
     expect(initials('متجر')).toBe('م');
+    // A number in the name is not a letter: «فحص 46 مالك» is «فم», never «ف4»
+    expect(initials('فحص 46 مالك')).toBe('فم');
   });
 });
 
@@ -414,6 +416,18 @@ describe('the notices (the bell)', () => {
     expect(screen.getByRole('button', { name: 'التنبيهات' })).toHaveFocus();
   });
 
+  it('opens the list of new things with Alt N and with the «جديد» button (Ctrl N belongs to the browser)', async () => {
+    const { user } = signedIn(['catalog.manage', 'customers.view'], undefined, '/', {
+      'GET /v1/online-orders?status=pending': { status: 200, body: { items: [] } },
+    });
+    await user.click(await screen.findByRole('button', { name: 'جديد' }));
+    expect(await screen.findByPlaceholderText('ماذا تريد أن تنشئ؟')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByPlaceholderText('ماذا تريد أن تنشئ؟')).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'n', code: 'KeyN', altKey: true });
+    expect(await screen.findByPlaceholderText('ماذا تريد أن تنشئ؟')).toBeInTheDocument();
+  });
+
   it('says when nothing waits', async () => {
     const { user } = signedIn(['customers.view'], undefined, '/', {
       'GET /v1/online-orders?status=pending': { status: 200, body: { items: [] } },
@@ -421,7 +435,7 @@ describe('the notices (the bell)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'التنبيهات' }));
     const pop = screen.getByRole('dialog', { name: 'الإشعارات' });
-    expect(within(pop).getByText('لا تنبيهات جديدة')).toBeInTheDocument();
+    expect(within(pop).getByText('لا إشعارات جديدة')).toBeInTheDocument();
     expect(within(pop).queryByRole('link', { name: /طلب/ })).not.toBeInTheDocument();
   });
 
@@ -479,7 +493,7 @@ describe('the page search (Ctrl K)', () => {
     const { user } = signedIn(['catalog.manage', 'devices.view']);
     await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
     await user.keyboard('{Control>}k{/Control}');
-    const box = await screen.findByRole('combobox', { name: 'اسم الصفحة' });
+    const box = await screen.findByRole('combobox', { name: 'ابحث في المتجر' });
     await user.type(box, 'سعر');
     const list = await screen.findByRole('listbox', { name: 'الصفحات' });
     expect(within(list).getAllByRole('option', { name: /الأسعار/ }).length).toBeGreaterThan(0);

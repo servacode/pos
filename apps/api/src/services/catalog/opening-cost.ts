@@ -5,6 +5,7 @@ import type { z } from 'zod';
 import { inScope, permissionScope, requirePermission } from '../../auth/permissions';
 import { AppError } from '../../errors';
 import { postOpeningStock, variantsWithMovements } from '../import/opening';
+import { assertDateOpen } from '../period-close';
 import { fieldError, notFound, requireCatalogManager, type CatalogContext } from './common';
 
 /**
@@ -21,6 +22,8 @@ export async function postProductOpening(
   const { tenantId, userId } = ctx.auth;
   return withTenant(db, tenantId, async (tx) => {
     await requireCatalogManager(tx, userId);
+    // An opening quantity dated inside a closed period is refused, as any other document is
+    await assertDateOpen(tx, tenantId, input.date, 'date');
     const adjust = await permissionScope(tx, userId, 'inventory.adjust');
     if (!inScope(adjust, input.branchId)) {
       throw new AppError(
@@ -45,6 +48,9 @@ export async function postProductOpening(
     if (new Set(input.lines.map((l) => l.variantId)).size !== input.lines.length) {
       throw fieldError('lines', 'قطعة مكررة');
     }
+    // The same per-tenant lock the import takes: two quick presses (or two tabs) queue here, and the
+    // second one sees the first one's movement below and is refused, never posting twice.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`import:${tenantId}`}, 0))`);
     const moved = await variantsWithMovements(
       tx,
       input.branchId,

@@ -37,7 +37,7 @@ const STEPS: readonly { label: string; description: string }[] = [
     label: 'العملة',
     description: 'الليرة أساس الحسابات والتقارير، والدولار إن كنت تبيع به أو تقبضه.',
   },
-  { label: 'البداية', description: 'محلّك جاهز. هذا ما تحتاجه لأول بيع:' },
+  { label: 'جاهز', description: 'محلّك جاهز. هذا ما تحتاجه لأول بيع:' },
 ];
 
 /**
@@ -398,11 +398,11 @@ function NextStep({
         to={to}
         className={cn(
           'group/next flex w-full flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5 sm:p-6',
-          compact && 'gap-2 p-3 sm:p-4',
+          compact && 'flex-row items-center gap-3 p-3 sm:p-3',
         )}
       >
-        <span className="flex items-center justify-between gap-3">
-          <IconChip size="lg" tone={done ? 'success' : undefined}>
+        <span className={cn('flex items-center justify-between gap-3', compact && 'shrink-0')}>
+          <IconChip size={compact ? 'md' : 'lg'} tone={done ? 'success' : undefined}>
             {done ? <CheckIcon size={24} /> : <StepIcon size={24} />}
           </IconChip>
           {/* A chevron toward the reading end: down, turned a quarter toward it. */}
@@ -411,7 +411,11 @@ function NextStep({
         <span className="flex flex-col gap-1">
           <span className="font-semibold text-ink">
             {title}
-            {done ? <span className="ms-2 text-sm font-semibold text-success-ink">تمّ</span> : null}
+            {done ? (
+              <span className="ms-2 rounded-full bg-success-soft px-2 py-0.5 text-xs font-semibold text-success-ink">
+                تمّ
+              </span>
+            ) : null}
             {pending ? (
               <span className="ms-2 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-semibold text-warning-ink">
                 لم يتم

@@ -1,4 +1,10 @@
-import type { Promotion, PromotionInput } from '@serva/core';
+import type {
+  Promotion,
+  PromotionInput,
+  PromotionPreview,
+  PromotionPreviewInput,
+  PromotionReport,
+} from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
 /** `GET /v1/promotions` (catalog.manage) */
@@ -15,3 +21,11 @@ export const updatePromotion = (id: string, input: PromotionInput & { version: n
 /** `POST /v1/promotions/{id}/archive` (catalog.manage): stop or restart one offer, whatever else is in its row */
 export const archivePromotion = (id: string, input: { version: number; archived: boolean }) =>
   apiFetch<Promotion>(`/v1/promotions/${id}/archive`, { method: 'POST', body: input, auth: true });
+
+/** `POST /v1/promotions/preview` (catalog.manage): how many products a scope reaches */
+export const previewPromotion = (input: PromotionPreviewInput) =>
+  apiFetch<PromotionPreview>('/v1/promotions/preview', { method: 'POST', body: input, auth: true });
+
+/** `GET /v1/promotions/report?from&to` (catalog.manage): what each offer did at the tills */
+export const promotionReport = (from: string, to: string) =>
+  apiFetch<PromotionReport>(`/v1/promotions/report?from=${from}&to=${to}`, { auth: true });

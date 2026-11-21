@@ -5,6 +5,7 @@ import {
   CUSTOMER_KINDS,
   type CurrencyCode,
   type CustomerKind,
+  type CustomerGroup,
   type CustomerListItem,
 } from '@serva/core';
 import {
@@ -38,11 +39,13 @@ import { countWord } from '../../lib/plural';
 import { downloadText } from '../accounting/csv';
 import { Pager, useCursorPages } from '../pager';
 import { Amt, DownloadGlyph, PageTop, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
-import { listCustomerPage, type CustomerPageQuery } from './api';
+import { listCustomerPage, listGroups, type CustomerPageQuery } from './api';
 import { customersCsv } from './csv';
 import { CustomerForm, KIND_SECTORS } from './CustomerForm';
 import { debtReminderLink } from './debtReminder';
-import { BalanceCell, CheckChip, CountLine, Empty, Who } from './parts';
+import { Ago, BalanceCell, CheckChip, CountLine, Empty, SortHead, Who } from './parts';
+import { BulkReminder } from './BulkReminder';
+import { GroupsDialog } from './GroupsDialog';
 
 const VouchersPanel = lazy(() => import('./VouchersPanel').then((m) => ({ default: m.VouchersPanel })));
 
@@ -123,11 +126,13 @@ function CustomerCard({
   base,
   clothing,
   store,
+  today,
 }: {
   customer: CustomerListItem;
   base: CurrencyCode;
   clothing: boolean;
   store: string;
+  today: string;
 }) {
   const digits = useDigits();
   return (
@@ -144,17 +149,26 @@ function CustomerCard({
           </span>
         </Who>
       </Link>
-      <span className="justify-self-end text-end">
+      <span className="flex items-center gap-1 justify-self-end text-end">
         <BalanceCell customer={customer} currency={base} />
+        <RowMenu customer={customer} store={store} />
       </span>
       <span className="x">
         <span>
-          {customer.lastPurchaseDate
-            ? `آخر شراء ${dayText(customer.lastPurchaseDate, digits)}`
-            : 'لم يشترِ بعد'}
+          {customer.lastPurchaseDate ? (
+            <>
+              آخر شراء{' '}
+              <Ago
+                day={customer.lastPurchaseDate}
+                today={today}
+                long={dayText(customer.lastPurchaseDate, digits)}
+              />
+            </>
+          ) : (
+            'لم يشترِ بعد'
+          )}
           {clothing && customer.favouriteSize ? ` · المقاس ${customer.favouriteSize}` : ''}
         </span>
-        <RowMenu customer={customer} store={store} />
       </span>
     </li>
   );
@@ -180,15 +194,32 @@ export function CustomersPage() {
   const kind = (CUSTOMER_KINDS as readonly string[]).includes(params.get('kind') ?? '')
     ? (params.get('kind') as CustomerKind)
     : '';
+  const sortKey = (['name', 'last', 'spent', 'balance'] as const).find((k) => k === params.get('sort'));
+  const sortDir = params.get('dir') === 'asc' ? 'asc' : 'desc';
+  const groupId = params.get('group') ?? '';
+  const birthdays = params.get('birthdays') === '1';
+  const [groups, setGroups] = useState<CustomerGroup[]>([]);
+  const [dialog, setDialog] = useState<'groups' | 'remind' | null>(null);
+  useEffect(() => {
+    listGroups()
+      .then((g) => setGroups(g.filter((x) => !x.archived)))
+      .catch(() => setGroups([]));
+  }, [dialog]);
   const [adding, setAdding] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  // Built from the address as it is when it runs, so a chip pressed while the search timer waits is kept
   const setFilter = (name: string, value: string | null) => {
-    const next = new URLSearchParams(params);
-    if (value) next.set(name, value);
-    else next.delete(name);
-    setParams(next, { replace: true });
+    setParams(
+      (was) => {
+        const next = new URLSearchParams(was);
+        if (value) next.set(name, value);
+        else next.delete(name);
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   // The server is asked once the owner stops typing
@@ -210,9 +241,12 @@ export function CustomersPage() {
       kind,
       ...(away ? { lastBefore: cutoff } : {}),
       ...(waiting ? { approval: 'pending' as const } : {}),
+      ...(sortKey ? { sort: sortKey, dir: sortDir } : {}),
+      ...(groupId ? { groupId } : {}),
+      ...(birthdays ? { birthMonth: Number(today.slice(5, 7)) } : {}),
       limit: PAGE,
     }),
-    [search, owing, kind, away, waiting, cutoff],
+    [search, owing, kind, away, waiting, cutoff, sortKey, sortDir, groupId, birthdays, today],
   );
   const key = JSON.stringify(query);
   const { data, error, loading, retry, pager, topRef } = useCursorPages(
@@ -232,12 +266,31 @@ export function CustomersPage() {
   const items = data?.items ?? [];
   const anyLimit = items.some((c) => c.creditLimitMinor !== null);
   const pendingCount = strip?.pendingCount ?? 0;
-  const filtered = search !== '' || owing || away || waiting || kind !== '';
+  const filtered = search !== '' || owing || away || waiting || kind !== '' || groupId !== '' || birthdays;
+
+  /** Pressing a title sorts by it; pressing it again flips the order (names A to Z first, money the most first) */
+  const sortBy = (key: 'name' | 'last' | 'spent' | 'balance') => {
+    const next = new URLSearchParams(params);
+    const first = key === 'name' ? 'asc' : 'desc';
+    const was = sortKey ?? 'balance';
+    const wasDir = sortKey ? sortDir : 'desc';
+    next.set('sort', key);
+    next.set('dir', was === key ? (wasDir === 'asc' ? 'desc' : 'asc') : first);
+    setParams(next, { replace: true });
+  };
+  const head = (key: 'name' | 'last' | 'spent' | 'balance', label: string) => (
+    <SortHead
+      label={label}
+      active={(sortKey ?? 'balance') === key}
+      dir={sortKey ? sortDir : 'desc'}
+      onSort={() => sortBy(key)}
+    />
+  );
 
   const columns: SxColumn<CustomerListItem>[] = [
     {
       key: 'name',
-      header: 'الزبون',
+      header: head('name', 'الزبون'),
       lead: true,
       cell: (c) => (
         <Who name={c.name}>
@@ -247,6 +300,7 @@ export function CustomersPage() {
             </Link>
             {c.priceTier === 'wholesale' ? <StatusPill kind="ok">جملة</StatusPill> : null}
             {c.kind ? <StatusPill kind="ok">{CUSTOMER_KIND_LABELS[c.kind]}</StatusPill> : null}
+            {c.groupName ? <StatusPill kind="ok">{c.groupName}</StatusPill> : null}
             {c.archived ? <StatusPill kind="open">مؤرشف</StatusPill> : null}
             {c.approvalStatus === 'pending' ? <StatusPill kind="warn">بانتظار الموافقة</StatusPill> : null}
           </span>
@@ -273,18 +327,20 @@ export function CustomersPage() {
     },
     {
       key: 'last',
-      header: 'آخر شراء',
+      header: head('last', 'آخر شراء'),
       hideBelowLg: true,
       cell: (c) =>
         c.lastPurchaseDate ? (
-          <span className="sx-n sx-mute">{dayText(c.lastPurchaseDate, digits)}</span>
+          <span className="sx-n sx-mute">
+            <Ago day={c.lastPurchaseDate} today={today} long={dayText(c.lastPurchaseDate, digits)} />
+          </span>
         ) : (
           <span className="sx-z">—</span>
         ),
     },
     {
       key: 'spent',
-      header: 'مجموع المشتريات',
+      header: head('spent', 'مجموع المشتريات'),
       numeric: true,
       hideBelowLg: true,
       cell: (c) =>
@@ -327,7 +383,7 @@ export function CustomersPage() {
       : []),
     {
       key: 'balance',
-      header: 'الرصيد',
+      header: head('balance', 'الرصيد'),
       numeric: true,
       strong: true,
       cell: (c) => <BalanceCell customer={c} currency={base} />,
@@ -471,6 +527,21 @@ export function CustomersPage() {
                   ))}
                 </Select>
               ) : null}
+              {groups.length > 0 ? (
+                <Select
+                  label="المجموعة"
+                  hideLabel
+                  value={groupId}
+                  onChange={(e) => setFilter('group', e.target.value || null)}
+                >
+                  <option value="">كل المجموعات</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
               <div className="sx-chips">
                 <CheckChip
                   label="من عليه دين فقط"
@@ -482,6 +553,11 @@ export function CustomersPage() {
                   checked={away}
                   onChange={(v) => setFilter('away', v ? '1' : null)}
                 />
+                <CheckChip
+                  label="أعياد ميلاد هذا الشهر"
+                  checked={birthdays}
+                  onChange={(v) => setFilter('birthdays', v ? '1' : null)}
+                />
                 {pendingCount > 0 ? (
                   <CheckChip
                     label={`بانتظار الموافقة (${pendingCount})`}
@@ -490,6 +566,16 @@ export function CustomersPage() {
                   />
                 ) : null}
               </div>
+              {canManage ? (
+                <Button variant="secondary" onClick={() => setDialog('groups')}>
+                  المجموعات
+                </Button>
+              ) : null}
+              {(strip?.owingCount ?? 0) > 0 ? (
+                <Button variant="secondary" icon={<CashIcon />} onClick={() => setDialog('remind')}>
+                  تذكير جماعي للمدينين
+                </Button>
+              ) : null}
               <Button
                 variant="secondary"
                 icon={<DownloadGlyph />}
@@ -517,6 +603,7 @@ export function CustomersPage() {
                     base={base}
                     clothing={clothing}
                     store={me.tenant.name}
+                    today={today}
                   />
                 ))}
               </ul>
@@ -533,6 +620,10 @@ export function CustomersPage() {
               />
             )}
             <Pager noun="الزبائن" pager={pager} />
+            {dialog === 'groups' ? (
+              <GroupsDialog canManage={canManage} onClose={() => setDialog(null)} />
+            ) : null}
+            {dialog === 'remind' ? <BulkReminder onClose={() => setDialog(null)} /> : null}
           </>
         )}
       </SalesPage>

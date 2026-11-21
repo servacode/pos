@@ -15,6 +15,8 @@ const shiftWeek = (day: string) => {
 
 /** The home summary the page asks for instead of the heavy lists: the low pieces, debts and photos */
 const summaryOf = (parts: {
+  /** The store has sold at some time (default: yes, like every store in these tests except a brand-new one) */
+  hasEverSold?: boolean;
   lowStock?: unknown[];
   debts?: { totalOwedMinor: number; overLimitCount: number; overLimitOne: unknown } | null;
   photos?: { goodsCount: number; withoutPhoto: number } | null;
@@ -22,6 +24,7 @@ const summaryOf = (parts: {
   status: 200,
   body: {
     baseCurrency: 'SYP',
+    hasEverSold: parts.hasEverSold ?? true,
     debts: parts.debts ?? null,
     photos: parts.photos ?? null,
     lowStock: parts.lowStock ? { total: parts.lowStock.length, items: parts.lowStock } : null,
@@ -157,7 +160,10 @@ describe('HomePage', () => {
       expect(await screen.findByText('قميص كتان: يوشك على النفاد (باقي 1)')).toBeInTheDocument();
       expect(screen.queryByRole('tab', { name: /المخزون/ })).not.toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'منتج جديد' })).toHaveAttribute('href', '/products/new');
-      expect(screen.getByRole('link', { name: 'افتح الكاشير' })).toHaveAttribute('href', '/pos');
+      // One filled «افتح الكاشير» on the page: the top bar's (not repeated in the page header)
+      const till = screen.getAllByRole('link', { name: /افتح الكاشير/ });
+      expect(till).toHaveLength(1);
+      expect(till[0]).toHaveAttribute('href', '/pos');
     });
 
     it('counts the accepted orders waiting for a till, the number the till shows', async () => {
@@ -769,17 +775,69 @@ describe('HomePage', () => {
     it('welcomes a store with no sales yet', async () => {
       mockFetch({
         'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'settings.manage']) },
+        [`GET /v1/reports/day?date=${TODAY}`]: {
+          status: 200,
+          body: dayReport({ invoiceCount: 0, totalMinor: 0, topProducts: [], byMethod: [] }),
+        },
+        [WEEK]: weekOf({}),
+        'GET /v1/me/home-summary': summaryOf({
+          hasEverSold: false,
+          photos: { goodsCount: 0, withoutPhoto: 0 },
+        }),
+        'GET /v1/staff': { status: 200, body: { staff: [] } },
+        'GET /v1/devices': { status: 200, body: { devices: [] } },
+      });
+      renderApp('/');
+
+      expect(await screen.findByText('لا مبيعات بعد')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'ابدأ أول عملية بيع' })).toHaveAttribute('href', '/pos');
+      // The zero figures are not drawn for a store that never sold: one calm card instead
+      expect(screen.queryByRole('region', { name: 'مبيعات اليوم' })).not.toBeInTheDocument();
+      // and the set-up checklist stays on the page until the four tasks are done
+      const setup = await screen.findByRole('region', { name: 'أكمل الإعداد' });
+      expect(setup).toHaveTextContent('0 من 4');
+      expect(within(setup).getByRole('link', { name: 'اختر رمز الكاشير' })).toHaveAttribute(
+        'href',
+        '/me/pin',
+      );
+    });
+
+    it('does not call an old store new because it sold nothing for a week', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
         [`GET /v1/reports/day?date=${TODAY}`]: {
           status: 200,
           body: dayReport({ invoiceCount: 0, totalMinor: 0, topProducts: [], byMethod: [] }),
         },
         [WEEK]: weekOf({}),
+        'GET /v1/me/home-summary': summaryOf({ hasEverSold: true }),
       });
       renderApp('/');
 
-      expect(await screen.findByText('لا مبيعات بعد')).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'ابدأ أول عملية بيع' })).toHaveAttribute('href', '/pos');
+      const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
+      expect(await within(sales).findByText('لا مبيعات بعد')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'ابدأ أول عملية بيع' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'أكمل الإعداد' })).not.toBeInTheDocument();
+      // Nothing sold today: the day's figures are not repeated as three zeros
+      expect(within(sales).queryByText('متوسط الفاتورة')).not.toBeInTheDocument();
+    });
+
+    it('says which source failed instead of letting «nothing waits» stand for it', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'customers.view']) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        'GET /v1/cheques?status=pending': {
+          status: 500,
+          body: { error: { code: 'server_error', message: 'تعذّر الاتصال' } },
+        },
+        'GET /v1/me/home-summary': summaryOf({ debts: null }),
+      });
+      renderApp('/');
+
+      expect(await screen.findByText(/تعذّر تحميل «الشيكات»/)).toBeInTheDocument();
     });
 
     it('does not take a failed week for a brand-new store: it says so and offers a retry', async () => {

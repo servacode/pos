@@ -259,7 +259,7 @@ describe('balance sheet', () => {
     const over = await post(store, `/v1/customers/${customer.id}/payments`, {
       amountMinor: 118_000,
       method: 'cash',
-      date: '2026-11-10',
+      date: '2026-10-30',
     });
     expect(over.statusCode, over.body).toBe(201);
     const advance = await post(store, '/v1/supplier-payments', {

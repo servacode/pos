@@ -16,5 +16,5 @@ export function customersCsv(items: readonly CustomerListItem[], currency: Curre
     c.spentMinor ? money(c.spentMinor) : csvField(''),
     csvField(c.archived ? 'مؤرشف' : ''),
   ]);
-  return `FEFF${[header, ...rows].map((cells) => cells.join(',')).join('\r\n')}\r\n`;
+  return `\uFEFF${[header, ...rows].map((cells) => cells.join(',')).join('\r\n')}\r\n`;
 }

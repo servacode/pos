@@ -1,9 +1,23 @@
 import type { FastifyInstance } from 'fastify';
-import { promotionArchiveInput, promotionInput, promotionUpdateInput, uuidSchema } from '@serva/core';
+import {
+  promotionArchiveInput,
+  promotionInput,
+  promotionPreviewInput,
+  promotionReportQuery,
+  promotionUpdateInput,
+  uuidSchema,
+} from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
-import { archivePromotion, createPromotion, listPromotions, updatePromotion } from '../services/promotions';
+import {
+  archivePromotion,
+  createPromotion,
+  listPromotions,
+  promotionPreview,
+  promotionReport,
+  updatePromotion,
+} from '../services/promotions';
 import { parseBody } from './validation';
 
 /** Promotions (packages/core › contracts/promotions.ts). */
@@ -16,6 +30,16 @@ export async function promotionRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/promotions', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return listPromotions(app.db, request.auth);
+  });
+
+  app.get('/v1/promotions/report', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return promotionReport(app.db, request.auth, parseBody(promotionReportQuery, request.query));
+  });
+
+  app.post('/v1/promotions/preview', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return promotionPreview(app.db, request.auth, parseBody(promotionPreviewInput, request.body));
   });
 
   app.post('/v1/promotions', { preHandler: requireAuth }, async (request, reply) => {

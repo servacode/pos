@@ -28,4 +28,23 @@ describe('useUnsavedGuard', () => {
     await userEvent.click(screen.getByRole('link'));
     expect(confirm).not.toHaveBeenCalled();
   });
+
+  it('asks on the browser Back button, and puts the page back when refused', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const push = vi.spyOn(window.history, 'pushState');
+    render(<Page active />);
+    expect(push).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(push).toHaveBeenCalledTimes(2);
+  });
+
+  it('adds no history entry and asks nothing when nothing is edited', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const push = vi.spyOn(window.history, 'pushState');
+    render(<Page active={false} />);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(push).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+  });
 });

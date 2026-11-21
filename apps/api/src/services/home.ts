@@ -15,6 +15,8 @@ import type { AccessClaims } from '../auth/tokens';
 
 export interface HomeSummary {
   baseCurrency: CurrencyCode;
+  /** The store has at least one invoice (any day): the home page of a store that has never sold shows the way in */
+  hasEverSold: boolean;
   /** customers.view: what customers owe (every customer with a debt, archived too) and who is over the limit */
   debts: {
     totalOwedMinor: number;
@@ -149,6 +151,15 @@ export async function loadHomeSummary(db: Database, auth: AccessClaims, now: Dat
       };
     }
 
-    return { baseCurrency: (base?.base ?? 'SYP') as CurrencyCode, debts, photos, lowStock };
+    // Whether the store has ever sold: a week without sales is a closed week, not a new store
+    const [sold] = await tx.execute<{ ever: boolean }>(sql`select exists (select 1 from invoices) as ever`);
+
+    return {
+      baseCurrency: (base?.base ?? 'SYP') as CurrencyCode,
+      hasEverSold: sold?.ever === true,
+      debts,
+      photos,
+      lowStock,
+    };
   });
 }

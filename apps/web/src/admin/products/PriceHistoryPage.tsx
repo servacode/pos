@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PriceModes } from './parts';
 import { CatalogGate } from './CatalogGate';
 import type { PriceChange, PriceChangeSource } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
@@ -74,13 +75,17 @@ export const HISTORY_HEADERS = [
   'ملاحظة',
 ];
 
-const getHistory = (query: { productId: string; from: string; to: string }) => {
+const getHistory = (query: { productId: string; from: string; to: string; before?: string }) => {
   const params = new URLSearchParams();
   if (query.productId) params.set('productId', query.productId);
   if (query.from) params.set('from', query.from);
   if (query.to) params.set('to', query.to);
+  if (query.before) params.set('before', query.before);
   params.set('limit', '500');
-  return apiFetch<{ items: PriceChange[] }>(`/v1/price-history?${params.toString()}`, { auth: true });
+  return apiFetch<{ items: PriceChange[]; nextCursor?: string | null }>(
+    `/v1/price-history?${params.toString()}`,
+    { auth: true },
+  );
 };
 
 export function PriceHistoryPage() {
@@ -125,6 +130,8 @@ function PriceHistory() {
   const phone = useIsPhone();
   const digits = me.settings.numberFormat;
   const [items, setItems] = useState<PriceChange[] | null>(null);
+  const [next, setNext] = useState<string | null>(null);
+  const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -139,13 +146,32 @@ function PriceHistory() {
     setError(null);
     getHistory({ productId, from, to })
       .then((r) => {
-        if (mine === latest.current) setItems(r.items);
+        if (mine === latest.current) {
+          setItems(r.items);
+          setNext(r.nextCursor ?? null);
+        }
       })
       .catch((e: unknown) => {
         if (mine === latest.current) setError(errorMessage(e));
       });
   }, [productId, from, to]);
   useEffect(load, [load]);
+
+  function loadMore() {
+    if (!next || more) return;
+    const mine = latest.current;
+    setMore(true);
+    getHistory({ productId, from, to, before: next })
+      .then((r) => {
+        if (mine !== latest.current) return;
+        setItems((old) => [...(old ?? []), ...r.items]);
+        setNext(r.nextCursor ?? null);
+      })
+      .catch((e: unknown) => {
+        if (mine === latest.current) setError(errorMessage(e));
+      })
+      .finally(() => setMore(false));
+  }
 
   // The product filter: type a name, pick one of the matches
   useEffect(() => {
@@ -221,6 +247,7 @@ function PriceHistory() {
             </Button>
           }
         />
+        <PriceModes current="/price-history" />
         {error ? <Alert tone="error">{error}</Alert> : null}
         <div className="sx-toolbar">
           <DateField label="من تاريخ" value={from} onChange={setFrom} />
@@ -303,6 +330,13 @@ function PriceHistory() {
             />
           </Panel>
         )}
+        {next ? (
+          <div className="flex justify-center">
+            <Button variant="secondary" loading={more} onClick={loadMore}>
+              اعرض تغييرات أقدم
+            </Button>
+          </div>
+        ) : null}
       </SalesPage>
     </>
   );
@@ -314,6 +348,9 @@ function Piece({ row }: { row: PriceChange }) {
       <span className="font-semibold">
         {row.productName}
         {row.variantLabel ? <span className="sx-mute"> · {row.variantLabel}</span> : null}
+        {row.field && row.field !== 'price' && row.note ? (
+          <span className="sx-mute"> · {row.note}</span>
+        ) : null}
       </span>
     );
   }

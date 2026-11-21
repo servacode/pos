@@ -1,16 +1,20 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import type { PartyStatement, PartyStatementLine } from '@serva/core';
+import type { CurrencyCode, PartyStatement, PartyStatementLine } from '@serva/core';
 import {
   AddIcon,
-  Balance,
   BackIcon,
   BookIcon,
   Button,
   Card,
   DataTable,
   EmptyState,
+  IconButton,
+  Menu,
+  MenuItem,
+  MenuSeparator,
   Money,
+  MoreIcon,
   PrintIcon,
   Skeleton,
   StatTile,
@@ -19,6 +23,7 @@ import {
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay } from '../../lib/dates';
+import { useIsPhone } from '../../lib/useIsPhone';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { downloadText } from '../accounting/csv';
 import { DayField, PageHead, ReportScreen } from '../reports/parts';
@@ -26,6 +31,7 @@ import { useReport } from '../reports/useReport';
 import { CustomerMoneyDialog } from '../customers/CustomerMoneyDialog';
 import { getStatement } from './api';
 import { statementCsv, statementWhat } from './csv';
+import '../customers/customers.css';
 
 const COPY = {
   customer: {
@@ -55,6 +61,28 @@ const SIDES = {
   supplier: { debit: 'دفعنا له', credit: 'اشترينا منه' },
 } as const;
 
+/**
+ * The balance in words: «عليه» or «له» and the amount (no arrow: the word says the side). The words
+ * are the owner's, as the statement has always shown them.
+ */
+function Balance({
+  minor,
+  currency,
+  className,
+}: {
+  minor: number;
+  currency: CurrencyCode;
+  className?: string;
+}) {
+  const side = minor > 0 ? 'عليه' : minor < 0 ? 'له' : null;
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap text-ink ${className ?? ''}`}>
+      {side ? <span className="font-semibold">{side}</span> : null}
+      <Money minor={minor} currency={currency} signDisplay="never" />
+    </span>
+  );
+}
+
 function DocNumber({ value }: { value: string }) {
   return (
     <bdi dir="ltr" className="num">
@@ -66,6 +94,7 @@ function DocNumber({ value }: { value: string }) {
 /** The sheet on A4, light: header, period, opening balance, movements, totals and closing balance. */
 function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; copy: Copy }) {
   const base = s.baseCurrency;
+  const digits = useDigits();
   return (
     <div dir="rtl" className="flex flex-col gap-4 p-2 text-sm text-ink">
       <div className="flex items-start justify-between border-b border-ink pb-2">
@@ -86,7 +115,7 @@ function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; 
         <div className="text-end">
           <p className="text-xl font-bold">{copy.title}</p>
           <p>
-            من <bdi className="num">{s.from}</bdi> إلى <bdi className="num">{s.to}</bdi>
+            من {dayText(s.from, digits)} إلى {dayText(s.to, digits)}
           </p>
         </div>
       </div>
@@ -103,7 +132,7 @@ function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; 
         </thead>
         <tbody>
           <tr className="border-b border-line font-semibold">
-            <td className="num py-1">{s.from}</td>
+            <td className="py-1 whitespace-nowrap">{dayText(s.from, digits)}</td>
             <td className="py-1">رصيد أول المدة</td>
             <td />
             <td />
@@ -118,7 +147,7 @@ function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; 
           </tr>
           {s.lines.map((l, index) => (
             <tr key={`${l.sourceId}-${index}`} className="border-b border-line">
-              <td className="num py-1 whitespace-nowrap">{l.date}</td>
+              <td className="py-1 whitespace-nowrap">{dayText(l.date, digits)}</td>
               <td className="py-1">
                 {statementWhat(l)}
                 {l.number ? (
@@ -182,6 +211,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
   const { id = '' } = useParams();
   const me = useMe();
   const digits = useDigits();
+  const phone = useIsPhone();
   const copy = COPY[type];
   const today = isoDay(Date.now(), me.tenant.timezone);
   const [from, setFrom] = useState(`${today.slice(0, 4)}-01-01`);
@@ -192,13 +222,15 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
   const { paper, print } = usePrint();
   const [money, setMoney] = useState<'payment' | 'opening' | null>(null);
   const base = data?.baseCurrency ?? me.settings.baseCurrency;
+  const canReceive = type === 'customer' && me.user.permissions.includes('receipt.create');
+  const canOpen = type === 'customer' && me.user.permissions.includes('accounting.post');
 
   const columns: DataColumn<PartyStatementLine>[] = [
     {
       key: 'date',
       header: 'التاريخ',
       className: 'hidden sm:table-cell',
-      cell: (l) => <bdi className="num whitespace-nowrap text-ink-muted">{l.date}</bdi>,
+      cell: (l) => <span className="whitespace-nowrap text-ink-muted">{dayText(l.date, digits)}</span>,
     },
     {
       key: 'what',
@@ -211,9 +243,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
               <DocNumber value={l.number} />
             </span>
           ) : null}
-          <span className="text-xs text-ink-muted sm:hidden">
-            <bdi className="num">{l.date}</bdi>
-          </span>
+          <span className="text-xs text-ink-muted sm:hidden">{dayText(l.date, digits)}</span>
         </div>
       ),
     },
@@ -310,32 +340,43 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
         subtitle={data ? data.party.name : undefined}
         actions={
           <>
-            {type === 'customer' && me.user.permissions.includes('receipt.create') ? (
+            {canReceive ? (
               <Button icon={<AddIcon />} disabled={!data} onClick={() => setMoney('payment')}>
                 استلم دفعة
               </Button>
-            ) : null}
-            {type === 'customer' && me.user.permissions.includes('accounting.post') ? (
-              <Button variant="secondary" disabled={!data} onClick={() => setMoney('opening')}>
-                سجّل دين افتتاحي
+            ) : (
+              <Button variant="secondary" icon={<PrintIcon />} disabled={!data} onClick={() => print('A4')}>
+                اطبع
               </Button>
-            ) : null}
-            <Button
-              variant="secondary"
-              disabled={!data}
-              onClick={() =>
-                data &&
-                downloadText(
-                  `${copy.title}-${data.party.name}-${data.from}-${data.to}.csv`,
-                  statementCsv(data),
-                )
-              }
+            )}
+            <Menu
+              label="المزيد"
+              align="end"
+              trigger={<IconButton label="المزيد" icon={<MoreIcon />} size="md" disabled={!data} />}
             >
-              صدّر إلى إكسل
-            </Button>
-            <Button variant="secondary" icon={<PrintIcon />} disabled={!data} onClick={() => print('A4')}>
-              اطبع
-            </Button>
+              {canReceive ? (
+                <MenuItem icon={<PrintIcon />} onSelect={() => print('A4')}>
+                  اطبع الكشف
+                </MenuItem>
+              ) : null}
+              <MenuItem
+                onSelect={() =>
+                  data &&
+                  downloadText(
+                    `${copy.title}-${data.party.name}-${data.from}-${data.to}.csv`,
+                    statementCsv(data),
+                  )
+                }
+              >
+                صدّر إلى إكسل
+              </MenuItem>
+              {canOpen ? (
+                <>
+                  <MenuSeparator />
+                  <MenuItem onSelect={() => setMoney('opening')}>سجّل دين افتتاحي</MenuItem>
+                </>
+              ) : null}
+            </Menu>
           </>
         }
       />
@@ -374,26 +415,56 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
         />
       </div>
       <div className="flex flex-col gap-2 print:hidden">
-        <DataTable
-          caption={copy.title}
-          columns={columns}
-          rows={data?.lines ?? []}
-          rowKey={(l) => lineKeys.get(l) ?? `${l.sourceId}:${l.balanceMinor}`}
-          loading={loading}
-          error={error ?? undefined}
-          onRetry={retry}
-          empty={
-            <EmptyState
-              icon={BookIcon}
-              title="لا حركة في هذه الفترة."
-              description={
-                data && data.openingMinor !== 0
-                  ? 'رصيد أول المدة يحمل ما قبلها.'
-                  : 'اختر فترة أخرى لترى الحركات.'
-              }
-            />
-          }
-        />
+        {phone && data && data.lines.length > 0 ? (
+          <Card className="p-0">
+            <ul className="cx-stm" aria-label={copy.title}>
+              {data.lines.map((l) => (
+                <li key={lineKeys.get(l) ?? `${l.sourceId}:${l.balanceMinor}`}>
+                  <span className="what">
+                    {statementWhat(l)}
+                    {l.number ? (
+                      <>
+                        {' '}
+                        <DocNumber value={l.number} />
+                      </>
+                    ) : null}
+                  </span>
+                  <span className="num end font-semibold">
+                    <span className="text-xs text-ink-muted">
+                      {l.debitMinor ? SIDES[type].debit : SIDES[type].credit}{' '}
+                    </span>
+                    <Money minor={l.debitMinor || l.creditMinor} currency={base} />
+                  </span>
+                  <span className="row2">
+                    <span>{dayText(l.date, digits)}</span>
+                    <Balance minor={copy.signed(l.balanceMinor)} currency={base} className="num" />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        ) : (
+          <DataTable
+            caption={copy.title}
+            columns={columns}
+            rows={data?.lines ?? []}
+            rowKey={(l) => lineKeys.get(l) ?? `${l.sourceId}:${l.balanceMinor}`}
+            loading={loading}
+            error={error ?? undefined}
+            onRetry={retry}
+            empty={
+              <EmptyState
+                icon={BookIcon}
+                title="لا حركة في هذه الفترة."
+                description={
+                  data && data.openingMinor !== 0
+                    ? 'رصيد أول المدة يحمل ما قبلها.'
+                    : 'اختر فترة أخرى لترى الحركات.'
+                }
+              />
+            }
+          />
+        )}
         {data ? (
           <p className="text-sm text-ink-subtle">
             من {dayText(data.from, digits)} إلى {dayText(data.to, digits)}.

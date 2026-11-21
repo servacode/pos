@@ -1526,6 +1526,8 @@ export const invoices = pgTable(
     index('invoices_business_date_idx').on(t.tenantId, t.branchId, t.businessDate),
     // The invoice list's order, newest first: the all-branches list reads its page off the index
     index('invoices_list_order_idx').on(t.tenantId, t.businessDate.desc(), t.deviceTime.desc(), t.id.desc()),
+    // A customer's invoices: their page, «لم يزر منذ 90 يوماً», the list's last purchase and spend
+    index('invoices_customer_idx').on(t.tenantId, t.customerId, t.businessDate),
     tenantIsolation(),
   ],
 );
@@ -1745,6 +1747,26 @@ export const regions = pgTable(
   ],
 );
 
+/** «مجموعات الزبائن» (round 48): a name and the discount its customers get, in hundredths of a percent */
+export const customerGroups = pgTable(
+  'customer_groups',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    discountBps: integer('discount_bps').notNull().default(0),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'customer_groups_pkey', columns: [t.tenantId, t.id] }),
+    uniqueIndex('customer_groups_name_unique').on(t.tenantId, sql`lower(${t.name})`),
+    tenantIsolation(),
+  ],
+);
+
 /**
  * The store's customers (09 › customers). Every till pulls them; a till may add one (the
  * `customer` document, whose id becomes the customer's). What a customer owes is not stored here:
@@ -1784,6 +1806,10 @@ export const customers = pgTable(
     lng: doublePrecision('lng'),
     /** The till document that created it, when a till did */
     createdByDoc: uuid('created_by_doc'),
+    /** «مجموعة الزبون» (customer_groups): a group may carry a discount */
+    groupId: uuid('group_id'),
+    /** Birthday, for the occasion reminder */
+    birthDate: date('birth_date'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
@@ -1796,6 +1822,11 @@ export const customers = pgTable(
       name: 'customers_region_fk',
       columns: [t.tenantId, t.regionId],
       foreignColumns: [regions.tenantId, regions.id],
+    }),
+    foreignKey({
+      name: 'customers_group_fk',
+      columns: [t.tenantId, t.groupId],
+      foreignColumns: [customerGroups.tenantId, customerGroups.id],
     }),
     index('customers_region_idx').on(t.tenantId, t.regionId),
     index('customers_phone_idx').on(t.tenantId, t.phone),
@@ -2895,7 +2926,7 @@ export const promotions = pgTable(
     primaryKey({ name: 'promotions_pkey', columns: [t.tenantId, t.id] }),
     uniqueIndex('promotions_coupon_unique')
       .on(t.tenantId, sql`lower(${t.couponCode})`)
-      .where(sql`${t.couponCode} is not null`),
+      .where(sql`${t.couponCode} is not null and ${t.archivedAt} is null`),
     index('promotions_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
     tenantIsolation(),
   ],
@@ -3017,6 +3048,11 @@ export const vouchers = pgTable(
     currency: text('currency').notNull(),
     amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
     redeemedMinor: bigint('redeemed_minor', { mode: 'number' }).notNull().default(0),
+    /** After this day the voucher is not honoured (null: never); an admin sets it */
+    expiresOn: date('expires_on'),
+    /** Cancelled by the owner: nothing is left to spend on it */
+    voidedAt: timestamp('voided_at', { withTimezone: true }),
+    voidReason: text('void_reason'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

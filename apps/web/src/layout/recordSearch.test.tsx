@@ -1,6 +1,6 @@
 import { screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mockFetch, type MockReply } from '../test/fetchMock';
+import { mockFetch } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
 
@@ -11,6 +11,16 @@ const meWith = (permissions: string[]) => {
 
 afterEach(() => localStorage.removeItem('serva.trialBannerDismissed'));
 
+const OPEN = 'ابحث عن منتج أو زبون أو دفعة';
+const searchUrl = (q: string) => `GET /v1/me/search?q=${encodeURIComponent(q)}`;
+const customerHit = {
+  key: 'c:c-1',
+  group: 'الزبائن',
+  label: 'ريم',
+  detail: '0999',
+  to: '/customers/c-1',
+};
+
 describe('the search box finds records as well as pages', () => {
   it('lists a product and a customer under the pages, and asks nothing for one letter', async () => {
     const { requests } = mockFetch({
@@ -20,104 +30,73 @@ describe('the search box finds records as well as pages', () => {
         status: 200,
         body: { items: [{ id: 'p-1', nameAr: 'شاش طبي', categoryName: 'مستهلكات' }], nextCursor: null },
       },
-      'GET /v1/customers?q=%D8%B4%D8%A7%D8%B4': {
+      [searchUrl('شاش')]: {
         status: 200,
-        body: { items: [{ id: 'c-1', name: 'مشفى الشاش', phone: '0999' }] },
+        body: {
+          items: [
+            { key: 'c:c-2', group: 'الزبائن', label: 'مشفى الشاش', detail: '0999', to: '/customers/c-2' },
+          ],
+        },
       },
     });
     const { user } = renderApp('/products');
     // The page's own shell replaces the loading shell once its code arrives: open the box after that
     await screen.findByRole('heading', { level: 1, name: 'المنتجات' });
-    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    const box = await screen.findByRole('combobox', { name: 'اسم الصفحة' });
+    await user.click((await screen.findAllByRole('button', { name: OPEN }))[0]!);
+    const box = await screen.findByRole('combobox', { name: 'ابحث في المتجر' });
     await user.type(box, 'ش');
     expect(requests.some((r) => r.path.startsWith('/v1/products?q='))).toBe(false);
+    expect(requests.some((r) => r.path.startsWith('/v1/me/search'))).toBe(false);
     await user.type(box, 'اش');
     expect(await screen.findByRole('option', { name: /شاش طبي/ })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('option', { name: /مشفى الشاش/ })).toBeInTheDocument());
   });
 });
 
-describe('the search box finds purchase invoices', () => {
-  it('lists a PUR number with its supplier and opens the purchases list on it', async () => {
+describe('the search box finds what the server finds by name or number', () => {
+  it('lists a PUR number with its supplier, an order and a rental, each under its group', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
-      'GET /v1/me': { status: 200, body: meWith(['purchases.manage']) },
-      'GET /v1/suppliers': { status: 200, body: { items: [] } },
-      'GET /v1/purchases': {
-        status: 200,
-        body: {
-          items: [
-            { id: 'u-1', number: 'PUR-000012', supplierName: 'مورد الشفاء', reference: null },
-            { id: 'u-2', number: 'PUR-000013', supplierName: 'مورد آخر', reference: 'ABC' },
-          ],
-          baseCurrency: 'SYP',
-        },
-      },
-      'GET /v1/inventory/recall?batchNo=PUR-000012': { status: 200, body: { batches: [] } },
-    });
-    const { user } = renderApp('/products');
-    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    await user.type(await screen.findByRole('combobox', { name: 'اسم الصفحة' }), 'PUR-000012');
-    const hit = await screen.findByRole('option', { name: /PUR-000012/ });
-    expect(hit).toHaveTextContent('مورد الشفاء');
-    expect(screen.queryByRole('option', { name: /PUR-000013/ })).not.toBeInTheDocument();
-  });
-});
-
-describe('the search box finds online orders, rentals and cheques', () => {
-  it('lists each by its number under its own group', async () => {
-    mockFetch({
-      'POST /v1/auth/refresh': signedInRefresh,
-      'GET /v1/me': { status: 200, body: meWith(['customers.view']) },
-      'GET /v1/customers?q=11': { status: 200, body: { items: [] } },
-      'GET /v1/online-orders': {
-        status: 200,
-        body: { items: [{ id: 'o-1', number: 'ONL-1100', customerName: 'ريم', phone: '0999' }] },
-      },
-      'GET /v1/rentals?status=all': {
-        status: 200,
-        body: { items: [{ id: 'r-1', number: 'RNT-1101', item: 'كرسي', customerName: 'هدى' }] },
-      },
-      'GET /v1/cheques': {
+      'GET /v1/me': { status: 200, body: meWith(['purchases.manage', 'customers.view']) },
+      [searchUrl('11')]: {
         status: 200,
         body: {
           items: [
             {
-              sourceType: 'invoice',
-              sourceId: 'i-1',
-              paymentNo: 1,
-              documentNumber: 'INV-1',
-              reference: 'CH-1102',
-              customerName: 'سامر',
+              key: 'u:u-1',
+              group: 'فواتير الشراء',
+              label: 'PUR-000011',
+              detail: 'مورد الشفاء',
+              to: '/purchases?q=PUR-000011',
             },
+            {
+              key: 'o:o-1',
+              group: 'طلبات المتجر الإلكتروني',
+              label: 'ONL-1100',
+              detail: 'ريم',
+              to: '/online-store',
+            },
+            { key: 'r:r-1', group: 'التأجير', label: 'RNT-1101', detail: 'كرسي · هدى', to: '/rentals' },
           ],
         },
       },
+      'GET /v1/cheques': { status: 200, body: { items: [] } },
+      'GET /v1/inventory/recall?batchNo=11': { status: 200, body: { batches: [] } },
     });
     const { user } = renderApp('/products');
-    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    await user.type(await screen.findByRole('combobox', { name: 'اسم الصفحة' }), '11');
+    await user.click((await screen.findAllByRole('button', { name: OPEN }))[0]!);
+    await user.type(await screen.findByRole('combobox', { name: 'ابحث في المتجر' }), '11');
+    expect(await screen.findByRole('option', { name: /PUR-000011/ })).toHaveTextContent('مورد الشفاء');
     expect(await screen.findByRole('option', { name: /ONL-1100/ })).toHaveTextContent('ريم');
     expect(await screen.findByRole('option', { name: /RNT-1101/ })).toHaveTextContent('كرسي');
-    expect(await screen.findByRole('option', { name: /CH-1102/ })).toHaveTextContent('سامر');
+    expect(await screen.findByText('ONL-1100')).toHaveAttribute('dir', 'ltr');
   });
-});
 
-describe('the search box keeps numbers and dates readable in Arabic', () => {
-  it('draws phones and codes left to right and writes a cheque date in words', async () => {
+  it('finds a cheque by its reference and writes its date in words', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': { status: 200, body: meWith(['customers.view']) },
-      'GET /v1/customers?q=11': {
-        status: 200,
-        body: { items: [{ id: 'c-1', name: 'ريم', phone: '+963944555222' }] },
-      },
-      'GET /v1/online-orders': {
-        status: 200,
-        body: { items: [{ id: 'o-1', number: 'ONL-1100', customerName: 'ريم', phone: '0999' }] },
-      },
-      'GET /v1/rentals?status=all': { status: 200, body: { items: [] } },
+      [searchUrl('11')]: { status: 200, body: { items: [] } },
       'GET /v1/cheques': {
         status: 200,
         body: {
@@ -135,11 +114,8 @@ describe('the search box keeps numbers and dates readable in Arabic', () => {
       },
     });
     const { user } = renderApp('/products');
-    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    await user.type(await screen.findByRole('combobox', { name: 'اسم الصفحة' }), '11');
-    const phone = await screen.findByText('+963944555222');
-    expect(phone.closest('bdi')).toHaveAttribute('dir', 'ltr');
-    expect(await screen.findByText('ONL-1100')).toHaveAttribute('dir', 'ltr');
+    await user.click((await screen.findAllByRole('button', { name: OPEN }))[0]!);
+    await user.type(await screen.findByRole('combobox', { name: 'ابحث في المتجر' }), '11');
     const cheque = await screen.findByRole('option', { name: /بنك سورية/ });
     expect(cheque).toHaveTextContent('1 كانون الأول 2026');
     expect(cheque).not.toHaveTextContent('2026-12-01');
@@ -147,41 +123,45 @@ describe('the search box keeps numbers and dates readable in Arabic', () => {
 });
 
 describe('the search box is quick', () => {
-  it('shows a record as soon as its own request answers, and asks each whole list once', async () => {
-    let finishOrders: (reply: MockReply) => void = () => {};
-    const { requestsTo } = mockFetch({
+  it('opens without downloading any list, and shows a record as soon as the server answers', async () => {
+    const { requests } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
-      'GET /v1/me': { status: 200, body: meWith(['customers.view']) },
-      'GET /v1/customers?q=%D8%B1%D9%8A': {
-        status: 200,
-        body: { items: [{ id: 'c-1', name: 'ريم', phone: '0999' }] },
-      },
-      'GET /v1/customers?q=%D8%B1%D9%8A%D9%85': {
-        status: 200,
-        body: { items: [{ id: 'c-1', name: 'ريم', phone: '0999' }] },
-      },
-      // The slowest list has not answered yet
-      'GET /v1/online-orders': () =>
-        new Promise<MockReply>((resolve) => {
-          finishOrders = resolve;
-        }),
-      'GET /v1/rentals?status=all': { status: 200, body: { items: [] } },
+      'GET /v1/me': { status: 200, body: meWith(['customers.view', 'purchases.manage']) },
+      [searchUrl('ري')]: { status: 200, body: { items: [customerHit] } },
+      [searchUrl('ريم')]: { status: 200, body: { items: [customerHit] } },
       'GET /v1/cheques': { status: 200, body: { items: [] } },
     });
     const { user } = renderApp('/products');
     await screen.findByRole('heading', { level: 1, name: 'المنتجات' });
-    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    const box = await screen.findByRole('combobox', { name: 'اسم الصفحة' });
+    await user.click((await screen.findAllByRole('button', { name: OPEN }))[0]!);
+    const box = await screen.findByRole('combobox', { name: 'ابحث في المتجر' });
+    // Opening the box fetched none of the lists the old search downloaded whole
+    for (const list of [
+      '/v1/suppliers',
+      '/v1/purchases',
+      '/v1/online-orders',
+      '/v1/rentals',
+      '/v1/cheques',
+    ]) {
+      expect(requests.some((r) => r.path === list)).toBe(false);
+    }
     await user.type(box, 'ري');
-
-    // The customer shows while the orders list is still on its way
     expect(await screen.findByRole('option', { name: /ريم/ })).toBeInTheDocument();
-    finishOrders({ status: 200, body: { items: [] } });
     await user.type(box, 'م');
     await screen.findByRole('option', { name: /ريم/ });
-    // One more letter did not fetch the whole lists again
-    expect(requestsTo('GET', '/v1/online-orders')).toHaveLength(1);
-    expect(requestsTo('GET', '/v1/rentals?status=all')).toHaveLength(1);
+  });
+
+  it('offers a cashier no customer or product tabs', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: meWith(['sale.create']) },
+    });
+    const { user } = renderApp('/');
+    await user.click((await screen.findAllByRole('button', { name: OPEN }))[0]!);
+    await screen.findByRole('combobox', { name: 'ابحث في المتجر' });
+    expect(screen.queryByRole('button', { name: 'زبائن' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'منتجات' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'صفحات' })).toBeInTheDocument();
   });
 });
 

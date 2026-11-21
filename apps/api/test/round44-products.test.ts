@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ImportResponse, ProductDetail, ProductListResponse } from '@serva/core';
 import { ManualClock } from '../src/clock';
 import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
-import { bearer, testStore, type TestStore } from './staff';
+import { bearer, staffUser, testStore, type TestStore } from './staff';
 
 /** Round 44, products: the floor price, the kind of a stocked product, the list's totals and search, the import's repeated names */
 
@@ -170,5 +170,88 @@ describe('stock filter, sort, opening stock and cost', () => {
     expect((await open()).statusCode).toBe(409);
     const detail = (await call('GET', `/v1/products/${p.id}`)).json<ProductDetail>();
     expect(detail.variants[0]!.stock[0]!.qty).toBe(10_000);
+  });
+
+  it('two simultaneous openings of one product post once', async () => {
+    const p = (await make()).json<ProductDetail>();
+    const v = p.variants[0]!;
+    const open = () =>
+      call('POST', `/v1/products/${p.id}/opening-stock`, {
+        date: '2026-10-30',
+        branchId: s.branchId,
+        lines: [{ variantId: v.id, qty: 5_000, unitCostMinor: 1_000_000 }],
+      });
+    const codes = (await Promise.all([open(), open()])).map((r) => r.statusCode).sort();
+    expect(codes).toEqual([200, 409]);
+    const detail = (await call('GET', `/v1/products/${p.id}`)).json<ProductDetail>();
+    expect(detail.variants[0]!.stock[0]!.qty).toBe(5_000);
+  });
+});
+
+describe('round 48: a plain import row, the closed period, the accountant', () => {
+  it('refuses a row with no barcode and no size whose name a product already has', async () => {
+    expect((await make({ nameAr: 'شاي' })).statusCode).toBe(201);
+    const res = await call('POST', '/v1/import', {
+      type: 'products',
+      mode: 'commit',
+      existing: 'update',
+      date: '2026-10-30',
+      rows: [{ line: 2, values: { name: 'شاي', price: '9000' } }],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const row = res.json<ImportResponse>().results[0]!;
+    expect(row.status).toBe('error');
+    expect(JSON.stringify(row)).toContain('يوجد منتج بهذا الاسم');
+    const list = (await call('GET', '/v1/products')).json<ProductListResponse>();
+    expect(list.items).toHaveLength(1);
+    expect(list.items[0]!.price?.minMinor).toBe(5_000_000);
+  });
+
+  it('refuses an opening quantity dated inside a closed period', async () => {
+    const p = (await make()).json<ProductDetail>();
+    const closed = await call('POST', '/v1/period-close/close', { through: '2026-10-25' });
+    expect(closed.statusCode, closed.body).toBe(200);
+    const res = await call('POST', `/v1/products/${p.id}/opening-stock`, {
+      date: '2026-10-20',
+      branchId: s.branchId,
+      lines: [{ variantId: p.variants[0]!.id, qty: 1_000, unitCostMinor: 100_000 }],
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('period_closed');
+  });
+
+  it('lets the accountant read the list and the card, and never write', async () => {
+    const p = (await make()).json<ProductDetail>();
+    const acc = await staffUser(app, s, 'accountant', '0922222222');
+    const h = bearer(acc.accessToken);
+    expect((await app.inject({ method: 'GET', url: '/v1/products', headers: h })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/v1/products/${p.id}`, headers: h })).statusCode).toBe(
+      200,
+    );
+    const write = await app.inject({
+      method: 'PATCH',
+      url: `/v1/products/${p.id}`,
+      headers: h,
+      payload: { version: p.version, nameAr: 'غير' },
+    });
+    expect(write.statusCode).toBe(403);
+  });
+
+  it('adds the unit, wholesale price and average cost to the list for the export', async () => {
+    const p = (await make({}, { wholesalePriceMinor: 4_000_000 })).json<ProductDetail>();
+    const open = await call('POST', `/v1/products/${p.id}/opening-stock`, {
+      date: '2026-10-30',
+      branchId: s.branchId,
+      lines: [{ variantId: p.variants[0]!.id, qty: 2_000, unitCostMinor: 3_000_000 }],
+    });
+    expect(open.statusCode, open.body).toBe(200);
+    const plain = (await call('GET', '/v1/products')).json<ProductListResponse>();
+    expect(plain.items[0]!.costMinor).toBeUndefined();
+    const more = (await call('GET', '/v1/products?detail=1')).json<ProductListResponse>().items[0]!;
+    expect(more).toMatchObject({
+      wholesale: { minMinor: 4_000_000, maxMinor: 4_000_000 },
+      costMinor: 3_000_000,
+    });
+    expect(more.unitName).toBeTruthy();
   });
 });

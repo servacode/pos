@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CurrencyCode, ProductCostsResponse, ProductDetail } from '@serva/core';
 import { Alert, Button, MoneyField, NumberField, Select, StockIcon } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
@@ -36,6 +36,7 @@ export function CostStockSection({ product, onPosted }: { product: ProductDetail
   const [qty, setQty] = useState<Record<string, string>>({});
   const [unitCost, setUnitCost] = useState<Record<string, number | null>>({});
   const [busy, setBusy] = useState(false);
+  const posting = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
@@ -57,6 +58,9 @@ export function CostStockSection({ product, onPosted }: { product: ProductDetail
   const noCost = lines.some((l) => l.unitCostMinor === 0);
 
   async function post() {
+    // A second click before the first answer arrives must not send a second posting
+    if (posting.current) return;
+    posting.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -76,6 +80,7 @@ export function CostStockSection({ product, onPosted }: { product: ProductDetail
           : errorMessage(caught),
       );
     } finally {
+      posting.current = false;
       setBusy(false);
     }
   }

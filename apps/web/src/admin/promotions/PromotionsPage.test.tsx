@@ -99,6 +99,9 @@ describe('«العروض»', () => {
     );
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
     await user.click(within(list).getByRole('button', { name: 'أوقف' }));
+    // A stopped offer leaves the live list at once, with a sentence saying where it went
+    expect(await screen.findByText(/أُوقف «خصم الألبان»/)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /أظهر المتوقفة والمنتهية \(1\)/ }));
     expect(await within(list).findByText('متوقف')).toBeInTheDocument();
     // Only the stop is sent (not the whole offer), so an old row can always be stopped
     expect(requestsTo('POST', '/v1/promotions/p-1/archive').at(-1)?.body).toEqual({

@@ -272,7 +272,7 @@ export function ProfileForm({
       setSaved(true);
     },
   });
-  const { formRef, values, setValue, errors, formError, submitting, handleSubmit } = form;
+  const { formRef, values, setValue, validateField, errors, formError, submitting, handleSubmit } = form;
 
   return (
     <SettingsCard
@@ -350,6 +350,7 @@ export function ProfileForm({
               inputClassName="num"
               value={values.phone}
               onChange={(e) => setValue('phone', e.target.value)}
+              onBlur={() => validateField('phone')}
               error={errors.phone}
             />
           </div>
@@ -366,6 +367,7 @@ export function ProfileForm({
               label="الرقم الضريبي (إن وُجد)"
               value={values.taxNumber}
               onChange={(e) => setValue('taxNumber', e.target.value)}
+              onBlur={() => validateField('taxNumber')}
               error={errors.taxNumber}
             />
           </div>
@@ -379,7 +381,14 @@ export function ProfileForm({
           />
         </div>
         <div className="lg:sticky lg:top-32 lg:self-start">
-          <ReceiptPreview values={values} />
+          <ReceiptPreview
+            // A phone or tax number the form refuses is not drawn on the receipt
+            values={{
+              ...values,
+              phone: errors.phone ? '' : values.phone,
+              taxNumber: errors.taxNumber ? '' : values.taxNumber,
+            }}
+          />
         </div>
       </div>
     </SettingsCard>

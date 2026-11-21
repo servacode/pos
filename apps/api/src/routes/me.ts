@@ -5,6 +5,7 @@ import { unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
 import { loadHomeSummary } from '../services/home';
 import { loadMe } from '../services/me';
+import { searchRecords } from '../services/record-search';
 import { setMyPin } from '../services/staff';
 import { parseBody } from './validation';
 
@@ -18,6 +19,13 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/me/home-summary', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return loadHomeSummary(app.db, request.auth, app.clock.now());
+  });
+
+  // The top bar's search: a few suppliers, purchase invoices, returns, online orders, rentals and claims by what was typed
+  app.get('/v1/me/search', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const q = (request.query as { q?: unknown }).q;
+    return { items: await searchRecords(app.db, request.auth, typeof q === 'string' ? q.slice(0, 120) : '') };
   });
 
   // «رمز الدخول للكاشير» (packages/core › contracts/staff.ts): 204, no body.

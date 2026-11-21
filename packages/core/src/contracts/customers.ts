@@ -88,6 +88,12 @@ export const customerInput = z.object({
   lat: z.number().min(-90).max(90).nullable().optional(),
   lng: z.number().min(-180).max(180).nullable().optional(),
   archived: z.boolean().optional(),
+  /** «المجموعة» (customer_groups); null clears it */
+  groupId: uuidSchema.nullable().optional(),
+  /** Birthday (YYYY-MM-DD; the year may be any); null clears it */
+  birthDate: isoDateSchema.nullable().optional(),
+  /** Another customer has this phone and the owner chose to save anyway */
+  confirmDuplicate: z.boolean().optional(),
 });
 export type CustomerInput = z.output<typeof customerInput>;
 
@@ -110,6 +116,13 @@ export const customerListQuery = z.object({
   cursor: z.string().max(64).optional(),
   /** Only those who bought before and not since this day: «لم يزر منذ 90 يوماً» */
   lastBefore: isoDateSchema.optional(),
+  /** Order: balance (default, the most owing first), name, last purchase or spend; `dir` flips it */
+  sort: z.enum(['balance', 'name', 'last', 'spent']).optional(),
+  dir: z.enum(['asc', 'desc']).optional(),
+  /** Only customers of one group */
+  groupId: uuidSchema.optional(),
+  /** Only customers whose birthday is in this month (1-12) */
+  birthMonth: z.coerce.number().int().min(1).max(12).optional(),
   /** With `limit`: name, phone and balance only; the last purchase, spend and size are left out */
   lite: z
     .enum(['true', 'false'])
@@ -163,6 +176,11 @@ export interface CustomerListItem {
   spentMinor?: number;
   /** The list only: the size they bought most (colours are not sizes); null when none */
   favouriteSize?: string | null;
+  /** Round 48: the group and its discount (hundredths of a percent), the birthday */
+  groupId?: string | null;
+  groupName?: string | null;
+  groupDiscountBps?: number | null;
+  birthDate?: string | null;
 }
 
 export interface CustomerListResponse {
@@ -251,6 +269,8 @@ export type CustomerPaymentInput = z.output<typeof customerPaymentInput>;
 export const customerOpeningDebtInput = z.object({
   amountMinor: positiveMinorSchema.max(1_000_000_000_000, 'المبلغ كبير جداً'),
   date: isoDateSchema.optional(),
+  /** Sent again after a lost answer, it posts once */
+  id: uuidSchema.optional(),
 });
 export type CustomerOpeningDebtInput = z.output<typeof customerOpeningDebtInput>;
 
@@ -328,12 +348,21 @@ export interface CustomerPurchases {
  */
 export const voucherListQuery = z.object({
   status: z.enum(['open', 'all']).optional(),
+  /** Gift, exchange or deposit only */
+  kind: z.enum(['gift', 'exchange', 'deposit']).optional(),
+  /** A code, or part of it */
+  q: z.string().trim().max(40).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   cursor: z.string().max(64).optional(),
 });
 
 export interface VoucherListRow {
   code: string;
+  /** Round 48: the day after which it is not honoured, and when the owner voided it */
+  expiresOn?: string | null;
+  voidedAt?: string | null;
+  /** open, used (nothing left), expired or void */
+  state?: 'open' | 'used' | 'expired' | 'void';
   /** exchange, gift or deposit */
   kind: string;
   currency: CurrencyCode;
@@ -348,4 +377,40 @@ export interface VoucherList {
   nextCursor: string | null;
   /** What all open vouchers still hold, per currency */
   outstanding: { currency: CurrencyCode; amountMinor: number; count: number }[];
+}
+
+/**
+ *   PUT /v1/vouchers/{code}   voucherUpdateInput  (customers.manage): the expiry day, or void it
+ */
+export const voucherUpdateInput = z.object({
+  /** The last day it is honoured; null: never expires */
+  expiresOn: isoDateSchema.nullable().optional(),
+  /** Cancel it: nothing left to spend. The reason is kept in the log. */
+  void: z.boolean().optional(),
+  reason: shortTextSchema(120).nullable().optional(),
+});
+export type VoucherUpdateInput = z.output<typeof voucherUpdateInput>;
+
+// ─── Customer groups (a name and a discount) ───────────────────────────────────
+
+/**
+ *   GET  /v1/customer-groups        CustomerGroup[]   (customers.view)
+ *   POST /v1/customer-groups        customerGroupInput (customers.manage)
+ *   PUT  /v1/customer-groups/{id}   customerGroupInput (customers.manage; `archived` hides it)
+ */
+export const customerGroupInput = z.object({
+  name: z.string('اسم المجموعة مطلوب').trim().min(2, 'اكتب اسم المجموعة').max(60, 'الاسم طويل'),
+  /** The discount in hundredths of a percent: 500 is 5% */
+  discountBps: z.number().int().min(0, 'الخصم لا يقل عن صفر').max(10000, 'الخصم لا يزيد على 100%'),
+  archived: z.boolean().optional(),
+});
+export type CustomerGroupInput = z.output<typeof customerGroupInput>;
+
+export interface CustomerGroup {
+  id: string;
+  name: string;
+  discountBps: number;
+  archived: boolean;
+  /** How many customers are in it */
+  customers: number;
 }

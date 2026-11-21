@@ -25,10 +25,26 @@ export function useUnsavedGuard(active: boolean): void {
         event.stopPropagation();
       }
     };
+    // Browser Back/Forward: one extra entry for this very page sits in front, so the first Back lands
+    // on it (the page stays) and asks; «stay» puts the entry back, «leave» goes one further back.
+    const here = window.location.href;
+    window.history.pushState(window.history.state, '', here);
+    let leaving = false;
+    const onPop = () => {
+      if (leaving) return;
+      if (window.confirm(UNSAVED_TEXT)) {
+        leaving = true;
+        window.history.back();
+      } else {
+        window.history.pushState(window.history.state, '', here);
+      }
+    };
     window.addEventListener('beforeunload', beforeUnload);
+    window.addEventListener('popstate', onPop);
     document.addEventListener('click', onClick, true);
     return () => {
       window.removeEventListener('beforeunload', beforeUnload);
+      window.removeEventListener('popstate', onPop);
       document.removeEventListener('click', onClick, true);
     };
   }, [active]);

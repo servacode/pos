@@ -213,6 +213,7 @@ function TreeGuides({ row }: { row: TreeRow }) {
 function CategoryRow({
   row,
   first,
+  maxCount,
   canManage,
   busy,
   onEdit,
@@ -221,6 +222,8 @@ function CategoryRow({
 }: {
   row: TreeRow;
   first: boolean;
+  /** The biggest product count among the rows: the bar of each row is its share of it */
+  maxCount: number;
   canManage: boolean;
   busy: boolean;
   onEdit: () => void;
@@ -251,7 +254,8 @@ function CategoryRow({
         )}
         style={{ marginInlineStart: `${depth * TILE_STEP}rem` }}
       >
-        <CategoriesIcon size={16} />
+        {/* The first letter of the name: a row is found by its own mark, not by ten identical icons */}
+        <span className="text-sm font-bold">{[...category.name][0]}</span>
       </span>
       <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
         <Link
@@ -265,6 +269,17 @@ function CategoryRow({
         </Link>
         {archived ? <Badge>مؤرشف</Badge> : null}
       </span>
+      {category.productCount > 0 ? (
+        <span
+          aria-hidden="true"
+          className="hidden h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-surface-muted sm:block"
+        >
+          <span
+            className="block h-full rounded-full bg-brand"
+            style={{ width: `${Math.max(6, Math.round((category.productCount / maxCount) * 100))}%` }}
+          />
+        </span>
+      ) : null}
       <Badge dot={false}>
         {category.productCount === 0 ? (
           'لا منتجات'
@@ -444,6 +459,7 @@ function CategoriesContent() {
                 key={row.category.id}
                 row={row}
                 first={index === 0}
+                maxCount={Math.max(1, ...rows.map((r) => r.category.productCount))}
                 canManage={canManage}
                 busy={busyId === row.category.id}
                 onEdit={() => setEditing({ mode: 'edit', category: row.category })}
