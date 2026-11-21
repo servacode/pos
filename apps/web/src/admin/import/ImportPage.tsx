@@ -17,7 +17,6 @@ import {
   Button,
   Card,
   DataTable,
-  EmptyState,
   PackageOpenIcon,
   ProgressBar,
   SegmentedControl,
@@ -26,6 +25,7 @@ import {
   type BadgeTone,
   type DataColumn,
 } from '@serva/ui';
+import { DropZone, EmptyState } from '../products/shared';
 import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
@@ -431,22 +431,15 @@ function Import() {
               options={allowed.map((t) => ({ value: t, label: IMPORT_TYPE_LABELS[t] }))}
               onValueChange={(t) => reset(t)}
             />
-            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-card border border-dashed border-line-control/60 px-6 py-10 text-center hover:bg-surface-muted">
-              <span className="font-semibold text-ink">اختر ملف إكسل أو ملفاً نصياً مفصولاً بفواصل</span>
-              <span className="text-sm text-ink-muted">حتى 15 ميغابايت و20 ألف صف</span>
-              <input
-                type="file"
-                className="sr-only"
-                accept=".xlsx,.csv,.tsv,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                aria-label="ملف الاستيراد"
-                disabled={reading}
-                onChange={(e) => {
-                  void onFile(e.target.files?.[0]);
-                  e.target.value = '';
-                }}
-              />
-              {reading ? <span className="text-sm text-ink-muted">نقرأ الملف…</span> : null}
-            </label>
+            <DropZone
+              title="اختر ملف إكسل أو ملفاً نصياً مفصولاً بفواصل، أو اسحبه إلى هنا"
+              hint="حتى 15 ميغابايت و20 ألف صف"
+              accept=".xlsx,.csv,.tsv,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              ariaLabel="ملف الاستيراد"
+              disabled={reading}
+              busyText={reading ? 'نقرأ الملف…' : null}
+              onFiles={(files) => void onFile(files[0])}
+            />
             {program ? (
               <ExportSteps
                 program={program}

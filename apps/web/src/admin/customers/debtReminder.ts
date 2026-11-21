@@ -16,3 +16,17 @@ export function debtReminderLink(
   const text = `السلام عليكم ${v.name}، نذكّركم بأن رصيدكم المستحق لدى ${v.store} ${amount}. نرجو التسديد في أقرب وقت، وشكراً لثقتكم.`;
   return `https://wa.me/${to}?text=${encodeURIComponent(text)}`;
 }
+
+/**
+ * «عيد ميلاد سعيد» on WhatsApp: the chat with the customer opened with a short greeting from the shop.
+ * Null when the customer has no usable phone.
+ */
+export function birthdayLink(
+  phone: string | null | undefined,
+  v: { name: string; store: string },
+): string | null {
+  const to = whatsappAddress(phone);
+  if (!to) return null;
+  const text = `كل عام وأنتم بخير ${v.name}، عيد ميلاد سعيد! يتمنى لكم فريق ${v.store} عاماً مليئاً بالفرح، ويسعدنا أن نراكم دائماً.`;
+  return `https://wa.me/${to}?text=${encodeURIComponent(text)}`;
+}

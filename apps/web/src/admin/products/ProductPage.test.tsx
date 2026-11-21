@@ -200,13 +200,29 @@ describe('a new product', () => {
     expect(screen.getByLabelText('الضريبة')).toHaveValue(twin.id);
   });
 
+  it('says it next to the field after a refused minus, and does not swallow the keys that follow', async () => {
+    const { user } = openCard('/products/new');
+    await screen.findByLabelText('اسم المنتج');
+    const price = screen.getByLabelText('سعر البيع');
+    await user.type(price, '-');
+    const hint = await screen.findByRole('status');
+    expect(hint).toHaveTextContent('لا تقبل رقماً سالباً');
+    // The words are fixed under the field, inside the screen at any width, not at the top of the form
+    expect(hint).toHaveClass('fixed');
+    // The owner starts over a moment later: the digits go in, nothing is frozen
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await user.type(price, '2500');
+    expect((price as HTMLInputElement).value.replace(/[,٬]/g, '')).toBe('2500');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
   it('drops the digits typed after a refused minus: «-5» does not become 5', async () => {
     const { user } = openCard('/products/new');
     await screen.findByLabelText('اسم المنتج');
     await user.type(screen.getByLabelText('سعر البيع'), '-5');
     expect(screen.getByLabelText('سعر البيع')).toHaveValue('');
     expect(await screen.findByText(/لا تقبل رقماً سالباً/)).toBeInTheDocument();
-    // a deletion lifts the freeze: the next number goes in
+    // a later number goes in
     await user.type(screen.getByLabelText('سعر البيع'), '{Backspace}7');
     expect(screen.getByLabelText('سعر البيع')).toHaveValue('7');
   });

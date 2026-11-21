@@ -9,13 +9,13 @@ import {
   Card,
   DataTable,
   Dialog,
-  EmptyState,
   PercentIcon,
   Select,
   Switch,
   TextField,
   type DataColumn,
 } from '@serva/ui';
+import { EmptyState } from '../products/shared';
 import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { ReportScreen } from '../reports/parts';

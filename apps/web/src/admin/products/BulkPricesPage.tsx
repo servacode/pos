@@ -7,7 +7,6 @@ import {
   Alert,
   Button,
   Dialog,
-  EmptyState,
   PercentIcon,
   PrintIcon,
   SegmentedControl,
@@ -22,6 +21,7 @@ import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
 import { listCategories } from '../catalog/api';
 import { ButtonLink, PriceModes } from './parts';
+import { EmptyState } from './shared';
 
 type Item = BulkPriceResult['items'][number];
 /** A line of the preview: one piece, or a whole model whose pieces all change the same way */
@@ -449,7 +449,7 @@ function BulkPrices() {
             open
             onOpenChange={(open) => !open && setConfirming(false)}
             title="تأكيد تغيير الأسعار"
-            description={`ستتغيّر أسعار ${countNoun(changed.length, COUNT_NOUNS.piece)}${rule ? ` (${rule})` : ''} وتصل إلى كل أجهزة الكاشير. وبعد التطبيق تجد «تراجع عن هذا التغيير» هنا وفي سجل الأسعار، ويُترك ما تعدّل بعده.`}
+            description={`ستتغيّر أسعار ${countNoun(changed.length, COUNT_NOUNS.piece, String(changed.length), true)}${rule ? ` (${rule})` : ''} وتصل إلى كل أجهزة الكاشير. وبعد التطبيق تجد «تراجع عن هذا التغيير» هنا وفي سجل الأسعار، ويُترك ما تعدّل بعده.`}
             actions={
               <>
                 <Button variant="secondary" onClick={() => setConfirming(false)}>

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import type { CustomerListItem, RouteDetail } from '@serva/core';
+import type { CustomerListItem, CustomerListResponse, RouteDetail } from '@serva/core';
 import {
   AddIcon,
   Alert,
@@ -39,6 +39,8 @@ export function RoutePage() {
   const { id = '' } = useParams();
   const [route, setRoute] = useState<RouteDetail | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const entriesRef = useRef<Entry[]>([]);
+  entriesRef.current = entries;
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -46,9 +48,8 @@ export function RoutePage() {
   const [q, setQ] = useState('');
   /** The search answers, from the server (30 at a time): the store may have thousands of customers */
   const [found, setFound] = useState<CustomerListItem[] | null>(null);
-  /** How many customers the route's region has (the server counts; they are fetched only when «أضف كل» is pressed) */
-  const [regionCount, setRegionCount] = useState(0);
-  const [addingRegion, setAddingRegion] = useState(false);
+  /** The customers of the route's region who can be visited (not archived, not rejected), page by page from the server */
+  const [regionList, setRegionList] = useState<CustomerListItem[]>([]);
   const regions = useLoad(listRegions);
   const reps = useLoad(listReps);
 
@@ -66,13 +67,26 @@ export function RoutePage() {
   const regionId = route?.regionId ?? null;
   useEffect(() => {
     if (!regionId) {
-      setRegionCount(0);
+      setRegionList([]);
       return;
     }
     let alive = true;
-    listCustomerPage({ regionId, limit: 1, sort: 'name', dir: 'asc' })
-      .then((r) => alive && setRegionCount(r.totalCount ?? r.items.length))
-      .catch(() => alive && setRegionCount(0));
+    void (async () => {
+      const all: CustomerListItem[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: CustomerListResponse = await listCustomerPage({
+          regionId,
+          limit: 200,
+          sort: 'name',
+          dir: 'asc',
+          cursor,
+        });
+        all.push(...page.items);
+        cursor = page.nextCursor ?? null;
+      } while (cursor && alive);
+      if (alive) setRegionList(all.filter((c) => !c.archived && c.approvalStatus !== 'rejected'));
+    })().catch(() => alive && setRegionList([]));
     return () => {
       alive = false;
     };
@@ -82,7 +96,13 @@ export function RoutePage() {
     let alive = true;
     const timer = setTimeout(
       () => {
-        listCustomerPage({ q: q.trim(), limit: 50, sort: 'name', dir: 'asc' })
+        // With nothing typed the first names are the route's own: ask for that many more so the list is never empty
+        listCustomerPage({
+          q: q.trim(),
+          limit: Math.min(200, 50 + (q.trim() ? 0 : entriesRef.current.length)),
+          sort: 'name',
+          dir: 'asc',
+        })
           .then(
             (r) => alive && setFound(r.items.filter((c) => !c.archived && c.approvalStatus !== 'rejected')),
           )
@@ -94,7 +114,7 @@ export function RoutePage() {
       alive = false;
       clearTimeout(timer);
     };
-  }, [q]);
+  }, [q, route?.id]);
 
   const inRoute = useMemo(() => new Set(entries.map((e) => e.customerId)), [entries]);
   const changed =
@@ -107,25 +127,13 @@ export function RoutePage() {
     [found, inRoute],
   );
 
-  /** Every customer of the route's region, page by page (200 at most per request) */
-  async function addRegion() {
-    if (!regionId) return;
-    setAddingRegion(true);
+  const regionToAdd = useMemo(() => regionList.filter((c) => !inRoute.has(c.id)), [regionList, inRoute]);
+  const regionCount = regionToAdd.length;
+
+  /** Every visitable customer of the route's region that is not in the route yet */
+  function addRegion() {
     setError(null);
-    try {
-      const all: CustomerListItem[] = [];
-      let cursor: string | null = null;
-      do {
-        const page = await listCustomerPage({ regionId, limit: 200, sort: 'name', dir: 'asc', cursor });
-        all.push(...page.items);
-        cursor = page.nextCursor ?? null;
-      } while (cursor);
-      add(all.filter((c) => !c.archived && c.approvalStatus !== 'rejected' && !inRoute.has(c.id)));
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setAddingRegion(false);
-    }
+    add(regionToAdd);
   }
 
   const add = (list: readonly CustomerListItem[]) =>
@@ -250,12 +258,7 @@ export function RoutePage() {
               onValueChange={setQ}
             />
             {route.regionName && regionCount > 0 ? (
-              <Button
-                variant="secondary"
-                icon={<AddIcon />}
-                loading={addingRegion}
-                onClick={() => void addRegion()}
-              >
+              <Button variant="secondary" icon={<AddIcon />} onClick={addRegion}>
                 أضف كل زبائن {route.regionName} ({regionCount})
               </Button>
             ) : null}

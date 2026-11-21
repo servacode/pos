@@ -1627,6 +1627,25 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     const [row] = await ownerDb()<{ n: string }[]>`
       select count(*)::text as n from audit_logs where tenant_id = ${a.tenantId} and action = 'prices.bulk_undone'`;
     expect(row!.n).toBe('0');
+    // The same door undoes a price-list file: another store's file id answers 404 and changes nothing
+    const listed = await app.inject({
+      method: 'POST',
+      url: '/v1/prices/list/apply',
+      headers: owner(a),
+      payload: { fileName: 'idor.xlsx', changes: [{ variantId: product.variants[0]!.id, newMinor: 7777 }] },
+    });
+    expect(listed.statusCode, listed.body).toBe(200);
+    const listChangeId = listed.json<{ changeId?: string }>().changeId;
+    expect(listChangeId).toBeTruthy();
+    const other = await app.inject({
+      method: 'POST',
+      url: `/v1/prices/bulk/${listChangeId!}/undo`,
+      headers: owner(b),
+    });
+    expect(other.statusCode).toBe(404);
+    const [priced] = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from audit_logs where tenant_id = ${a.tenantId} and action = 'prices.bulk_undone'`;
+    expect(priced!.n).toBe('0');
   },
   'PUT /v1/vouchers/:code': async (app, { a, b }) => {
     await ownerDb()`
@@ -3138,6 +3157,24 @@ describe('route registry', () => {
     // The platform panel sees every store by design: it has its own sign-in instead (above)
     const withIds = registeredRoutes().filter((r) => r.includes(':') && !r.includes('/v1/platform/'));
     expect(withIds.sort()).toEqual(Object.keys(IDOR_PROBES).sort());
+  });
+
+  it('the home summary refuses another store’s branch id and leaks nothing of it', async () => {
+    const { a, b } = await twoStores();
+    const [branchB] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${b.tenantId} limit 1`;
+    expect(branchB).toBeDefined();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/me/home-summary?branchId=${branchB!.id}`,
+      headers: owner(a),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('cashMinor');
+    expect(
+      (await app.inject({ method: 'GET', url: '/v1/me/home-summary?branchId=nope', headers: owner(a) }))
+        .statusCode,
+    ).toBe(400);
   });
 
   it('IDOR probes: another store’s ids answer 404', async () => {

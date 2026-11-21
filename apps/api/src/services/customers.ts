@@ -199,12 +199,19 @@ export async function listCustomers(
                    where r.tenant_id = i.tenant_id and r.sale_id = i.id)), 0) as spent
           from invoices i where i.customer_id is not null group by i.customer_id) s on s.customer_id = c.id`
       : sql``;
-    const rows = await tx.execute<Row>(sql`
-      select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at,
+    // Balances are added up over every 1200 line only when the order or the filter needs all of them
+    // (balance high first, «من عليه دين»). Any other order picks the page first and reads the balances
+    // of those rows alone, by the index (tenant, account, customer) that already holds debit and credit.
+    const needAllBalances = sort === 'balance' || query.owing === true;
+    const cols = sql`c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at,
              c.kind, c.contact_name, c.contact_phone, c.region_id, g.name as region_name,
              c.approval_status, c.lat, c.lng, c.group_id, cg.name as group_name,
-             cg.discount_bps as group_discount_bps, c.birth_date::text as birth_date,
-             ${balance}::text as balance${exporting ? sql`, s.last::text as last, coalesce(s.spent, 0)::text as spent` : sql``}
+             cg.discount_bps as group_discount_bps, c.birth_date::text as birth_date`;
+    const soldCols = exporting ? sql`, s.last::text as last, coalesce(s.spent, 0)::text as spent` : sql``;
+    const rows = needAllBalances
+      ? await tx.execute<Row>(sql`
+      select ${cols},
+             ${balance}::text as balance${soldCols}
       from customers c
       left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
       left join customer_groups cg on cg.tenant_id = c.tenant_id and cg.id = c.group_id
@@ -212,7 +219,24 @@ export async function listCustomers(
       ${soldJoin}
       where ${filter} and ${search} and ${owingWhere}
       order by ${order}
-      ${cap ? sql`limit ${cap + 1} offset ${offset}` : sql``}`);
+      ${cap ? sql`limit ${cap + 1} offset ${offset}` : sql``}`)
+      : await tx.execute<Row>(sql`
+      select p.*, coalesce(bl.balance, 0)::text as balance
+      from (
+        select c.tenant_id, ${cols}${soldCols}, row_number() over (order by ${order}) as ord
+        from customers c
+        left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
+        left join customer_groups cg on cg.tenant_id = c.tenant_id and cg.id = c.group_id
+        ${soldJoin}
+        where ${filter} and ${search}
+        order by ${order}
+        ${cap ? sql`limit ${cap + 1} offset ${offset}` : sql``}) p
+      left join lateral (
+        select sum(l.debit_minor - l.credit_minor) as balance from journal_lines l
+        where l.tenant_id = p.tenant_id
+          and l.account_id = (select a.id from accounts a where a.tenant_id = p.tenant_id and a.code = '1200')
+          and l.party_type = 'customer' and l.party_id = p.id) bl on true
+      order by p.ord`);
     const hasMore = cap !== undefined && rows.length > cap;
     const page = (cap ? rows.slice(0, cap) : rows).map(item);
     const nextCursor = hasMore && cap ? encodeOffset(offset + cap) : null;

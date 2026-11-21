@@ -15,6 +15,7 @@ import { useOnline } from '../pos/useOnline';
 import { CommandPalette, type PaletteIntent } from './CommandPalette';
 import { pageOwns, type NavSection } from './nav';
 import { Notifications, type Notice } from './Notifications';
+import { BranchSelect } from './BranchSelect';
 
 export type { Notice } from './Notifications';
 
@@ -43,6 +44,7 @@ export function TopBar({
   canSell,
   notices,
   branchLabel,
+  branchChoice,
   onOpenMenu,
 }: {
   storeName: string;
@@ -56,6 +58,8 @@ export function TopBar({
   notices: Notice[] | null;
   /** The branch the data is of: the user's own branch, or «كل الفروع» for a store with several. */
   branchLabel: string | null;
+  /** A store with several branches and a person who sees them all: the filter's list and its choice. */
+  branchChoice?: { branches: { id: string; name: string }[]; value: string | null } | null;
   /** Opens the sidebar as a drawer (under 768 px). */
   onOpenMenu: () => void;
 }) {
@@ -184,7 +188,9 @@ export function TopBar({
       </button>
 
       <div className="sh-tb">
-        {branchLabel ? (
+        {branchChoice ? (
+          <BranchSelect branches={branchChoice.branches} value={branchChoice.value} />
+        ) : branchLabel ? (
           <span className="sh-branch" role="group" aria-label={`الفرع: ${branchLabel}`}>
             <StoreIcon size={20} />
             <span>{branchLabel}</span>

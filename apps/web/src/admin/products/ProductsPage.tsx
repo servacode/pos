@@ -19,7 +19,6 @@ import {
   CloseIcon,
   DataTable,
   EditIcon,
-  EmptyState,
   ExpandIcon,
   IconButton,
   IconChip,
@@ -71,6 +70,7 @@ import { SlimKpis } from '../SlimKpis';
 import { negativeNote } from '../../lib/stockCounts';
 import { CategorizeDialog, type CategorizeItem } from './CategorizeDialog';
 import { ButtonLink } from './parts';
+import { EmptyState } from './shared';
 
 /** Typing pauses this long before the list is asked again. */
 export const SEARCH_DEBOUNCE_MS = 250;
@@ -1451,54 +1451,55 @@ function ProductsList() {
                 {items.map((item) => {
                   const cell = (key: string) => columns.find((c) => c.key === key)?.cell?.(item);
                   return (
-                    <li key={item.id} className="flex items-center gap-2 ps-3 pe-1">
-                      {canManage ? pickBox(item) : null}
-                      <div className="flex min-w-0 flex-1 items-center gap-3 py-2.5">
+                    <li key={item.id} className="flex flex-col gap-1 py-2.5 ps-3 pe-1">
+                      {/* Row 1: the name has the whole width; row 2: stock and category, then the price */}
+                      <div className="flex items-center gap-2">
+                        {canManage ? pickBox(item) : null}
                         <Thumb
                           item={item}
                           canAdd={canManage && !item.archivedAt}
                           sectors={me.tenant.sectors}
                         />
-                        <div className="flex min-w-0 flex-col gap-0.5">
-                          <Link
-                            to={`/products/${item.id}`}
-                            className="line-clamp-2 rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
-                          >
-                            {item.nameAr}
-                          </Link>
-                          <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted">
-                            {item.type === 'service' ? (
-                              <span>خدمة</span>
-                            ) : (
-                              <>
-                                <span
-                                  className={cn(
-                                    'shrink-0 font-semibold',
-                                    availableOf(item) === 0 && 'text-warning-ink',
-                                  )}
-                                >
-                                  {availableOf(item) === 0
-                                    ? 'نفد'
-                                    : `${formatQuantity(availableOf(item), digits)} ${countWord(availableOf(item), { one: 'قطعة', few: 'قطع' })}`}
-                                </span>
-                                {negativeWords(item, digits) ? (
-                                  <span className="shrink-0 text-danger-ink">
-                                    · {negativeWords(item, digits)}
-                                  </span>
-                                ) : null}
-                              </>
-                            )}
-                            {item.categoryName && item.type !== 'service' ? (
-                              <span className="min-w-0 truncate text-ink-subtle">{item.categoryName}</span>
-                            ) : null}
-                            {item.archivedAt || item.status === 'temporary' ? cell('status') : null}
-                          </span>
-                        </div>
+                        <Link
+                          to={`/products/${item.id}`}
+                          className="line-clamp-2 min-w-0 flex-1 rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
+                        >
+                          {item.nameAr}
+                        </Link>
+                        {canManage ? rowMenu(item) : null}
                       </div>
-                      <span className="shrink-0 text-sm font-semibold whitespace-nowrap">
-                        {cell('price')}
-                      </span>
-                      {canManage ? rowMenu(item) : null}
+                      <div className="flex items-center justify-between gap-3 ps-12">
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-ink-muted">
+                          {item.type === 'service' ? (
+                            <span>خدمة</span>
+                          ) : (
+                            <>
+                              <span
+                                className={cn(
+                                  'shrink-0 font-semibold',
+                                  availableOf(item) === 0 && 'text-warning-ink',
+                                )}
+                              >
+                                {availableOf(item) === 0
+                                  ? 'نفد'
+                                  : `${formatQuantity(availableOf(item), digits)} ${countWord(availableOf(item), { one: 'قطعة', few: 'قطع' })}`}
+                              </span>
+                              {negativeWords(item, digits) ? (
+                                <span className="shrink-0 text-danger-ink">
+                                  · {negativeWords(item, digits)}
+                                </span>
+                              ) : null}
+                            </>
+                          )}
+                          {item.categoryName && item.type !== 'service' ? (
+                            <span className="min-w-0 truncate text-ink-subtle">· {item.categoryName}</span>
+                          ) : null}
+                          {item.archivedAt || item.status === 'temporary' ? cell('status') : null}
+                        </span>
+                        <span className="shrink-0 text-sm font-semibold whitespace-nowrap">
+                          {cell('price')}
+                        </span>
+                      </div>
                     </li>
                   );
                 })}

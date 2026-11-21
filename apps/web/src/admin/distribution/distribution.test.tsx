@@ -210,7 +210,7 @@ describe('«خط السير»', () => {
       'GET /v1/regions': () => ({ status: 200, body: [region({})] }),
       'GET /v1/reps': () => ({ status: 200, body: [] }),
       // the search is the server's (50 at a time, by name), never every customer in one call
-      'GET /v1/customers?sort=name&dir=asc&limit=50': () => ({
+      'GET /v1/customers?sort=name&dir=asc&limit=52': () => ({
         status: 200,
         body: {
           items: [
@@ -228,10 +228,6 @@ describe('«خط السير»', () => {
           totalOwedMinor: 0,
           baseCurrency: 'SYP',
         },
-      }),
-      'GET /v1/customers?sort=name&dir=asc&regionId=r-1&limit=1': () => ({
-        status: 200,
-        body: { items: [], totalCount: 3, totalOwedMinor: 0, baseCurrency: 'SYP' },
       }),
       'GET /v1/customers?sort=name&dir=asc&regionId=r-1&limit=200': () => ({
         status: 200,
@@ -294,9 +290,9 @@ describe('«خط السير»', () => {
     });
   });
 
-  it('fetches the region page by page, leaves out archived ones and those already on the route', async () => {
+  it('counts and fetches only the region customers who can be visited (not archived, not on the route yet)', async () => {
     const { user, requestsTo } = open();
-    await user.click(await screen.findByRole('button', { name: /أضف كل زبائن دمشق \(3\)/ }));
+    await user.click(await screen.findByRole('button', { name: /أضف كل زبائن دمشق \((1)\)/ }));
     expect(await screen.findByText('زبائن الخط (3)')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'احفظ الترتيب' }));
     await screen.findByText('حُفظ ترتيب الزبائن.');

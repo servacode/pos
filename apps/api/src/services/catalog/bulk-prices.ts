@@ -182,7 +182,7 @@ interface Move {
 }
 
 /**
- * «تراجع» for a bulk price change: every piece still at the price that change gave it goes back to
+ * «تراجع» for a bulk price change or an applied price list (both keep their pieces the same way): every piece still at the price that change gave it goes back to
  * what it had (price, floor, struck-through price). A piece edited since is left as it is and counted.
  * A change can be undone once.
  */
@@ -196,7 +196,8 @@ export function undoBulkPrices(
     await requireCatalogManager(tx, userId);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`bulk-undo:${tenantId}`}, 0))`);
     const [row] = await tx.execute<{ data: { moves?: Move[]; mode?: string } | null }>(sql`
-      select data from audit_logs where action = 'prices.bulk_changed' and data->>'batchId' = ${changeId} limit 1`);
+      select data from audit_logs
+      where action in ('prices.bulk_changed', 'prices.list_applied') and data->>'batchId' = ${changeId} limit 1`);
     const moves = row?.data?.moves;
     if (!row || !Array.isArray(moves) || moves.some((m) => m.oldMin === undefined)) {
       throw notFound('هذا التغيير غير موجود أو قديم ولا يمكن التراجع عنه.');

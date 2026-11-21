@@ -1828,6 +1828,7 @@ export const customers = pgTable(
       columns: [t.tenantId, t.groupId],
       foreignColumns: [customerGroups.tenantId, customerGroups.id],
     }),
+    index('customers_name_idx').on(t.tenantId, t.name, t.id),
     index('customers_region_idx').on(t.tenantId, t.regionId),
     index('customers_phone_idx').on(t.tenantId, t.phone),
     index('customers_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
@@ -2823,6 +2824,8 @@ export const journalLines = pgTable(
     foreignKey({ columns: [t.tenantId, t.accountId], foreignColumns: [accounts.tenantId, accounts.id] }),
     index('journal_lines_account_idx').on(t.tenantId, t.accountId),
     index('journal_lines_shift_idx').on(t.tenantId, t.shiftId),
+    // Migration 0099 also makes this index covering: INCLUDE (debit_minor, credit_minor).
+    // drizzle-kit cannot express INCLUDE, so the columns here stay the same and the SQL carries it.
     index('journal_lines_customer_idx')
       .on(t.tenantId, t.accountId, t.partyId)
       .where(sql`${t.partyType} = 'customer'`),

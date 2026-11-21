@@ -13,7 +13,7 @@ export interface CategoryNode {
   depth: number;
 }
 
-const byOrderThenName = (a: Category, b: Category) =>
+export const byOrderThenName = (a: Category, b: Category) =>
   a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ar');
 
 /**
@@ -49,6 +49,31 @@ export function categoryTree(categories: readonly Category[]): CategoryNode[] {
     }
   }
   return out;
+}
+
+/**
+ * The ids of a category's siblings (the same parent) in display order, with the new sortOrder each
+ * must have once `id` moves one place up or down: the order is renumbered by tens so a later move
+ * has room, and only the ones that really change are returned. Empty when it cannot move.
+ */
+export function moveWithinSiblings(
+  categories: readonly Category[],
+  id: string,
+  direction: -1 | 1,
+): { id: string; sortOrder: number }[] {
+  const ids = new Set(categories.map((c) => c.id));
+  const me = categories.find((c) => c.id === id);
+  if (!me) return [];
+  const parentOf = (c: Category) => (c.parentId && ids.has(c.parentId) ? c.parentId : null);
+  const group = categories.filter((c) => parentOf(c) === parentOf(me)).sort(byOrderThenName);
+  const at = group.findIndex((c) => c.id === id);
+  const to = at + direction;
+  if (at < 0 || to < 0 || to >= group.length) return [];
+  const moved = [...group];
+  [moved[at], moved[to]] = [moved[to]!, moved[at]!];
+  return moved.flatMap((c, index) =>
+    c.sortOrder === (index + 1) * 10 ? [] : [{ id: c.id, sortOrder: (index + 1) * 10 }],
+  );
 }
 
 /** The category and everything under it: none of them can become its parent. */

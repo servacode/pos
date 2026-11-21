@@ -76,6 +76,34 @@ describe('the customers list', () => {
   });
 });
 
+describe('balances on a page sorted by name', () => {
+  it('reads the balance of the page rows alone and gives the same figures as the balance order', async () => {
+    const store = await openStore(app);
+    const a = await add(store, { name: 'أحمد' });
+    const b = await add(store, { name: 'باسل' });
+    await add(store, { name: 'جميل' });
+    await debt(store, a.id, 5_000);
+    await debt(store, b.id, 9_000);
+    await debt(store, b.id, 1_000);
+    const byName = await list(store, '?limit=2&sort=name&dir=asc');
+    expect(byName.items.map((c) => [c.name, c.balanceMinor])).toEqual([
+      ['أحمد', 5_000],
+      ['باسل', 10_000],
+    ]);
+    expect(byName.nextCursor).toBeTruthy();
+    const next = await list(store, `?limit=2&sort=name&dir=asc&cursor=${byName.nextCursor}`);
+    expect(next.items.map((c) => [c.name, c.balanceMinor])).toEqual([['جميل', 0]]);
+    // The strip (all debts) is the same whatever the order
+    expect(byName).toMatchObject({ totalOwedMinor: 15_000, owingCount: 2 });
+    const byBalance = await list(store, '?limit=3');
+    expect(byBalance.items.map((c) => [c.name, c.balanceMinor])).toEqual([
+      ['باسل', 10_000],
+      ['أحمد', 5_000],
+      ['جميل', 0],
+    ]);
+  });
+});
+
 describe('archiving from the customer page', () => {
   it('refuses a customer who owes, allows one at zero, and refuses a new opening debt on an archived one', async () => {
     const store = await openStore(app);

@@ -42,7 +42,7 @@ import { Amt, DownloadGlyph, PageTop, SalesPage, StatusPill, SxTable, type SxCol
 import { exportCustomers, listCustomerPage, listGroups, type CustomerPageQuery } from './api';
 import { customersCsv } from './csv';
 import { CustomerForm, KIND_SECTORS } from './CustomerForm';
-import { debtReminderLink } from './debtReminder';
+import { birthdayLink, debtReminderLink } from './debtReminder';
 import { Ago, BalanceCell, CheckChip, CountLine, Empty, SortHead, Who } from './parts';
 import { BulkReminder } from './BulkReminder';
 import { GroupsDialog } from './GroupsDialog';
@@ -54,7 +54,7 @@ const PAGE = 50;
 const SEARCH_MAX = 60;
 
 /** The row's «⋯»: the customer's page, a call, a WhatsApp chat, and the debt reminder with the amount. */
-function RowMenu({ customer, store }: { customer: CustomerListItem; store: string }) {
+function RowMenu({ customer, store, today }: { customer: CustomerListItem; store: string; today: string }) {
   const me = useMe();
   const label = `خيارات ${customer.name}`;
   const phone = customer.phone;
@@ -66,6 +66,11 @@ function RowMenu({ customer, store }: { customer: CustomerListItem; store: strin
         currency: me.settings.baseCurrency,
         store,
       });
+  // The birthday greeting is offered in the month of the birthday
+  const greeting =
+    customer.noMessages || !customer.birthDate || customer.birthDate.slice(5, 7) !== today.slice(5, 7)
+      ? null
+      : birthdayLink(phone, { name: customer.name, store });
   return (
     <Menu
       label={label}
@@ -114,6 +119,18 @@ function RowMenu({ customer, store }: { customer: CustomerListItem; store: strin
               ذكّره بالدين على واتساب
             </MenuItem>
           ) : null}
+          {greeting ? (
+            <MenuItem
+              icon={<SendIcon />}
+              render={({ children, ...props }) => (
+                <a href={greeting} target="_blank" rel="noreferrer" {...props}>
+                  {children}
+                </a>
+              )}
+            >
+              هنّئه بعيد ميلاده على واتساب
+            </MenuItem>
+          ) : null}
         </>
       ) : null}
     </Menu>
@@ -151,7 +168,7 @@ function CustomerCard({
       </Link>
       <span className="flex items-center gap-1 justify-self-end text-end">
         <BalanceCell customer={customer} currency={base} />
-        <RowMenu customer={customer} store={store} />
+        <RowMenu customer={customer} store={store} today={today} />
       </span>
       <span className="x">
         <span>
@@ -391,7 +408,7 @@ export function CustomersPage() {
     {
       key: 'actions',
       header: <span className="sr-only">خيارات</span>,
-      cell: (c) => <RowMenu customer={c} store={me.tenant.name} />,
+      cell: (c) => <RowMenu customer={c} store={me.tenant.name} today={today} />,
     },
   ];
 

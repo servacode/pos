@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { COUNT_NOUNS, countNoun, normalizeArabic } from '@serva/core';
 import { Alert, Button, Dialog, cn } from '@serva/ui';
 import { errorMessage } from '../../lib/api';
+import { DropZone } from './shared';
 import { resizeImage } from '../../lib/images';
 import { addProductImage, listProducts } from '../catalog/api';
 
@@ -67,8 +68,8 @@ export function BulkPhotos({
   const [busy, setBusy] = useState<'matching' | 'sending' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function pick(files: FileList | null) {
-    if (!files || files.length === 0) return;
+  async function pick(files: File[]) {
+    if (files.length === 0) return;
     setError(null);
     setBusy('matching');
     try {
@@ -140,24 +141,15 @@ export function BulkPhotos({
     >
       <div className="flex flex-col gap-4">
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <label className="flex cursor-pointer flex-col items-center gap-1 rounded-card border border-dashed border-line-control bg-surface-muted px-4 py-6 text-center text-sm text-ink-muted hover:border-brand">
-          <span className="font-semibold text-ink">
-            {busy === 'matching' ? 'نطابق الصور مع المنتجات…' : 'اختر الصور أو اسحبها إلى هنا'}
-          </span>
-          <span>يمكنك اختيار عدة صور معاً.</span>
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            aria-label="ملفات الصور"
-            className="sr-only"
-            disabled={busy !== null}
-            onChange={(event) => {
-              void pick(event.target.files);
-              event.target.value = '';
-            }}
-          />
-        </label>
+        <DropZone
+          title={busy === 'matching' ? 'نطابق الصور مع المنتجات…' : 'اختر الصور أو اسحبها إلى هنا'}
+          hint="يمكنك اختيار عدة صور معاً."
+          accept="image/*"
+          ariaLabel="ملفات الصور"
+          multiple
+          disabled={busy !== null}
+          onFiles={(files) => void pick(files)}
+        />
         {rows.length > 0 ? (
           <ul
             aria-label="الصور المختارة"

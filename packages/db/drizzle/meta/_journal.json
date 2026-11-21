@@ -687,6 +687,13 @@
       "when": 1795165972887,
       "tag": "0098_shop_free_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1795165973887,
+      "tag": "0099_customers_balance_covering",
+      "breakpoints": true
     }
   ]
 }

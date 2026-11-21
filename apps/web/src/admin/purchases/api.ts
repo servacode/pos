@@ -84,8 +84,13 @@ export const getCountSheet = (branchId?: string, categoryId?: string) => {
   const text = query.toString();
   return apiFetch<CountSheet>(`/v1/inventory/count-sheet${text ? `?${text}` : ''}`, { auth: true });
 };
-export const getProfit = (from: string, to: string) =>
-  apiFetch<ProfitReport>(`/v1/reports/profit?from=${from}&to=${to}`, { auth: true });
+export const getProfit = (from: string, to: string, branchId: string | null = null) =>
+  apiFetch<ProfitReport>(
+    `/v1/reports/profit?from=${from}&to=${to}${branchId ? `&branchId=${branchId}` : ''}`,
+    {
+      auth: true,
+    },
+  );
 
 /** Today in the browser's calendar, YYYY-MM-DD (kept for the pages that have no store at hand: prefer `storeToday`) */
 export const today = () => new Date().toLocaleDateString('en-CA');
@@ -117,10 +122,11 @@ export function moneyOf(text: string): number | null {
 }
 
 /** `GET /v1/inventory/expiry?days=` (purchases.manage): batches on the shelf ending within `days` */
-export const listExpiry = (days: number, unbatched = false) =>
-  apiFetch<ExpiryResponse>(`/v1/inventory/expiry?days=${days}${unbatched ? '&unbatched=1' : ''}`, {
-    auth: true,
-  });
+export const listExpiry = (days: number, unbatched = false, branchId: string | null = null) =>
+  apiFetch<ExpiryResponse>(
+    `/v1/inventory/expiry?days=${days}${unbatched ? '&unbatched=1' : ''}${branchId ? `&branchId=${branchId}` : ''}`,
+    { auth: true },
+  );
 
 /** `GET /v1/serials?q=` (catalog.manage): a piece by its serial number or IMEI */
 export const findSerials = (q: string) =>

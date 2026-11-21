@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import {
   barcodeCell,
@@ -262,7 +263,30 @@ export function applyPriceList(
       }
       return [{ ...piece, currency: piece.currency as CurrencyCode, oldMinor: piece.price, newMinor }];
     });
+    const batchId = randomUUID();
     if (items.length > 0) {
+      // What each piece had besides its price, so «تراجع» can put the whole row back
+      const before = await tx.execute<{ id: string; min: string | null; was: string | null }>(sql`
+        select id, min_price_minor::text as min, was_price_minor::text as was from prices
+        where id in (${sql.join(
+          items.map((i) => sql`${i.variantId}::uuid`),
+          sql`, `,
+        )})`);
+      const extras = new Map(before.map((b) => [b.id, b]));
+      const moves = items.map((i) => {
+        const e = extras.get(i.variantId);
+        const oldMin = e?.min ? Number(e.min) : null;
+        const oldWas = e?.was ? Number(e.was) : null;
+        return {
+          id: i.variantId,
+          old: i.oldMinor,
+          new: i.newMinor,
+          oldMin,
+          newMin: oldMin === null ? null : Math.min(oldMin, i.newMinor),
+          oldWas,
+          newWas: oldWas !== null && oldWas <= i.newMinor ? null : oldWas,
+        };
+      });
       const values = sql.join(
         items.map((i) => sql`(${i.variantId}::uuid, ${i.newMinor}::bigint)`),
         sql`, `,
@@ -293,7 +317,7 @@ export function applyPriceList(
             entity: 'variant',
             entityId: i.variantId,
             changes: { priceMinor: [i.oldMinor, i.newMinor] },
-            data: { source: 'price_list', productId: i.productId, fileName: input.fileName },
+            data: { source: 'price_list', productId: i.productId, fileName: input.fileName, batchId },
             ip: ctx.meta.ip,
             userAgent: ctx.meta.userAgent,
           })),
@@ -306,7 +330,13 @@ export function applyPriceList(
           userId,
           action: 'prices.list_applied',
           entity: 'price_list',
-          data: { fileName: input.fileName, pieces: items.length, skipped: ids.length - items.length },
+          data: {
+            fileName: input.fileName,
+            pieces: items.length,
+            skipped: ids.length - items.length,
+            batchId,
+            moves,
+          },
         },
         ctx.meta,
       );
@@ -315,6 +345,7 @@ export function applyPriceList(
       changed: items.length,
       skipped: ids.length - items.length,
       stale,
+      ...(items.length > 0 ? { changeId: batchId } : {}),
       items: items.map((i) => ({
         productId: i.productId,
         variantId: i.variantId,

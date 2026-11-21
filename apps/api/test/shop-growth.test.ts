@@ -679,11 +679,8 @@ describe('the price-change history', () => {
 
     const all = await history(store);
     expect(all.status).toBe(200);
-    expect(all.items.map((i) => i.source).sort()).toEqual([
-      'price_list',
-      'price_list_summary',
-      'product_edit',
-    ]);
+    // Round 54: a price list's own pieces show under one header, so it has no separate summary row
+    expect(all.items.map((i) => i.source).sort()).toEqual(['price_list', 'product_edit']);
     const editRow = all.items.find((i) => i.source === 'product_edit')!;
     expect(editRow).toMatchObject({
       productId: a.id,
@@ -699,10 +696,6 @@ describe('the price-change history', () => {
       newMinor: 700_000,
       note: 'خريف.xlsx',
     });
-    expect(all.items.find((i) => i.source === 'price_list_summary')).toMatchObject({
-      oldMinor: null,
-      note: expect.stringContaining('1 قطعة'),
-    });
 
     // One product: its own rows only
     const mine = await history(store, `?productId=${a.id}`);
@@ -711,7 +704,7 @@ describe('the price-change history', () => {
     expect((await history(store, '?to=2020-01-01')).items).toEqual([]);
     // The store's day can differ from UTC's around midnight: a day either side covers it
     const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
-    expect((await history(store, `?from=${day(-1)}&to=${day(1)}`)).items.length).toBe(3);
+    expect((await history(store, `?from=${day(-1)}&to=${day(1)}`)).items.length).toBe(2);
     expect((await history(store, '?limit=1')).items).toHaveLength(1);
     expect((await history(store, '?from=junk')).status).toBe(400);
   });

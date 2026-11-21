@@ -56,6 +56,7 @@ export function priceHistory(
             'moves', coalesce((select jsonb_agg(m) from (
                 select m from jsonb_array_elements(data->'moves') m where true ${pick} limit ${MOVES_SHOWN}) x), '[]'::jsonb),
             'movesTotal', (select count(*) from jsonb_array_elements(data->'moves') m where true ${pick}))
+        when action = 'prices.list_applied' then data - 'moves'
         else data end as data`;
     const rows = await tx.execute<AuditRow>(sql`
       select id, created_at, created_at::text as created_text, user_id, action, entity_id, changes, ${dataColumn}
@@ -66,6 +67,7 @@ export function priceHistory(
       )})
         and (action <> 'product.updated' or jsonb_path_exists(data,
               '$.variants[*] ? (exists(@.priceMinor) || exists(@.minPriceMinor) || exists(@.wholesalePriceMinor))'))
+        and not (action = 'prices.list_applied' and data ? 'batchId')
         ${cursor ? sql`and (created_at, id) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)` : sql``}
         ${query.from ? sql`and created_at >= (${query.from}::date)::timestamp at time zone ${tz}` : sql``}
         ${query.to ? sql`and created_at < ((${query.to}::date + 1)::timestamp at time zone ${tz})` : sql``}
@@ -145,9 +147,18 @@ export function priceHistory(
     }
 
     // Which of the listed bulk changes were taken back since
-    const batchIds = rows.flatMap((r) =>
-      r.action === 'prices.bulk_changed' && typeof r.data?.batchId === 'string' ? [r.data.batchId] : [],
-    );
+    const batchIds = [
+      ...new Set(
+        rows.flatMap((r) =>
+          (r.action === 'prices.bulk_changed' ||
+            r.action === 'prices.list_applied' ||
+            r.action === 'price.changed') &&
+          typeof r.data?.batchId === 'string'
+            ? [r.data.batchId]
+            : [],
+        ),
+      ),
+    ];
     const undone = new Set<string>();
     if (batchIds.length > 0) {
       const found = await tx.execute<{ of: string }>(sql`
@@ -185,6 +196,7 @@ export function priceHistory(
         const piece = r.entity_id ? labels.get(r.entity_id) : undefined;
         const pid = typeof r.data?.productId === 'string' ? r.data.productId : (piece?.productId ?? null);
         if (!pair) continue;
+        const listBatch = typeof r.data?.batchId === 'string' ? r.data.batchId : undefined;
         push(
           r,
           'price_list',
@@ -195,6 +207,7 @@ export function priceHistory(
             oldMinor: pair[0],
             newMinor: pair[1],
             note: typeof r.data?.fileName === 'string' ? r.data.fileName : null,
+            ...(listBatch ? { batchId: listBatch, undone: undone.has(listBatch) } : {}),
           },
           '',
         );
@@ -249,7 +262,7 @@ export function priceHistory(
                 : r.data?.mode === 'restore'
                   ? 'إنهاء التخفيض'
                   : `تعديل جماعي ${Number(r.data?.percentBp ?? 0) / 100}٪`,
-              ...(batchId ? { batchId, undone: undone.has(batchId) } : {}),
+              ...(batchId ? { batchId, undone: undone.has(batchId), batchPieces: total } : {}),
             },
             `:${m.id}`,
           );
@@ -265,11 +278,17 @@ export function priceHistory(
               oldMinor: null,
               newMinor: null,
               note: `و${String(total - all.length)} قطعة أخرى في التغيير نفسه`,
+              ...(batchId ? { batchId, undone: undone.has(batchId), batchPieces: total } : {}),
             },
             ':more',
           );
         }
-      } else if (!product && r.action !== 'prices.bulk_undone') {
+      } else if (
+        !product &&
+        r.action !== 'prices.bulk_undone' &&
+        // A price list written with its own pieces shows them under one header instead
+        !(r.action === 'prices.list_applied' && typeof r.data?.batchId === 'string')
+      ) {
         const count = Number(r.data?.pieces ?? 0);
         const note =
           r.action === 'prices.bulk_changed'

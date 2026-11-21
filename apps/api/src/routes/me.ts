@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { setPinInput } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { unauthorized } from '../errors';
@@ -18,7 +19,8 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
   // The few numbers of the home page (debts, goods without a photo), each only for who may open them
   app.get('/v1/me/home-summary', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
-    return loadHomeSummary(app.db, request.auth, app.clock.now());
+    const { branchId } = parseBody(z.object({ branchId: z.uuid().optional() }), request.query);
+    return loadHomeSummary(app.db, request.auth, app.clock.now(), branchId);
   });
 
   // The top bar's search: a few suppliers, purchase invoices, returns, online orders, rentals and claims by what was typed

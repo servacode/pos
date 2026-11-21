@@ -250,8 +250,33 @@ function ProductCard() {
   const [search] = useSearchParams();
   const canManage = canManageCatalog(me);
   const formRef = useRef<HTMLFormElement>(null);
-  // The field that just refused a typed minus: the digits typed next are ignored with it
-  const signRefused = useRef<HTMLElement | null>(null);
+  // The field that just refused a typed minus, and when: a digit typed right after it (within a
+  // breath, as in «-5») is dropped with it; one typed later is the owner starting over and goes in
+  const signRefused = useRef<{ target: HTMLElement; at: number } | null>(null);
+  // The words next to that field, placed under it so they show on a phone too
+  const [minusHint, setMinusHint] = useState<{ top: number; left: number; width: number } | null>(null);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showMinusHint = (target: HTMLElement) => {
+    const box = target.getBoundingClientRect();
+    const width = Math.min(Math.max(box.width, 220), window.innerWidth - 32);
+    setMinusHint({
+      top: box.bottom + 4,
+      left: Math.max(16, Math.min(box.left, window.innerWidth - width - 16)),
+      width,
+    });
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    hintTimer.current = setTimeout(() => setMinusHint(null), 5000);
+  };
+  const hideMinusHint = () => {
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    setMinusHint(null);
+  };
+  useEffect(
+    () => () => {
+      if (hintTimer.current) clearTimeout(hintTimer.current);
+    },
+    [],
+  );
 
   const [lookups, setLookups] = useState<Lookups | null>(null);
   const [product, setProduct] = useState<ProductDetail | null>(null);
@@ -711,18 +736,23 @@ function ProductCard() {
           if (target.getAttribute('inputmode') !== 'decimal') return;
           if (event.key === '-' || event.key === '−') {
             event.preventDefault();
-            signRefused.current = target;
-            setFormError('الأسعار والكميات لا تقبل رقماً سالباً. اكتب الرقم بلا إشارة ناقص.');
+            signRefused.current = { target, at: Date.now() };
+            showMinusHint(target);
             return;
           }
-          // The digits typed right after a refused sign are ignored too: «-5» must not become 5
-          if (signRefused.current === target) {
-            if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) event.preventDefault();
-            else if (event.key === 'Backspace' || event.key === 'Delete') signRefused.current = null;
+          // The digit typed right after a refused sign is dropped too: «-5» must not become 5
+          const refused = signRefused.current;
+          if (refused && event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
+            signRefused.current = null;
+            if (refused.target === target && Date.now() - refused.at < 800) event.preventDefault();
+            else hideMinusHint();
+          } else if (refused && event.key !== 'Shift') {
+            signRefused.current = null;
           }
         }}
         onBlur={() => {
           signRefused.current = null;
+          hideMinusHint();
         }}
         onPaste={(event) => {
           const target = event.target as HTMLElement;
@@ -731,10 +761,19 @@ function ProductCard() {
             /[-−]/.test(event.clipboardData.getData('text'))
           ) {
             event.preventDefault();
-            setFormError('الأسعار والكميات لا تقبل رقماً سالباً. اكتب الرقم بلا إشارة ناقص.');
+            showMinusHint(target);
           }
         }}
       >
+        {minusHint ? (
+          <p
+            role="status"
+            style={{ top: minusHint.top, left: minusHint.left, width: minusHint.width }}
+            className="fixed z-50 rounded-control border border-warning/30 bg-warning-soft px-3 py-1.5 text-sm font-semibold text-warning-ink shadow-e1"
+          >
+            الأسعار والكميات لا تقبل رقماً سالباً. اكتب الرقم بلا إشارة ناقص.
+          </p>
+        ) : null}
         <form
           ref={formRef}
           noValidate

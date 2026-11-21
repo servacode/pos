@@ -132,6 +132,37 @@ describe('GET /v1/me/home-summary', () => {
     expect(off.cashMinor).toBe(await ledger('111001'));
   });
 
+  it('takes one branch: its own drawers, a foreign or junk branch is refused', async () => {
+    const store = await openStore(app);
+    const db = ownerDb();
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const first = doc('sale', goldenFirstSale(store, open.id));
+    expect((await push(app, store.device, [open, first])).results.map((r) => r.status)).toEqual([
+      'accepted',
+      'accepted',
+    ]);
+    const [sold] = await db<{ branch_id: string }[]>`
+      select l.branch_id from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+      where l.tenant_id = ${store.tenantId} and a.parent_code = '1110' limit 1`;
+    const [other] = await db<{ id: string }[]>`
+      insert into branches (tenant_id, code, name) values (${store.tenantId}, '009', 'فرع آخر') returning id`;
+    const ask = (branchId: string) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/me/home-summary?branchId=${branchId}`,
+        headers: bearer(store.accessToken),
+      });
+    const all = (await summary(store.accessToken)).json();
+    const mine = (await ask(sold!.branch_id)).json();
+    const empty = (await ask(other!.id)).json();
+    expect(all.cashMinor).toBeGreaterThan(0);
+    expect(mine.cashMinor).toBe(all.cashMinor);
+    expect(empty.cashMinor).toBe(0);
+    expect((await ask('not-a-uuid')).statusCode).toBe(400);
+    expect((await ask('00000000-0000-4000-8000-000000000000')).statusCode).toBe(404);
+  });
+
   it('needs a signed-in user', async () => {
     expect((await app.inject({ method: 'GET', url: '/v1/me/home-summary' })).statusCode).toBe(401);
   });

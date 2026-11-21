@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { MeResponse } from '@serva/core';
-import { Card, EmptyState, LockIcon } from '@serva/ui';
+import { Card, LockIcon } from '@serva/ui';
+import { EmptyState } from './shared';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { canManageCatalog } from '../catalog/catalog';

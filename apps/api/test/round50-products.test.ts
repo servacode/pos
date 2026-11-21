@@ -105,8 +105,8 @@ describe('round 50: the history after an undo', () => {
       cursor = page.nextCursor;
       if (!cursor) break;
     }
-    // the three price rows and the list's own summary row
-    expect(new Set(seen).size).toBe(4);
+    // the three price rows (round 54: the list's summary row is gone, its pieces sit under one header)
+    expect(new Set(seen).size).toBe(3);
   });
 });
 

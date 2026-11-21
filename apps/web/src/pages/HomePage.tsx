@@ -72,6 +72,8 @@ import { methodLabel } from '../admin/reports/labels';
 import { useReport, type ReportState } from '../admin/reports/useReport';
 import { useMe } from '../auth/useAuth';
 import { AppShell, getPendingOrdersOnce, splitPending } from '../layout/AppShell';
+import { BranchSelect } from '../layout/BranchSelect';
+import { useBranchScope } from '../layout/branchScope';
 import { apiFetch } from '../lib/api';
 import { dayText, isoDay } from '../lib/dates';
 import { products } from '../lib/plural';
@@ -167,8 +169,8 @@ interface DayPoint {
  * not swallowed: the page shows the error with a retry, and never takes a week it could not load
  * for a week without sales.
  */
-const loadDays = (from: string, to: string): Promise<DayPoint[]> =>
-  getDayTotals({ from, to }).then(({ items }) => {
+const loadDays = (from: string, to: string, branchId: string | null): Promise<DayPoint[]> =>
+  getDayTotals({ from, to, branchId }).then(({ items }) => {
     const byDate = new Map(items.map((d) => [d.date, d]));
     const points: DayPoint[] = [];
     for (let date = from; date <= to; date = shiftDay(date, -1)) {
@@ -1600,9 +1602,12 @@ function MorningLine({
   const dollar = rate !== null && Number(rate) > 0 ? Number(rate) : null;
   if (yesterday === null && cash === null && dollar === null && owed === null) return null;
   const chip =
-    'inline-flex min-h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-sm whitespace-nowrap text-ink-muted';
+    'inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-sm whitespace-nowrap text-ink-muted';
   return (
-    <ul aria-label="نظرة الصباح" className="flex flex-wrap gap-2">
+    <ul
+      aria-label="نظرة الصباح"
+      className="flex gap-2 max-sm:-mx-4 max-sm:min-w-0 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-1 sm:flex-wrap"
+    >
       {yesterday !== null ? (
         <li className={chip}>
           أمس <Money minor={yesterday} currency={base} className="font-semibold text-ink" />
@@ -1610,7 +1615,7 @@ function MorningLine({
       ) : null}
       {cash !== null ? (
         <li className={chip}>
-          الصندوق الآن <Money minor={cash} currency={base} className="font-semibold text-ink" />
+          في الأدراج <Money minor={cash} currency={base} className="font-semibold text-ink" />
           {cashUsd !== null ? (
             <>
               <span aria-hidden="true">·</span>
@@ -1699,6 +1704,8 @@ export function HomePage() {
   const me = useMe();
   const [range, setRange] = useState<Range>('7');
   const [kpiOpen, setKpiOpen] = useState(false);
+  const scope = useBranchScope(me.branches);
+  const scopeKey = scope ? `:${scope}` : '';
   const seesSales = holdsAny(me, DAY_REPORT_ACCESS);
   const seesOrders = holdsAny(me, ['customers.view']);
   const seesStock = holdsAny(me, ['report.view']);
@@ -1715,23 +1722,23 @@ export function HomePage() {
   const openShift = useOpenShiftFromYesterday(seesSales, today, me.tenant.timezone, 'home');
 
   const day = useReport(
-    seesSales ? `day:${today}` : null,
-    () => getDayReport({ branchId: null, date: today }),
+    seesSales ? `day:${today}${scopeKey}` : null,
+    () => getDayReport({ branchId: scope, date: today }),
     { cache: 'home' },
   );
   // The six days before today feed the sparklines and the 7-day chart; the 30-day view adds the
   // 23 before them, only once asked for. A day that fails to load is a gap, never an error.
   const week = useReport(
-    seesSales ? `week:${today}` : null,
-    () => loadDays(shiftDay(today, 6), shiftDay(today, 1)),
+    seesSales ? `week:${today}${scopeKey}` : null,
+    () => loadDays(shiftDay(today, 6), shiftDay(today, 1), scope),
     { cache: 'home' },
   );
-  const month = useReport(seesSales && range === '30' ? `month:${today}` : null, () =>
-    loadDays(shiftDay(today, 29), shiftDay(today, 7)),
+  const month = useReport(seesSales && range === '30' ? `month:${today}${scopeKey}` : null, () =>
+    loadDays(shiftDay(today, 29), shiftDay(today, 7), scope),
   );
   const profit = useReport(
-    seesSales && seesProfit ? `profit:${today}` : null,
-    () => getProfit(today, today),
+    seesSales && seesProfit ? `profit:${today}${scopeKey}` : null,
+    () => getProfit(today, today, scope),
     {
       cache: 'home',
     },
@@ -1741,8 +1748,8 @@ export function HomePage() {
   // What the page needs from the heavy lists, in one light request: the low pieces, who owes, the photos
   const canCatalogView = holdsAny(me, ['catalog.manage']);
   const summary = useReport(
-    seesSales || seesStock || seesCheques || canCatalogView ? 'home:summary' : null,
-    getHomeSummary,
+    seesSales || seesStock || seesCheques || canCatalogView ? `home:summary${scopeKey}` : null,
+    () => getHomeSummary(scope),
     { cache: 'home' },
   );
   const merch: MerchState = {
@@ -1755,11 +1762,13 @@ export function HomePage() {
   };
   // «الأكثر مبيعاً» of the last seven days, from the sales report (it needs report.view)
   const weekTop = useReport(
-    seesStock ? `home:top:${today}` : null,
-    () => getSalesBreakdown({ from: shiftDay(today, 6), to: today, by: 'product' }),
+    seesStock ? `home:top:${today}${scopeKey}` : null,
+    () => getSalesBreakdown({ from: shiftDay(today, 6), to: today, by: 'product', branchId: scope }),
     { cache: 'home' },
   );
-  const expiry = useReport(seesExpiry ? 'home:expiry' : null, () => listExpiry(30), { cache: 'home' });
+  const expiry = useReport(seesExpiry ? `home:expiry${scopeKey}` : null, () => listExpiry(30, false, scope), {
+    cache: 'home',
+  });
   // Goods (not services) still without a photo, counted by the server over the whole catalogue
   const noPhoto = summary.data?.photos?.withoutPhoto ?? 0;
   // Only the cheques still waiting: «due within a week» is never about one already cashed
@@ -1826,6 +1835,48 @@ export function HomePage() {
     today,
   };
 
+  const waitingArgs: WaitingArgs = {
+    orders,
+    toSell,
+    merch,
+    expiry,
+    seesOrders,
+    seesStock,
+    seesExpiry,
+    noPhoto,
+    lowTotal: merch.data?.total ?? 0,
+  };
+  // A store that has never sold and has nothing waiting gets the way in first, not an empty «تحتاج انتباهك»
+  const quietFresh =
+    brandNew &&
+    !waitingFigures(waitingArgs).loading &&
+    waitingFigures(waitingArgs).empty &&
+    lowRows(merch, groupedLow(merch.data?.lowStock ?? [])).length === 0 &&
+    moneyFigures(me, money).total === 0 &&
+    !moneyFigures(me, money).loading;
+  const manyBranches = me.branches.length > 1 && !branchOnly;
+  const scopeName = scope ? (me.branches.find((b) => b.id === scope)?.name ?? null) : null;
+  const firstWay =
+    seesSales && brandNew ? (
+      <EmptyState
+        icon={CartIcon}
+        title="لا مبيعات بعد"
+        description="أول فاتورة تبيعها تظهر هنا: المبيعات، الربح، الأكثر مبيعاً وطرق الدفع."
+        action={
+          <ButtonLink to="/pos" reloadDocument variant="primary" icon={<CartIcon />}>
+            ابدأ أول عملية بيع
+          </ButtonLink>
+        }
+        secondaryAction={
+          canCatalog ? (
+            <ButtonLink to="/products/new" icon={<AddIcon />}>
+              أضف أول منتج
+            </ButtonLink>
+          ) : undefined
+        }
+      />
+    ) : null;
+
   return (
     <AppShell>
       <SalesPage className="motion-safe:animate-rise">
@@ -1850,6 +1901,7 @@ export function HomePage() {
             </button>
           </Alert>
         ) : null}
+        {quietFresh ? firstWay : null}
         <TrialBanner me={me} />
         {summary.data ? <SetupStrip me={me} summary={summary.data} /> : null}
         <PageTop
@@ -1857,14 +1909,25 @@ export function HomePage() {
           subtitle={`${weekdayOf(today)} ${dayText(today, me.settings.numberFormat)} · ${
             branchOnly
               ? `أرقام ${branchOnly} فقط${seesCheques ? '، وما على الزبائن للمتجر كله' : ''}.`
-              : seesSales
-                ? 'هذه صورة متجرك اليوم.'
-                : 'أهلاً بك في عملك اليوم.'
+              : scopeName
+                ? `أرقام فرع ${scopeName} فقط. الطلبات والشيكات والأقساط والموردون وديون الزبائن للمتجر كله.`
+                : seesSales
+                  ? 'هذه صورة متجرك اليوم.'
+                  : 'أهلاً بك في عملك اليوم.'
           }`}
         />
         {/* The morning look and the shortcuts sit right under the greeting, not at the far end of the page */}
+        {manyBranches ? (
+          <div className="-mt-3 md:hidden">
+            <BranchSelect
+              branches={me.branches}
+              value={scope}
+              className="flex items-center gap-2 text-sm font-semibold text-ink-muted"
+            />
+          </div>
+        ) : null}
         {!brandNew && (seesSales || canCatalog) ? (
-          <div className="-mt-3 flex flex-wrap items-center gap-2">
+          <div className="-mt-3 flex min-w-0 flex-wrap items-center gap-2 max-sm:flex-col max-sm:flex-nowrap max-sm:items-stretch">
             {seesSales ? (
               <MorningLine
                 yesterday={weekPoints[5]?.total ?? null}
@@ -1927,25 +1990,6 @@ export function HomePage() {
                 </div>
               </div>
             ) : null}
-            {seesSales && brandNew ? (
-              <EmptyState
-                icon={CartIcon}
-                title="لا مبيعات بعد"
-                description="أول فاتورة تبيعها تظهر هنا: المبيعات، الربح، الأكثر مبيعاً وطرق الدفع."
-                action={
-                  <ButtonLink to="/pos" reloadDocument variant="primary" icon={<CartIcon />}>
-                    ابدأ أول عملية بيع
-                  </ButtonLink>
-                }
-                secondaryAction={
-                  canCatalog ? (
-                    <ButtonLink to="/products/new" icon={<AddIcon />}>
-                      أضف أول منتج
-                    </ButtonLink>
-                  ) : undefined
-                }
-              />
-            ) : null}
             {seesSales && !brandNew ? (
               <SalesTrend
                 me={me}
@@ -1962,30 +2006,15 @@ export function HomePage() {
               />
             ) : null}
             {seesStock && !brandNew ? <BestSellersWeek report={weekTop} /> : null}
-            {seesSales && !brandNew ? (
-              <div className="grid items-start gap-6 md:grid-cols-2">
-                <BestSellers report={day} />
-                <PaymentMix me={me} report={day} />
-              </div>
-            ) : null}
+            {!quietFresh ? firstWay : null}
             {!seesSales ? canSell ? <TillCard /> : <StoreCard me={me} /> : null}
           </div>
           <div className="contents xl:col-start-2 xl:row-start-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
             <div className="flex min-w-0 flex-col gap-6 empty:hidden max-xl:order-[-1] xl:order-none">
-              {showWaiting ? (
+              {showWaiting && !quietFresh ? (
                 <AttentionPanel
                   me={me}
-                  waiting={{
-                    orders,
-                    toSell,
-                    merch,
-                    expiry,
-                    seesOrders,
-                    seesStock,
-                    seesExpiry,
-                    noPhoto,
-                    lowTotal: merch.data?.total ?? 0,
-                  }}
+                  waiting={waitingArgs}
                   merch={merch}
                   showStock={seesStock}
                   money={money}
@@ -1994,6 +2023,13 @@ export function HomePage() {
               ) : null}
               {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
             </div>
+            {seesSales && !brandNew ? (
+              // At 1280 and up they sit under «تحتاج انتباهك», so both columns end near the same height
+              <div className="grid items-start gap-6 md:grid-cols-2 xl:grid-cols-1">
+                <BestSellers report={day} />
+                <PaymentMix me={me} report={day} />
+              </div>
+            ) : null}
           </div>
         </div>
         {/* The shop's card is for the first days: a full-width strip under the columns (so none ends ragged); on a phone it is left to the settings page */}

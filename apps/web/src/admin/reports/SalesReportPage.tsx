@@ -39,8 +39,15 @@ import { DayField, ReportFilters, ReportScreen } from './parts';
 import { useReport } from './useReport';
 
 /** `GET /v1/reports/sales-breakdown` (report.view) */
-export const getSalesBreakdown = (q: { from: string; to: string; by: SalesGroup; option?: string }) => {
+export const getSalesBreakdown = (q: {
+  from: string;
+  to: string;
+  by: SalesGroup;
+  option?: string;
+  branchId?: string | null;
+}) => {
   const params = new URLSearchParams({ from: q.from, to: q.to, by: q.by });
+  if (q.branchId) params.set('branchId', q.branchId);
   if (q.by === 'option' && q.option) params.set('option', q.option);
   return apiFetch<SalesBreakdown>(`/v1/reports/sales-breakdown?${params.toString()}`, { auth: true });
 };

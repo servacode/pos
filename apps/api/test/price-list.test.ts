@@ -287,12 +287,24 @@ describe('price list: apply', () => {
     expect(logs.filter((l) => l.action === 'price.changed')).toHaveLength(2);
     expect(logs.find((l) => l.entity_id === ia)).toMatchObject({
       changes: { priceMinor: [1_000_000, 800_000] },
-      data: { source: 'price_list', productId: a.id, fileName: 'نشرة.xlsx' },
+      data: { source: 'price_list', productId: a.id, fileName: 'نشرة.xlsx', batchId: expect.any(String) },
     });
-    expect(logs.find((l) => l.action === 'prices.list_applied')?.data).toEqual({
+    // The file's row also keeps every piece with what it had, for «تراجع»
+    expect(logs.find((l) => l.action === 'prices.list_applied')?.data).toMatchObject({
       fileName: 'نشرة.xlsx',
       pieces: 2,
       skipped: 2,
+      moves: expect.arrayContaining([
+        expect.objectContaining({
+          id: ia,
+          old: 1_000_000,
+          new: 800_000,
+          oldMin: 900_000,
+          newMin: 800_000,
+          oldWas: null,
+        }),
+        expect.objectContaining({ id: ib, old: 2_000_000, new: 1_500_000, oldWas: 1_500_000, newWas: null }),
+      ]),
     });
   });
 

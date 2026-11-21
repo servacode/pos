@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { PriceModes } from './parts';
 import { CatalogGate } from './CatalogGate';
 import {
+  COUNT_NOUNS,
+  countNoun,
   PRICE_LIST_CHUNK_MAX,
   PRICE_LIST_FIELDS,
   type PriceListApplied,
@@ -16,7 +18,7 @@ import {
   Card,
   Checkbox,
   DataTable,
-  EmptyState,
+  Dialog,
   Money,
   PercentIcon,
   PrintIcon,
@@ -29,7 +31,6 @@ import {
 import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
-import { errorMessage } from '../../lib/api';
 import { FileProblem, readSpreadsheet, type FileCell, type Sheet } from '../import/file';
 import { Paged } from '../pager';
 import {
@@ -44,8 +45,10 @@ import {
   NO_COLUMNS,
   type Columns,
 } from './priceList';
+import { apiFetch, errorMessage } from '../../lib/api';
 import { applyPriceList, previewPriceList } from './priceListApi';
 import { ButtonLink } from './parts';
+import { DropZone, EmptyState } from './shared';
 
 /** A row matched by a barcode of one variant of a model that has other sizes or colours. */
 function multiVariantByBarcode(i: PriceListItem): boolean {
@@ -97,6 +100,10 @@ function PriceList() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [applied, setApplied] = useState<PriceListApplied | null>(null);
+  // The ids of the requests that applied the file, for «تراجع»
+  const [changeIds, setChangeIds] = useState<string[]>([]);
+  const [asking, setAsking] = useState(false);
+  const [undone, setUndone] = useState<{ restored: number; skipped: number } | null>(null);
   const [tab, setTab] = useState<Tab>('change');
   // «طبّق على كل قياسات وألوان هذا الموديل»
   const [wholeModel, setWholeModel] = useState(false);
@@ -135,6 +142,8 @@ function PriceList() {
     setInvalid([]);
     setPicked(new Set());
     setApplied(null);
+    setChangeIds([]);
+    setUndone(null);
     setError(null);
     setTab('change');
   }
@@ -195,6 +204,7 @@ function PriceList() {
     setBusy(true);
     setProgress({ done: 0, total: changes.length });
     const total: PriceListApplied = { changed: 0, skipped: 0, stale: 0, items: [] };
+    const ids: string[] = [];
     try {
       for (let at = 0; at < changes.length; at += PRICE_LIST_CHUNK_MAX) {
         const answer = await applyPriceList(fileName, changes.slice(at, at + PRICE_LIST_CHUNK_MAX));
@@ -202,9 +212,11 @@ function PriceList() {
         total.skipped += answer.skipped;
         total.stale = (total.stale ?? 0) + (answer.stale ?? 0);
         total.items.push(...answer.items);
+        if (answer.changeId) ids.push(answer.changeId);
         setProgress({ done: Math.min(at + PRICE_LIST_CHUNK_MAX, changes.length), total: changes.length });
       }
       setApplied(total);
+      setChangeIds(ids);
       setStep('done');
     } catch (e) {
       // Chunks that went through stay applied: say so, and let the owner check the file again
@@ -213,6 +225,31 @@ function PriceList() {
           ? `تغيّر سعر ${String(total.changed)} صنفاً ثم توقّف التحديث. ${errorMessage(e)} افحص الملف من جديد لترى ما بقي.`
           : errorMessage(e),
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Puts every piece of this file back to the price it had; one that was edited since is left */
+  async function undoFile() {
+    setAsking(false);
+    setError(null);
+    setBusy(true);
+    const sum = { restored: 0, skipped: 0 };
+    try {
+      for (const id of changeIds) {
+        const r = await apiFetch<{ restored: number; skipped: number }>(`/v1/prices/bulk/${id}/undo`, {
+          method: 'POST',
+          auth: true,
+          body: {},
+        });
+        sum.restored += r.restored;
+        sum.skipped += r.skipped;
+      }
+      setUndone(sum);
+      setChangeIds([]);
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -331,24 +368,15 @@ function PriceList() {
 
         {step === 'file' ? (
           <Card className="flex flex-col gap-4">
-            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-card border border-dashed border-line-control/60 px-6 py-10 text-center hover:bg-surface-muted">
-              <span className="font-semibold text-ink">اختر ملف إكسل أو ملفاً نصياً مفصولاً بفواصل</span>
-              <span className="text-sm text-ink-muted">
-                عمود للسعر، وعمود للباركود أو لاسم الصنف (أو لاسمه العلمي)
-              </span>
-              <input
-                type="file"
-                className="sr-only"
-                accept=".xlsx,.csv,.tsv,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                aria-label="ملف الأسعار"
-                disabled={reading}
-                onChange={(e) => {
-                  void onFile(e.target.files?.[0]);
-                  e.target.value = '';
-                }}
-              />
-              {reading ? <span className="text-sm text-ink-muted">نقرأ الملف…</span> : null}
-            </label>
+            <DropZone
+              title="اختر ملف إكسل أو ملفاً نصياً مفصولاً بفواصل، أو اسحبه إلى هنا"
+              hint="عمود للسعر، وعمود للباركود أو لاسم الصنف (أو لاسمه العلمي)"
+              accept=".xlsx,.csv,.tsv,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              ariaLabel="ملف الأسعار"
+              disabled={reading}
+              busyText={reading ? 'نقرأ الملف…' : null}
+              onFiles={(files) => void onFile(files[0])}
+            />
           </Card>
         ) : null}
 
@@ -511,6 +539,37 @@ function PriceList() {
                 ? ` ${String(applied.skipped - (applied.stale ?? 0))} بقيت كما هي لأن سعرها لم يعد يختلف.`
                 : ''}
             </Alert>
+            {undone ? (
+              <Alert tone="success">
+                رجعت {countNoun(undone.restored, COUNT_NOUNS.piece)} إلى سعرها قبل الملف
+                {undone.skipped > 0
+                  ? `، وتُركت ${countNoun(undone.skipped, COUNT_NOUNS.piece)} لأنها تعدّلت بعده.`
+                  : '.'}
+              </Alert>
+            ) : changeIds.length > 0 ? (
+              <div>
+                <Button variant="secondary" loading={busy} onClick={() => setAsking(true)}>
+                  تراجع عن هذا الملف
+                </Button>
+              </div>
+            ) : null}
+            <Dialog
+              open={asking}
+              onOpenChange={(open) => !open && setAsking(false)}
+              size="sm"
+              title="نرجّع أسعار هذا الملف؟"
+              description="نرجّع كل صنف تغيّر بهذا الملف إلى سعره قبله. ما تعدّل بعده يُترك كما هو."
+              actions={
+                <>
+                  <Button variant="secondary" onClick={() => setAsking(false)}>
+                    تراجع
+                  </Button>
+                  <Button variant="danger" onClick={() => void undoFile()}>
+                    نعم، رجّع الأسعار
+                  </Button>
+                </>
+              }
+            ></Dialog>
             {(applied.stale ?? 0) > 0 ? (
               <Alert tone="warning">
                 {String(applied.stale)} صنفاً تغيّر سعره بعد أن فحصت الملف، فتركناه كما هو ولم نكتب فوقه. افحص

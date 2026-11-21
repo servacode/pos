@@ -92,6 +92,8 @@ export interface PriceListApplied {
   skipped: number;
   /** Of the skipped: pieces whose price changed after the preview, so the file's price was not applied */
   stale?: number;
+  /** The id of this apply, for «تراجع» (`POST /v1/prices/bulk/:id/undo`); absent when nothing changed */
+  changeId?: string;
   items: {
     productId: string;
     variantId: string;

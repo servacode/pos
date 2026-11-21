@@ -7,6 +7,7 @@ import {
   categoryOptionLabel,
   categoryTree,
   looksLikeBarcode,
+  moveWithinSiblings,
   searchTerm,
   selfAndDescendants,
 } from './catalog';
@@ -35,6 +36,35 @@ describe('the category tree', () => {
       category({ id: 'q', name: 'ب', parentId: 'p' }),
     ]);
     expect(tree.map((n) => n.category.id).sort()).toEqual(['p', 'q', 'x']);
+  });
+
+  it('moves a category one place among its siblings and renumbers only what changes', () => {
+    const list = [
+      category({ id: 'a', name: 'أ', sortOrder: 0 }),
+      category({ id: 'b', name: 'ب', sortOrder: 0 }),
+      category({ id: 'c', name: 'ج', sortOrder: 0 }),
+      category({ id: 'k', name: 'ابن', parentId: 'a' }),
+    ];
+    // «ج» one place up: أ، ج، ب, written as 10, 20, 30
+    expect(moveWithinSiblings(list, 'c', -1)).toEqual([
+      { id: 'a', sortOrder: 10 },
+      { id: 'c', sortOrder: 20 },
+      { id: 'b', sortOrder: 30 },
+    ]);
+    // the first cannot go further up, the last further down, and a child only moves among its own
+    expect(moveWithinSiblings(list, 'a', -1)).toEqual([]);
+    expect(moveWithinSiblings(list, 'c', 1)).toEqual([]);
+    expect(moveWithinSiblings(list, 'k', 1)).toEqual([]);
+    // already numbered by tens: only the two that swapped are written
+    const numbered = [
+      category({ id: 'a', name: 'أ', sortOrder: 10 }),
+      category({ id: 'b', name: 'ب', sortOrder: 20 }),
+      category({ id: 'c', name: 'ج', sortOrder: 30 }),
+    ];
+    expect(moveWithinSiblings(numbered, 'b', 1)).toEqual([
+      { id: 'c', sortOrder: 20 },
+      { id: 'b', sortOrder: 30 },
+    ]);
   });
 
   it('knows a category’s descendants', () => {

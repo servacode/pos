@@ -25,6 +25,7 @@ import type { Notice } from './Notifications';
 import { trapTab } from './popover';
 import { SidebarPanel, type NavCount, type SidebarPlan } from './Sidebar';
 import { bannerFor, factsOfMe, SubscriptionBanner } from './subscription-banner';
+import { useBranchScope } from './branchScope';
 import { TopBar } from './TopBar';
 import './shell.css';
 
@@ -432,6 +433,7 @@ function Drawer({ onClose, children }: { onClose: () => void; children: ReactNod
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const me = useMe();
+  const chosenBranch = useBranchScope(me.branches);
   const { logout } = useAuth();
   const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -478,6 +480,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const tied = me.user.roles.some((role) => role.branchId !== null);
   const branchLabel =
     branchCount > 1 ? 'كل الفروع' : tied && branchCount === 1 ? (me.branches[0]?.name ?? null) : null;
+  const branchChoice =
+    branchCount > 1 && !tied && current?.key === 'home'
+      ? { branches: me.branches, value: chosenBranch }
+      : null;
   const waiting = formatNumber(pending.length, digits);
   const counts: Partial<Record<NavSection['key'], NavCount>> =
     pending.length > 0
@@ -576,6 +582,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             canSell={canSell}
             notices={notices}
             branchLabel={branchLabel}
+            branchChoice={branchChoice}
             onOpenMenu={() => setDrawerOpen(true)}
           />
           {tabs ? (

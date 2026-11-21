@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PriceModes } from './parts';
 import { CatalogGate } from './CatalogGate';
 import type { PriceChange, PriceChangeSource } from '@serva/core';
 import { COUNT_NOUNS, countNoun } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
-import { Alert, Button, Dialog, EmptyState, PercentIcon, Select, TextField } from '@serva/ui';
+import { Alert, Button, Dialog, PercentIcon, Select, TextField } from '@serva/ui';
+import { DeltaPill, EmptyState } from './shared';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
@@ -13,16 +14,7 @@ import { DateField } from '../../lib/DateField';
 import { downloadCsv } from '../exportCsv';
 import { listProducts } from '../catalog/api';
 import { useIsPhone } from '../../lib/useIsPhone';
-import {
-  Amt,
-  DownloadGlyph,
-  PageTop,
-  Panel,
-  SalesPage,
-  StatusPill,
-  SxTable,
-  type SxColumn,
-} from '../sales/ui';
+import { Amt, DownloadGlyph, PageTop, Panel, SalesPage, SxTable, type SxColumn } from '../sales/ui';
 
 /**
  * «سجل تغيير الأسعار»: who changed a price, when, from what to what and from where. It reads the
@@ -105,11 +97,9 @@ function Delta({ row }: { row: PriceChange }) {
   const d = row.newMinor - row.oldMinor;
   if (d === 0) return null;
   return (
-    <StatusPill kind={d > 0 ? 'warn' : 'ok'}>
-      <span className="sr-only">{d > 0 ? 'ارتفع' : 'انخفض'}</span>
-      <span aria-hidden="true">{d > 0 ? '▲' : '▼'}</span>
+    <DeltaPill rise={d > 0}>
       <Amt minor={Math.abs(d)} currency={row.currency} />
-    </StatusPill>
+    </DeltaPill>
   );
 }
 
@@ -200,18 +190,8 @@ function PriceHistory() {
     };
   }, [search]);
 
-  // One «تراجع» for a whole bulk change: on the first of its rows
-  const firstOfBatch = useMemo(() => {
-    const seen = new Set<string>();
-    const first = new Set<string>();
-    for (const r of items ?? []) {
-      if (r.batchId && !seen.has(r.batchId)) {
-        seen.add(r.batchId);
-        first.add(r.id);
-      }
-    }
-    return first;
-  }, [items]);
+  // A whole change under one header: its rows sit together, the header holds «تراجع»
+  const { ordered, batches, keyOf } = useMemo(() => groupBatches(items ?? []), [items]);
 
   function undoBatch(batchId: string) {
     if (undoing) return;
@@ -260,26 +240,10 @@ function PriceHistory() {
       {
         key: 'source',
         header: 'المصدر',
-        cell: (r) => (
-          <span className="sx-mute">
-            {SOURCE_TEXT[r.source]}
-            {r.batchId && r.undone ? ' · تم التراجع عنه' : null}
-            {r.batchId && !r.undone && firstOfBatch.has(r.id) ? (
-              <Button
-                variant="ghost"
-                size="xs"
-                disabled={undoing !== null}
-                onClick={() => setAsking(r.batchId ?? '')}
-              >
-                تراجع عن هذا التغيير
-              </Button>
-            ) : null}
-          </span>
-        ),
+        cell: (r) => <span className="sx-mute">{SOURCE_TEXT[r.source]}</span>,
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [when, firstOfBatch, undoing],
+    [when],
   );
 
   const filtered = Boolean(from || to || productId);
@@ -362,29 +326,41 @@ function PriceHistory() {
         </div>
         {phone && items && items.length > 0 ? (
           <ul aria-label="تغييرات الأسعار" className="sx-cards">
-            {items.map((r) => (
-              <li key={r.id} className="sx-icard" style={{ cursor: 'default' }}>
-                <span style={{ gridColumn: 1, gridRow: 1, minWidth: 0 }}>
-                  <Piece row={r} />
-                </span>
-                <span className="st">
-                  <Delta row={r} />
-                </span>
-                <span className="d">{when(r)}</span>
-                <span className="t">
-                  {r.oldMinor !== null && r.newMinor !== null && r.currency ? (
-                    <>
-                      <Amt minor={r.oldMinor} currency={r.currency} className="sx-mute" />
-                      {' ← '}
-                      <Amt minor={r.newMinor} currency={r.currency} />
-                    </>
+            {ordered.map((r, at) => {
+              const key = keyOf.get(r.id) ?? r.id;
+              const batch = batches.get(key);
+              const startsGroup = at === 0 || keyOf.get(ordered[at - 1]!.id) !== key;
+              return (
+                <Fragment key={r.id}>
+                  {startsGroup && batch ? (
+                    <li className="rounded-card border border-line bg-surface-muted px-3 py-2">
+                      <BatchHeader batch={batch} busy={undoing !== null} onUndo={() => setAsking(batch.id)} />
+                    </li>
                   ) : null}
-                </span>
-                <span className="x">
-                  {r.userName ?? '—'} · {SOURCE_TEXT[r.source]}
-                </span>
-              </li>
-            ))}
+                  <li className="sx-icard" style={{ cursor: 'default' }}>
+                    <span style={{ gridColumn: 1, gridRow: 1, minWidth: 0 }}>
+                      <Piece row={r} />
+                    </span>
+                    <span className="st">
+                      <Delta row={r} />
+                    </span>
+                    <span className="d">{when(r)}</span>
+                    <span className="t">
+                      {r.oldMinor !== null && r.newMinor !== null && r.currency ? (
+                        <>
+                          <Amt minor={r.oldMinor} currency={r.currency} className="sx-mute" />
+                          {' ← '}
+                          <Amt minor={r.newMinor} currency={r.currency} />
+                        </>
+                      ) : null}
+                    </span>
+                    <span className="x">
+                      {r.userName ?? '—'} · {SOURCE_TEXT[r.source]}
+                    </span>
+                  </li>
+                </Fragment>
+              );
+            })}
           </ul>
         ) : (
           <Panel title="التغييرات" aside={items ? `${String(items.length)} تغيير` : undefined} flush>
@@ -392,8 +368,19 @@ function PriceHistory() {
               bare
               caption="تغييرات الأسعار"
               columns={columns}
-              rows={items ?? []}
+              rows={ordered}
               rowKey={(r) => r.id}
+              groupOf={(r) => keyOf.get(r.id) ?? r.id}
+              groupLabel={(key) => {
+                const batch = batches.get(key);
+                return batch ? (
+                  <BatchHeader batch={batch} busy={undoing !== null} onUndo={() => setAsking(batch.id)} />
+                ) : (
+                  <span className="sx-mute">
+                    تعديلات منفردة · <bdi>{key.slice(2, 12)}</bdi>
+                  </span>
+                );
+              }}
               loading={items === null && !error}
               empty={
                 <EmptyState
@@ -417,13 +404,95 @@ function PriceHistory() {
   );
 }
 
+/** What the header of one change says: what it was, how many pieces, who, and its «تراجع» */
+interface Batch {
+  id: string;
+  title: string;
+  pieces: number;
+  who: string | null;
+  undone: boolean;
+}
+
+/** The rows with each change's rows together (at the place its first row came), and one header per change */
+export function groupBatches(items: readonly PriceChange[]): {
+  ordered: PriceChange[];
+  batches: Map<string, Batch>;
+  /** Each row's group: its change's id, or one key for each run of loose edits of the same day */
+  keyOf: Map<string, string>;
+} {
+  const batches = new Map<string, Batch>();
+  const rowsOf = new Map<string, PriceChange[]>();
+  const slots: (string | PriceChange)[] = [];
+  for (const r of items) {
+    if (!r.batchId) {
+      slots.push(r);
+      continue;
+    }
+    const list = rowsOf.get(r.batchId);
+    if (list) list.push(r);
+    else {
+      rowsOf.set(r.batchId, [r]);
+      slots.push(r.batchId);
+    }
+  }
+  const ordered: PriceChange[] = [];
+  const keyOf = new Map<string, string>();
+  let run = 0;
+  let lastPlain = '';
+  for (const slot of slots) {
+    if (typeof slot !== 'string') {
+      const day = slot.at.slice(0, 10);
+      if (lastPlain !== day) run += 1;
+      lastPlain = day;
+      keyOf.set(slot.id, `d:${day}#${String(run)}`);
+      ordered.push(slot);
+      continue;
+    }
+    lastPlain = '';
+    for (const r of rowsOf.get(slot) ?? []) keyOf.set(r.id, slot);
+    const rows = rowsOf.get(slot) ?? [];
+    ordered.push(...rows);
+    const first = rows[0]!;
+    const counted = rows.filter((r) => r.productId !== null).length;
+    batches.set(slot, {
+      id: slot,
+      title:
+        first.source === 'price_list'
+          ? `تحديث من ملف${first.note ? ` «${first.note}»` : ''}`
+          : properSigns(first.note ?? SOURCE_TEXT.bulk),
+      pieces: Math.max(first.batchPieces ?? 0, counted),
+      who: first.userName,
+      undone: rows.every((r) => r.undone === true),
+    });
+  }
+  return { ordered, batches, keyOf };
+}
+
+function BatchHeader({ batch, busy, onUndo }: { batch: Batch; busy: boolean; onUndo: () => void }) {
+  return (
+    <span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+      <span className="font-semibold text-ink">
+        {batch.title} · {countNoun(batch.pieces, COUNT_NOUNS.piece)}
+        {batch.who ? <span className="sx-mute font-normal"> · {batch.who}</span> : null}
+      </span>
+      {batch.undone ? (
+        <span className="sx-mute">تم التراجع عنه</span>
+      ) : (
+        <Button variant="secondary" size="xs" disabled={busy} onClick={onUndo}>
+          تراجع عن هذا التغيير
+        </Button>
+      )}
+    </span>
+  );
+}
+
 function Piece({ row }: { row: PriceChange }) {
   if (row.productName) {
     return (
       <span className="font-semibold">
         {row.productName}
         {row.variantLabel ? <span className="sx-mute"> · {row.variantLabel}</span> : null}
-        {((row.field && row.field !== 'price') || row.source === 'bulk') && row.note ? (
+        {((row.field && row.field !== 'price') || (row.source === 'bulk' && !row.batchId)) && row.note ? (
           <span className="sx-mute"> · {row.note}</span>
         ) : null}
       </span>

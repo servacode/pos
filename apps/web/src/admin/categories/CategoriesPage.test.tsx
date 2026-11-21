@@ -159,6 +159,26 @@ describe('/categories', () => {
     await vi.waitFor(() => expect(screen.queryByText('مؤرشف')).not.toBeInTheDocument());
   });
 
+  it('moves a category up in the owner’s order and keeps it there', async () => {
+    const { user, requestsTo } = openCategories(categories, {
+      [`PATCH /v1/categories/${ids.cleaning}`]: (request) => ({
+        status: 200,
+        body: { ...categories[2], ...(request.body as object), version: 2 },
+      }),
+      [`PATCH /v1/categories/${ids.dairy}`]: (request) => ({
+        status: 200,
+        body: { ...categories[0], ...(request.body as object), version: 2 },
+      }),
+    });
+    await screen.findByRole('list', { name: 'التصنيفات' });
+    expect(rowNames()).toEqual(['ألبان وأجبان', 'أجبان', 'منظفات']);
+    await user.click(screen.getByRole('button', { name: 'إجراءات «منظفات»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'قدّمه في الترتيب' }));
+    await vi.waitFor(() => expect(rowNames()).toEqual(['منظفات', 'ألبان وأجبان', 'أجبان']));
+    expect(requestsTo('PATCH', `/v1/categories/${ids.cleaning}`)[0]!.body).toMatchObject({ sortOrder: 10 });
+    expect(requestsTo('PATCH', `/v1/categories/${ids.dairy}`)[0]!.body).toMatchObject({ sortOrder: 20 });
+  });
+
   it('reloads when someone changed the category first', async () => {
     const { user, requestsTo } = openCategories(categories, {
       [`PATCH /v1/categories/${ids.cleaning}`]: apiError(409, 'stale_version', 'تغيّر السجل.'),

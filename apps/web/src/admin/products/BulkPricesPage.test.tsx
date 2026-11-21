@@ -75,6 +75,8 @@ describe('«تغيير الأسعار»', () => {
     // The old price, struck through on the labels
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('45,000');
     await user.click(screen.getByRole('button', { name: 'طبّق على قطعتين' }));
+    // «أسعار قطعتين» after «أسعار», never «قطعتان»
+    expect(await screen.findByText(/ستتغيّر أسعار قطعتين/)).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'نعم، طبّق التغيير' }));
     expect(await screen.findByRole('link', { name: 'اطبع ملصقات الأسعار الجديدة' })).toHaveAttribute(
       'href',

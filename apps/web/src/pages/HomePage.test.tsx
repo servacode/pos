@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockFetch } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
@@ -192,7 +192,7 @@ describe('HomePage', () => {
       const morning = await screen.findByRole('list', { name: 'نظرة الصباح' });
       expect(await within(morning).findByText(/أمس/)).toBeInTheDocument();
       // The pounds in the drawer and, beside them, the dollars (never added together)
-      expect(within(morning).getByText(/الصندوق الآن/)).toHaveTextContent(/25,000.*312\.50/);
+      expect(within(morning).getByText(/في الأدراج/)).toHaveTextContent(/25,000.*312\.50/);
       expect(within(morning).getByText(/سعر الدولار/)).toHaveTextContent('13,000');
     });
 
@@ -920,6 +920,36 @@ describe('HomePage', () => {
       expect(await screen.findByRole('link', { name: /120 منتجاً بلا صورة/ })).toBeInTheDocument();
       expect(requestsTo('GET', '/v1/me/home-summary')).toHaveLength(1);
       expect(requestsTo('GET', '/v1/customers?owing=true')).toHaveLength(0);
+    });
+
+    it('filters every request of the page by the branch picked in the top bar, and says what stays store-wide', async () => {
+      const { requests } = mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'customers.view']) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        [`GET /v1/reports/day?branchId=branch-2&date=${TODAY}`]: { status: 200, body: dayReport() },
+        'GET /v1/me/home-summary': summaryOf({ lowStock: [] }),
+        'GET /v1/me/home-summary?branchId=branch-2': summaryOf({ lowStock: [] }),
+      });
+      renderApp('/');
+
+      // One in the top bar, one for the phone (hidden by CSS from 768 px up)
+      const picker = (await screen.findAllByRole('combobox', { name: 'الفرع' }))[0]!;
+      expect(within(picker).getByRole('option', { name: 'كل الفروع' })).toBeInTheDocument();
+      fireEvent.change(picker, { target: { value: 'branch-2' } });
+
+      expect(await screen.findByText(/أرقام فرع دوار النعيم فقط/)).toBeInTheDocument();
+      await waitFor(() =>
+        expect(requests.some((r) => r.path === `/v1/reports/day?branchId=branch-2&date=${TODAY}`)).toBe(true),
+      );
+      expect(requests.some((r) => r.path === '/v1/me/home-summary?branchId=branch-2')).toBe(true);
+      // Every report call after the pick carries the branch
+      const after = requests.slice(requests.findIndex((r) => r.path.includes('branchId=branch-2')));
+      for (const r of after.filter((q) => q.path.startsWith('/v1/reports/'))) {
+        expect(r.path).toContain('branchId=branch-2');
+      }
+      fireEvent.change(picker, { target: { value: '' } });
+      expect(await screen.findByText('هذه صورة متجرك اليوم.', { exact: false })).toBeInTheDocument();
     });
 
     it('offers a retry when the day report fails', async () => {

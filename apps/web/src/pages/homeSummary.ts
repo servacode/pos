@@ -33,4 +33,6 @@ export interface HomeSummary {
   } | null;
 }
 
-export const getHomeSummary = () => apiFetch<HomeSummary>('/v1/me/home-summary', { auth: true });
+/** One branch's low pieces and drawer cash when `branchId` is given; the whole store otherwise */
+export const getHomeSummary = (branchId: string | null = null) =>
+  apiFetch<HomeSummary>(`/v1/me/home-summary${branchId ? `?branchId=${branchId}` : ''}`, { auth: true });

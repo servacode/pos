@@ -12,7 +12,6 @@ import {
   CategoriesIcon,
   Dialog,
   EditIcon,
-  EmptyState,
   IconButton,
   Menu,
   MenuItem,
@@ -27,6 +26,7 @@ import {
   UndoIcon,
   cn,
 } from '@serva/ui';
+import { EmptyState } from '../products/shared';
 import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { categoryExamples } from '../../lib/sectors';
@@ -37,6 +37,7 @@ import {
   canManageCatalog,
   categoryOptionLabel,
   categoryTree,
+  moveWithinSiblings,
   selfAndDescendants,
   type CategoryNode,
 } from '../catalog/catalog';
@@ -219,6 +220,7 @@ function CategoryRow({
   onEdit,
   onAddChild,
   onArchive,
+  onMove,
 }: {
   row: TreeRow;
   first: boolean;
@@ -229,6 +231,7 @@ function CategoryRow({
   onEdit: () => void;
   onAddChild: () => void;
   onArchive: (archived: boolean) => void;
+  onMove: (direction: -1 | 1) => void;
 }) {
   const { category, depth } = row;
   const archived = category.archivedAt !== null;
@@ -307,6 +310,8 @@ function CategoryRow({
           <MenuItem icon={<EditIcon />} onSelect={onEdit}>
             عدّل <bdi className="text-ink-muted">«{category.name}»</bdi>
           </MenuItem>
+          <MenuItem onSelect={() => onMove(-1)}>قدّمه في الترتيب</MenuItem>
+          <MenuItem onSelect={() => onMove(1)}>أخّره في الترتيب</MenuItem>
           <MenuSeparator />
           <MenuItem icon={archived ? <UndoIcon /> : <ArchiveIcon />} onSelect={() => onArchive(!archived)}>
             {archived ? 'أعد' : 'أرشف'} <bdi className="text-ink-muted">«{category.name}»</bdi>
@@ -398,6 +403,29 @@ function CategoriesContent() {
     }
   }
 
+  /** One place up or down among its siblings: the owner's order, saved as sortOrder */
+  async function move(category: Category, direction: -1 | 1) {
+    if (!categories) return;
+    const changes = moveWithinSiblings(categories, category.id, direction);
+    if (changes.length === 0) return;
+    setBusyId(category.id);
+    setActionError(null);
+    try {
+      for (const change of changes) {
+        const current = categories.find((c) => c.id === change.id);
+        if (!current) continue;
+        replace(await updateCategory(current.id, { version: current.version, sortOrder: change.sortOrder }));
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'stale_version') {
+        setActionError(CONFLICT_MESSAGE);
+      } else setActionError(errorMessage(error));
+      void refresh();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const tree = categories ? categoryTree(categories) : [];
   const rows = treeRows(tree);
 
@@ -407,7 +435,7 @@ function CategoriesContent() {
       <SalesPage>
         <PageTop
           title="التصنيفات"
-          subtitle="تجمع منتجاتك على شاشة البيع وفي التقارير. اضغط اسم التصنيف لترى منتجاته."
+          subtitle="تجمع منتجاتك على شاشة البيع وفي التقارير. اضغط اسم التصنيف لترى منتجاته. الترتيب ترتيبك أنت (قدّم أو أخّر من القائمة)، ثم بالاسم."
           actions={
             canManage ? (
               <Button icon={<AddIcon />} onClick={() => setEditing({ mode: 'new', parentId: '' })}>
@@ -465,6 +493,7 @@ function CategoriesContent() {
                 onEdit={() => setEditing({ mode: 'edit', category: row.category })}
                 onAddChild={() => setEditing({ mode: 'new', parentId: row.category.id })}
                 onArchive={(archived) => void archive(row.category, archived)}
+                onMove={(direction) => void move(row.category, direction)}
               />
             ))}
           </ul>

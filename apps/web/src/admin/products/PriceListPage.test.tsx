@@ -65,11 +65,13 @@ function open() {
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': { status: 200, body: catalogMe(['catalog.manage']) },
     'POST /v1/prices/list/preview': { status: 200, body: { items } },
+    'POST /v1/prices/bulk/chg-1/undo': { status: 200, body: { restored: 1, skipped: 0 } },
     'POST /v1/prices/list/apply': (r: MockRequest) => {
       const changes = (r.body as { changes: { variantId: string; newMinor: number }[] }).changes;
       const body: PriceListApplied = {
         changed: changes.length,
         skipped: 0,
+        changeId: 'chg-1',
         items: changes.map((c) => ({
           productId: `p-${c.variantId.slice(2)}`,
           variantId: c.variantId,
@@ -148,6 +150,16 @@ describe('«تحديث الأسعار من ملف»', () => {
       '/labels?queue=1',
     );
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
+
+    // The file can be taken back: the app asks, then every piece goes back to its price
+    await user.click(screen.getByRole('button', { name: 'تراجع عن هذا الملف' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/prices/bulk/chg-1/undo')).toHaveLength(0);
+    await user.click(within(dialog).getByRole('button', { name: 'نعم، رجّع الأسعار' }));
+    expect(await screen.findByText(/رجعت قطعة واحدة إلى سعرها قبل الملف/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/prices/bulk/chg-1/undo')).toHaveLength(1);
+    // taken back once: no second button
+    expect(screen.queryByRole('button', { name: 'تراجع عن هذا الملف' })).not.toBeInTheDocument();
   });
 
   it('selects all and none, and will not go on without a price column', async () => {

@@ -3,6 +3,7 @@ import { businessDateOf, type CurrencyCode } from '@serva/core';
 import { withTenant, type Database } from '@serva/db';
 import { permissionScope } from '../auth/permissions';
 import { DAY_MS } from '../clock';
+import { AppError } from '../errors';
 import { branchesOf } from './merchandise';
 import type { AccessClaims } from '../auth/tokens';
 
@@ -61,7 +62,13 @@ const debtLines = sql`
   where a.code = '1200' and l.party_type = 'customer'
   group by l.party_id`;
 
-export async function loadHomeSummary(db: Database, auth: AccessClaims, now: Date): Promise<HomeSummary> {
+export async function loadHomeSummary(
+  db: Database,
+  auth: AccessClaims,
+  now: Date,
+  /** One branch: its low pieces and its drawers' cash; absent: every branch. Debts and photos are the store's. */
+  branchId?: string,
+): Promise<HomeSummary> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const seesCustomers = await permissionScope(tx, auth.userId, 'customers.view');
     const seesCatalog = await permissionScope(tx, auth.userId, 'catalog.manage');
@@ -104,7 +111,7 @@ export async function loadHomeSummary(db: Database, auth: AccessClaims, now: Dat
     let lowStock: HomeSummary['lowStock'] = null;
     const seesStock = await permissionScope(tx, auth.userId, 'report.view');
     if (seesStock.all || seesStock.branchIds.size > 0) {
-      const ids = await branchesOf(tx, auth, undefined);
+      const ids = await branchesOf(tx, auth, branchId);
       const inBranches = (column: SQL): SQL =>
         ids === null
           ? sql`${column} not in (select id from branches where kind = 'damaged')`
@@ -169,10 +176,16 @@ export async function loadHomeSummary(db: Database, auth: AccessClaims, now: Dat
     let cashUsdMinor: number | null = null;
     const seesMoney = await permissionScope(tx, auth.userId, 'reports.financial');
     if (seesMoney.all) {
+      if (branchId) {
+        const [known] = await tx.execute<{ id: string }>(
+          sql`select id from branches where id = ${branchId}::uuid`,
+        );
+        if (!known) throw new AppError(404, 'not_found', 'هذا الفرع غير موجود.');
+      }
       const cash = await tx.execute<{ currency: string; balance: string }>(sql`
         select l.currency, sum(l.amount_minor)::text as balance
         from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
-        where a.parent_code = '1110'
+        where a.parent_code = '1110' ${branchId ? sql`and l.branch_id = ${branchId}::uuid` : sql``}
         group by l.currency`);
       const of = (code: string) => Number(cash.find((r) => r.currency === code)?.balance ?? 0);
       const baseCode = base?.base ?? 'SYP';

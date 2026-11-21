@@ -23,6 +23,49 @@ const row = (n: number, extra: Partial<PriceChange> = {}): PriceChange => ({
 });
 
 describe('«سجل تغيير الأسعار»', () => {
+  it('draws a rise and a fall as the same pill, a warm one up and a green one down', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: catalogMe() },
+      'GET /v1/price-history?limit=500': {
+        status: 200,
+        body: {
+          items: [row(1), row(2, { productName: 'بنطال', oldMinor: 700_000, newMinor: 650_000 })],
+        },
+      },
+    });
+    renderApp('/price-history');
+    const table = await screen.findByRole('table', { name: 'تغييرات الأسعار' });
+    const rise = (await within(table).findByText('ارتفع')).parentElement!;
+    const fall = within(table).getByText('انخفض').parentElement!;
+    expect(rise).toHaveTextContent('▲');
+    expect(fall).toHaveTextContent('▼');
+    expect(rise).toHaveClass('rounded-full', 'border', 'bg-warning-soft');
+    expect(fall).toHaveClass('rounded-full', 'border', 'bg-success-soft');
+  });
+
+  it('groups a price list under one header with its own undo', async () => {
+    const piece = (n: number) =>
+      row(n, { source: 'price_list', note: 'خريف.xlsx', batchId: 'f-1', undone: false });
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: catalogMe() },
+      'GET /v1/price-history?limit=500': { status: 200, body: { items: [piece(1), row(9), piece(2)] } },
+      'POST /v1/prices/bulk/f-1/undo': { status: 200, body: { restored: 2, skipped: 0 } },
+    });
+    const { user } = renderApp('/price-history');
+    const table = await screen.findByRole('table', { name: 'تغييرات الأسعار' });
+    const header = (await within(table).findByText(/تحديث من ملف «خريف.xlsx»/, { selector: 'span' })).closest(
+      'tr',
+    )!;
+    expect(header).toHaveTextContent('قطعتان');
+    await user.click(within(header).getByRole('button', { name: 'تراجع عن هذا التغيير' }));
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'نعم، رجّع الأسعار' }),
+    );
+    await vi.waitFor(() => expect(requestsTo('POST', '/v1/prices/bulk/f-1/undo')).toHaveLength(1));
+  });
+
   it('lists who changed what, when, from-to and from where, and filters by day and product', async () => {
     const { requestsTo, fetchMock } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
@@ -57,7 +100,10 @@ describe('«سجل تغيير الأسعار»', () => {
     const { user } = renderApp('/price-history');
     const table = await screen.findByRole('table', { name: 'تغييرات الأسعار' });
     await within(table).findAllByText('أحمد الخطيب');
-    const rows = within(table).getAllByRole('row').slice(1);
+    // The loose edits of one day sit under one quiet header
+    const all = within(table).getAllByRole('row').slice(1);
+    expect(all[0]).toHaveTextContent('تعديلات منفردة');
+    const rows = all.filter((r) => !r.classList.contains('day'));
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent('أحمد الخطيب');
     expect(rows[0]).toHaveTextContent('قميص كتان');
@@ -74,7 +120,7 @@ describe('«سجل تغيير الأسعار»', () => {
     await vi.waitFor(() =>
       expect(requestsTo('GET', '/v1/price-history?from=2026-11-01&limit=500')).toHaveLength(1),
     );
-    await vi.waitFor(() => expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(2));
+    await vi.waitFor(() => expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(3));
     expect(fetchMock).toHaveBeenCalled();
   });
 
@@ -154,7 +200,14 @@ describe('«سجل تغيير الأسعار»', () => {
     const { user } = renderApp('/price-history');
     const table = await screen.findByRole('table', { name: 'تغييرات الأسعار' });
     await within(table).findAllByText('قميص كتان');
-    // One button for the whole change, none on the one already undone
+    // One header for the whole change holds the one button; the change already undone has none
+    const headers = within(table)
+      .getAllByRole('row')
+      .filter((r) => r.classList.contains('day'));
+    expect(headers).toHaveLength(2);
+    expect(headers[0]).toHaveTextContent('تعديل جماعي −30٪ · قطعتان');
+    expect(within(headers[0]!).getByRole('button', { name: 'تراجع عن هذا التغيير' })).toBeInTheDocument();
+    expect(headers[1]).toHaveTextContent('تم التراجع عنه');
     expect(screen.getAllByRole('button', { name: 'تراجع عن هذا التغيير' })).toHaveLength(1);
     expect(table).toHaveTextContent('تم التراجع عنه');
     await user.click(screen.getByRole('button', { name: 'تراجع عن هذا التغيير' }));

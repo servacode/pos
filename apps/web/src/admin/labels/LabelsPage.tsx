@@ -10,7 +10,6 @@ import {
   Card,
   CardHeader,
   DeleteIcon,
-  EmptyState,
   IconButton,
   Money,
   PrintIcon,
@@ -23,6 +22,7 @@ import {
   CONTROL_HEIGHT,
   useDensity,
 } from '@serva/ui';
+import { EmptyState } from '../products/shared';
 import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { storeSells } from '../../lib/sectors';
