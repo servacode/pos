@@ -64,7 +64,7 @@ export function DataTable<Row>({
 }: DataTableProps<Row>) {
   const density = useDensity();
   const hasTotals = columns.some((column) => column.total !== undefined);
-  const cellText = density === 'dense' ? 'text-[0.8125rem]' : 'text-sm';
+  const cellText = density === 'dense' ? 'text-[0.8125rem]' : 'text-[0.9375rem]';
 
   function cellClass(column: DataColumn<Row>) {
     return cn(
@@ -121,7 +121,7 @@ export function DataTable<Row>({
         key={rowKey(row)}
         className={cn(
           ROW_HEIGHT[density],
-          'border-b border-line transition-colors duration-120 ease-standard last:border-0 hover:bg-surface-muted/60',
+          'border-b border-line transition-colors duration-120 ease-standard last:border-0 even:bg-surface-muted/35 hover:bg-brand-soft/50',
         )}
       >
         {columns.map((column, index) => {
@@ -147,12 +147,12 @@ export function DataTable<Row>({
         <table aria-busy={loading || undefined} className={cn('w-full border-collapse text-ink', cellText)}>
           <caption className="sr-only">{caption}</caption>
           <thead>
-            <tr className={cn(HEAD_ROW_HEIGHT[density], 'border-b border-line bg-surface-muted/60')}>
+            <tr className={cn(HEAD_ROW_HEIGHT[density], 'border-b border-line-control/40 bg-surface-muted')}>
               {columns.map((column) => (
                 <th
                   key={column.key}
                   scope="col"
-                  className={cn(cellClass(column), 'text-xs font-semibold whitespace-nowrap text-ink-muted')}
+                  className={cn(cellClass(column), 'text-[0.8125rem] font-bold whitespace-nowrap text-ink')}
                 >
                   {column.header}
                 </th>

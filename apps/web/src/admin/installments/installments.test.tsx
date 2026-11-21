@@ -108,7 +108,7 @@ describe('the reminder', () => {
       reminderLink('0944555222', { ...base, kind: 'before' })!.split('text=')[1]!,
     );
     expect(before).toContain('القسط رقم 2 من 6');
-    expect(before).toContain('يستحق بتاريخ 1 كانون الأول 2026');
+    expect(before).toContain('يستحق بتاريخ 01/12/2026');
     const late = decodeURIComponent(
       reminderLink('0944555222', { ...base, kind: 'late', daysLate: 4 })!.split('text=')[1]!,
     );

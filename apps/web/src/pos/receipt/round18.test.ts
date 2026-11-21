@@ -53,7 +53,7 @@ describe('the WhatsApp receipt text (round 18)', () => {
     const text = receiptText(data({ contractVariantIds: ['v1'] }));
     expect(text).toContain('سعر العقد');
     expect(text).toContain('BP-77');
-    expect(text).toContain('الكفالة حتى 30 تشرين الأول 2027');
+    expect(text).toContain('الكفالة حتى 30/10/2027');
     expect(text).toContain('قُرّب المبلغ إلى');
   });
 

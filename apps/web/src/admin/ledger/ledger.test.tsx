@@ -81,9 +81,9 @@ describe('«كشف حساب»', () => {
     expect(rows[1]).toContain('سند قبض');
     expect(screen.getByText('رصيد أول المدة')).toBeInTheDocument();
     expect(screen.getByText('رصيد آخر المدة')).toBeInTheDocument();
-    // One main action; the rest is in «المزيد». Dates are written long, not as 2026-10-20.
+    // One main action; the rest is in «المزيد». Dates are written in numbers, not as 2026-10-20.
     expect(screen.getByRole('button', { name: 'اطبع' })).toBeEnabled();
-    expect(rows[0]).toContain('تشرين الأول');
+    expect(rows[0]).toContain('20/10/2026');
     expect(rows[0]).not.toContain('2026-10-20');
     await user.click(screen.getByRole('button', { name: 'المزيد' }));
     expect(await screen.findByRole('menuitem', { name: 'صدّر إلى إكسل' })).toBeInTheDocument();

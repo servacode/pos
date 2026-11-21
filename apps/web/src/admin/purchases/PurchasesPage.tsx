@@ -1418,7 +1418,7 @@ function PurchaseForm({
                                   )
                                 }
                                 aria-invalid={serialProblem(i) ? true : undefined}
-                                className={`num rounded-control border bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden ${serialProblem(i) ? 'border-danger' : 'border-line-control'}`}
+                                className={`num rounded-control border bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:outline-hidden ${serialProblem(i) ? 'border-danger' : 'border-line-control'}`}
                               />
                               {serialProblem(i) ? (
                                 <span className="text-sm text-danger-ink">{serialProblem(i)}</span>

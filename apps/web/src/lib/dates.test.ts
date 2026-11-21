@@ -9,11 +9,11 @@ describe('store dates', () => {
   });
 
   it('writes the day and the time as the receipts do, years without a separator', () => {
-    expect(dayText('2026-10-31')).toBe('31 تشرين الأول 2026');
-    expect(dayText('2026-01-05', 'arab')).toBe('٥ كانون الثاني ٢٠٢٦');
+    expect(dayText('2026-10-31')).toBe('31/10/2026');
+    expect(dayText('2026-01-05', 'arab')).toBe('٠٥/٠١/٢٠٢٦');
     expect(zonedClock('2026-10-31T13:05:00Z', 'Asia/Damascus')).toBe('4:05 م');
     expect(zonedClock('2026-10-30T21:00:00Z', 'Asia/Damascus')).toBe('12:00 ص');
-    expect(zonedDateTime('2026-10-31T05:00:00Z', 'Asia/Damascus')).toBe('31 تشرين الأول 2026، 8:00 ص');
+    expect(zonedDateTime('2026-10-31T05:00:00Z', 'Asia/Damascus')).toBe('31/10/2026، 8:00 ص');
   });
 
   it('finds the first day of the month', () => {

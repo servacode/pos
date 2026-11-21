@@ -4,7 +4,6 @@ import type { MeResponse, OnlineOrder } from '@serva/core';
 import {
   CardIcon,
   CashIcon,
-  CONTROL_HEIGHT,
   GiftIcon,
   HomeIcon,
   MenuIcon,
@@ -13,7 +12,6 @@ import {
   SalesIcon,
   ScrollStrip,
   StoreIcon,
-  cn,
 } from '@serva/ui';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
 import { useAuth, useMe } from '../auth/useAuth';
@@ -320,10 +318,9 @@ function SectionTabs({ section, pathname }: { section: NavSection; pathname: str
     }
   }, [pathname]);
   return (
-    // -mb-px: the open tab's line lies on the header's hairline.
-    <nav ref={nav} aria-label={`صفحات ${section.label}`} className="-mb-px">
+    <nav ref={nav} aria-label={`صفحات ${section.label}`}>
       <ScrollStrip className="max-sm:snap-x max-sm:snap-proximity">
-        <ul className="flex min-w-max gap-1">
+        <ul className="sh-stabs">
           {section.pages.map((page) => {
             const active = pageOwns(page, pathname);
             return (
@@ -332,14 +329,8 @@ function SectionTabs({ section, pathname }: { section: NavSection; pathname: str
                   to={page.to}
                   aria-current={active ? 'page' : undefined}
                   aria-label={page.tab ? page.label : undefined}
-                  className={cn(
-                    CONTROL_HEIGHT.comfortable,
-                    // The focus ring is drawn inside the tab, so the scrolling strip never clips it.
-                    'inline-flex items-center rounded-t-small border-b-2 px-3 text-[0.9375rem] font-semibold whitespace-nowrap max-sm:px-2.5 transition-colors duration-120 ease-standard focus-visible:-outline-offset-2',
-                    active
-                      ? 'border-brand text-ink'
-                      : 'border-transparent text-ink-muted hover:border-line-control/50 hover:text-ink',
-                  )}
+                  // One look for every section's tabs: shell.css «.sh-stab»
+                  className="sh-stab"
                 >
                   {page.tab ?? page.label}
                 </Link>

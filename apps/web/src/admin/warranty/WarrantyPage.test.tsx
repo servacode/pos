@@ -73,7 +73,7 @@ describe('«الضمان والصيانة»', () => {
     await user.click(screen.getByRole('button', { name: 'ابحث' }));
     expect(await screen.findByText('تحت الكفالة')).toBeInTheDocument();
     expect(screen.getByText('سامر الحلبي')).toBeInTheDocument();
-    expect(screen.getByText('30 تشرين الأول 2027')).toBeInTheDocument();
+    expect(screen.getByText('30/10/2027')).toBeInTheDocument();
 
     const open = screen.getByRole('button', { name: 'افتح مطالبة' });
     expect(open).toBeDisabled();
@@ -138,7 +138,7 @@ describe('«الضمان والصيانة»', () => {
     const { user } = renderApp('/warranty');
     await user.click(await screen.findByRole('button', { name: 'أُرسلت للمورد أو الصيانة' }));
     // the day of each step is written out, never «2026-11-02»
-    expect(screen.getByText('2 تشرين الثاني 2026')).toBeInTheDocument();
+    expect(screen.getByText('02/11/2026')).toBeInTheDocument();
     expect(screen.queryByText('2026-11-02')).not.toBeInTheDocument();
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByLabelText('المورد أو الورشة'), 'وكيل سامسونج');

@@ -69,7 +69,7 @@ const STEP_LABEL: Partial<Record<QuotationStatus, string>> = {
 };
 
 const NOTES_CLASS =
-  'w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden pointer-coarse:text-base';
+  'w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:outline-hidden pointer-coarse:text-base';
 
 /** The fields this page marks itself; any other message the server gives is shown in the alert on top */
 const MARKED = new Set([

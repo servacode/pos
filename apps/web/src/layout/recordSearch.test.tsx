@@ -114,7 +114,7 @@ describe('the search box finds what the server finds by name or number', () => {
     await user.click((await screen.findAllByRole('button', { name: OPEN }))[0]!);
     await user.type(await screen.findByRole('combobox', { name: 'ابحث في المتجر' }), '11');
     const cheque = await screen.findByRole('option', { name: /بنك سورية/ });
-    expect(cheque).toHaveTextContent('1 كانون الأول 2026');
+    expect(cheque).toHaveTextContent('01/12/2026');
     expect(cheque).not.toHaveTextContent('2026-12-01');
     // The cheques list is never downloaded for the search
     expect(requests.some((r) => r.path === '/v1/cheques')).toBe(false);

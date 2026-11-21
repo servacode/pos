@@ -96,7 +96,7 @@ describe('«الصلاحية» on a phone and the recall button', () => {
       const cards = await screen.findByRole('list', { name: 'الدفعات حسب الصلاحية' });
       expect(screen.queryByRole('table', { name: 'الدفعات حسب الصلاحية' })).not.toBeInTheDocument();
       expect(cards).not.toHaveTextContent('2026-10-25');
-      expect(cards).toHaveTextContent('25 تشرين الأول 2026');
+      expect(cards).toHaveTextContent('25/10/2026');
       const urgent = within(cards).getByRole('link', { name: /استدعاء الدفعة A-01/ });
       const calm = within(cards).getByRole('link', { name: /استدعاء الدفعة B-77/ });
       expect(urgent).toHaveClass('ix-urgent');

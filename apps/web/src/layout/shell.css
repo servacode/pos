@@ -76,12 +76,12 @@
   position: sticky;
   inset-block-start: 0;
   flex: none;
-  width: 296px;
+  width: 320px;
   height: 100dvh;
   padding: 12px;
 }
 .sh-sbwrap[data-rail='true'] {
-  width: 96px;
+  width: 112px;
 }
 @media (prefers-reduced-motion: no-preference) {
   .sh-sbwrap {
@@ -123,6 +123,8 @@
 }
 .sh-wm-link {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   min-height: 40px;
   border-radius: var(--radius-control);
@@ -1610,4 +1612,309 @@ a.sh-trial:hover {
   .sh-new-btn {
     display: none;
   }
+}
+
+/* Owner 2026-11-22: a wider sidebar, a larger logo and larger icons, no group headings, and never a
+   scroll. The heading stays for screen readers (it names its list); on screen it is a thin line. */
+.sh-wm-link {
+  justify-content: center;
+}
+.sh-grp + .sh-grp {
+  margin-top: 0;
+}
+.sh-gl {
+  height: 1px;
+  margin: 7px 12px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--color-sidebar-line);
+  color: transparent;
+  font-size: 0;
+}
+.sh-it {
+  height: 42px;
+  font-size: 15px;
+}
+.sh-it-i svg {
+  width: 22px;
+  height: 22px;
+}
+.sh-switch {
+  height: 52px;
+}
+[data-rail='true'] .sh-wm,
+[data-rail='true'] .sh-switch,
+[data-rail='true'] .sh-it,
+[data-rail='true'] .sh-user,
+[data-rail='true'] .sh-sbbtn {
+  width: 64px;
+}
+[data-rail='true'] .sh-it-i svg {
+  width: 24px;
+  height: 24px;
+}
+[data-rail='true'] .sh-wm img {
+  width: 60px;
+  height: 60px;
+}
+/* Shorter screens: the rows and the logo tighten so the list never scrolls */
+@media (max-height: 860px) {
+  .sh-it,
+  [data-rail='true'] .sh-it {
+    height: 34px;
+  }
+  [data-rail='true'] .sh-gl {
+    margin-block: 6px;
+  }
+  .sh-wm-link img {
+    height: 80px;
+  }
+  [data-rail='true'] .sh-wm img {
+    width: 48px;
+    height: 48px;
+  }
+}
+@media (max-height: 760px) {
+  .sh-it,
+  [data-rail='true'] .sh-it {
+    height: 28px;
+  }
+  .sh-gl,
+  [data-rail='true'] .sh-gl {
+    margin-block: 3px;
+  }
+  [data-rail='true'] .sh-user,
+  [data-rail='true'] .sh-switch {
+    height: 40px;
+  }
+  .sh-wm-link img {
+    height: 64px;
+  }
+  [data-rail='true'] .sh-wm img {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* Owner 2026-11-22: the top bar wears the sidebar's navy, as a card beside it. The page's own colour
+   names are re-pointed inside it, so every control in the bar (search, buttons, the branch select)
+   follows without its own rule. */
+.sh-top {
+  --color-canvas: var(--color-sidebar);
+  --color-surface: var(--color-sidebar-hover);
+  --color-surface-sunken: var(--color-sidebar-hover);
+  --color-line: var(--color-sidebar-line);
+  --color-line-strong: var(--color-sidebar-line);
+  --color-ink: var(--color-sidebar-strong);
+  --color-ink-muted: var(--color-sidebar-muted);
+  --color-brand-ink: var(--color-sidebar-strong);
+  margin: 12px 12px 0;
+  margin-inline-start: 0;
+  border: 0;
+  border-radius: var(--radius-panel);
+  background: var(--color-sidebar);
+  color: var(--color-sidebar-ink);
+  box-shadow:
+    0 1px 2px rgb(10 26 63 / 0.18),
+    0 4px 16px rgb(10 26 63 / 0.12);
+}
+@media (max-width: 767px) {
+  .sh-top {
+    margin: 0;
+    border-radius: 0;
+  }
+}
+.sh-top {
+  --color-surface-muted: var(--color-sidebar-active);
+  --color-ink-subtle: var(--color-sidebar-ink);
+  --color-line-control: var(--color-sidebar-muted);
+  height: 72px;
+}
+.sh-top .sh-search {
+  width: 440px;
+  height: 46px;
+  background: rgb(255 255 255 / 0.08);
+  border-color: rgb(255 255 255 / 0.14);
+  box-shadow: none;
+  color: var(--color-sidebar-ink);
+  font-size: 15px;
+}
+.sh-top .sh-search:hover {
+  border-color: rgb(255 255 255 / 0.3);
+}
+.sh-top .sh-kbd {
+  border-color: rgb(255 255 255 / 0.2);
+  background: rgb(255 255 255 / 0.1);
+  color: var(--color-sidebar-strong);
+}
+.sh-top .sh-primary {
+  height: 44px;
+  background: var(--color-sidebar-brand);
+  color: var(--color-sidebar);
+  font-size: 15px;
+}
+.sh-top .sh-primary .sh-kbd {
+  border-color: rgb(10 26 63 / 0.25);
+  background: rgb(10 26 63 / 0.15);
+  color: var(--color-sidebar);
+}
+@media (max-width: 1279px) {
+  .sh-top .sh-search {
+    width: 300px;
+  }
+}
+/* Larger, clearer menu names and icons */
+.sh-it {
+  color: var(--color-sidebar-strong);
+  font-size: 16px;
+  font-weight: 500;
+}
+.sh-it-i {
+  color: var(--color-sidebar-ink);
+}
+.sh-it-i svg {
+  width: 24px;
+  height: 24px;
+}
+[data-rail='true'] .sh-it-i svg {
+  width: 26px;
+  height: 26px;
+}
+/* The top bar's «where you are»: the store as a chip with its initial, then the page in large type */
+.sh-top .sh-crumb ol {
+  gap: 12px;
+  font-size: 15px;
+}
+.sh-top .sh-crumb-store a {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding-inline: 6px 14px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.06);
+  color: var(--color-sidebar-ink);
+  font-weight: 600;
+}
+.sh-top .sh-crumb-store a:hover {
+  background: rgb(255 255 255 / 0.12);
+  color: var(--color-sidebar-strong);
+}
+.sh-crumb-av {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--color-sidebar-brand);
+  color: var(--color-sidebar);
+  font-size: 15px;
+  font-weight: 700;
+}
+.sh-top .sh-crumb [aria-current='page'] {
+  color: var(--color-sidebar-strong);
+  font-size: 18px;
+  font-weight: 700;
+}
+.sh-top .sh-crumb li svg {
+  color: var(--color-sidebar-muted);
+}
+@media (max-width: 767px) {
+  .sh-crumb-av {
+    display: none;
+  }
+}
+.sh-top .sh-search {
+  flex: 0 1 400px;
+  width: auto;
+  min-width: 220px;
+}
+.sh-top .sh-crumb-store {
+  flex: none;
+}
+.sh-top .sh-crumb-store a > span:last-child {
+  display: block;
+  white-space: nowrap;
+}
+/* Owner 2026-11-22: every section's page tabs, one look in one place. A white segmented strip under
+   the navy top bar; the open page is a navy pill. */
+.sh-subbar {
+  border-bottom: 0;
+}
+.sh-subbar-in {
+  padding-top: 16px;
+}
+.sh-stabs {
+  display: flex;
+  gap: 4px;
+  width: max-content;
+  min-width: 0;
+  margin: 0;
+  padding: 5px;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-e1);
+  list-style: none;
+}
+.sh-stab {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding-inline: 18px;
+  border-radius: 10px;
+  color: var(--color-ink-muted);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color 120ms var(--sh-ease),
+    color 120ms var(--sh-ease);
+}
+.sh-stab:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-ink);
+}
+.sh-stab:focus-visible {
+  outline-offset: -2px;
+}
+.sh-stab[aria-current='page'] {
+  background: var(--color-sidebar);
+  box-shadow: 0 1px 2px rgb(10 26 63 / 0.25);
+  color: var(--color-sidebar-strong);
+}
+@media (max-width: 767px) {
+  .sh-subbar-in {
+    padding-top: 10px;
+  }
+  .sh-stab {
+    height: 36px;
+    padding-inline: 12px;
+    font-size: 14px;
+  }
+}
+/* The top bar keeps the store chip; the page's own title says where you are (768–1599 px has no room
+   for both beside the search) */
+@media (min-width: 768px) and (max-width: 1599px) {
+  .sh-top .sh-crumb-sep,
+  .sh-top .sh-crumb-stack {
+    display: none;
+  }
+}
+/* Owner 2026-11-22: every table in the admin reads the same: a firm header, a soft band on every
+   other row, a clear hover. Written once here, so the hand-made tables follow DataTable. */
+.sh-page table thead th {
+  background: var(--color-surface-muted);
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+.sh-page table tbody tr:nth-child(even) {
+  background: color-mix(in oklab, var(--color-surface-muted) 35%, transparent);
+}
+.sh-page table tbody tr:hover {
+  background: color-mix(in oklab, var(--color-brand-soft) 50%, transparent);
 }

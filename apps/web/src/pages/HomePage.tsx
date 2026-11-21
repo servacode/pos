@@ -1601,41 +1601,46 @@ function MorningLine({
 }) {
   const dollar = rate !== null && Number(rate) > 0 ? Number(rate) : null;
   if (yesterday === null && cash === null && dollar === null && owed === null) return null;
-  const chip =
-    'inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-sm whitespace-nowrap text-ink-muted';
+  // Owner 2026-11-22: each figure a small card, its name above and the number large under it
+  const tile =
+    'flex min-w-40 shrink-0 flex-col gap-1 rounded-card border border-line bg-surface px-4 py-3 shadow-e1 sm:flex-1';
+  const name = 'text-xs font-semibold text-ink-muted';
+  const value = 'flex flex-wrap items-baseline gap-x-2 text-lg font-bold text-ink';
   return (
     <ul
       aria-label="نظرة الصباح"
-      className="flex gap-2 max-sm:-mx-4 max-sm:min-w-0 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-1 sm:flex-wrap"
+      className="flex gap-3 max-sm:-mx-4 max-sm:min-w-0 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-1 sm:flex-wrap"
     >
       {yesterday !== null ? (
-        <li className={chip}>
-          أمس <Money minor={yesterday} currency={base} className="font-semibold text-ink" />
+        <li className={tile}>
+          <span className={name}>مبيعات أمس</span>
+          <Money minor={yesterday} currency={base} className={value} />
         </li>
       ) : null}
       {cash !== null ? (
-        <li className={chip}>
-          في الأدراج <Money minor={cash} currency={base} className="font-semibold text-ink" />
-          {cashUsd !== null ? (
-            <>
-              <span aria-hidden="true">·</span>
-              <Money minor={cashUsd} currency="USD" className="font-semibold text-ink" />
-            </>
-          ) : null}
+        <li className={tile}>
+          <span className={name}>النقد في الأدراج</span>
+          <span className={value}>
+            <Money minor={cash} currency={base} />
+            {cashUsd !== null ? <Money minor={cashUsd} currency="USD" /> : null}
+          </span>
         </li>
       ) : null}
       {owed !== null ? (
-        <li className={chip}>
-          <Link to="/suppliers" className="inline-flex items-center gap-1.5">
-            علينا للموردين{' '}
-            <Money minor={owed.minor} currency={owed.currency} className="font-semibold text-ink" />
+        <li className={cn(tile, 'transition-colors duration-120 hover:border-line-control')}>
+          <Link to="/suppliers" className="flex flex-col gap-1">
+            <span className={name}>علينا للموردين</span>
+            <Money minor={owed.minor} currency={owed.currency} className={value} />
           </Link>
         </li>
       ) : null}
       {dollar !== null ? (
-        <li className={chip}>
-          سعر الدولار
-          <bdi className="num font-semibold text-ink">{formatNumber(dollar, digits)}</bdi> ل.س
+        <li className={tile}>
+          <span className={name}>سعر الدولار اليوم</span>
+          <span className={value}>
+            <bdi className="num">{formatNumber(dollar, digits)}</bdi>
+            <span className="text-sm font-semibold text-ink-muted">ل.س</span>
+          </span>
         </li>
       ) : null}
     </ul>

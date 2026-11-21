@@ -100,7 +100,7 @@ export function ShopTextSection({
 
   const dirty = texts !== null && JSON.stringify(texts) !== kept;
   const area =
-    'w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden disabled:opacity-60 pointer-coarse:text-base';
+    'w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:outline-hidden disabled:opacity-60 pointer-coarse:text-base';
   const waiting = alerts.filter((a) => !a.notifiedAt);
   return (
     <SectionCard

@@ -158,7 +158,7 @@ export function TransferReceive({
                     rows={Math.min(5, Math.max(2, l.serials.length))}
                     value={serials[l.variantId] ?? ''}
                     onChange={(e) => setSerials((s) => ({ ...s, [l.variantId]: e.target.value }))}
-                    className="num rounded-control border border-line-control bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden"
+                    className="num rounded-control border border-line-control bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:outline-hidden"
                   />
                   {fields[`lines.${i}.serials`] ? (
                     <span className="text-sm text-danger-ink">{fields[`lines.${i}.serials`]}</span>

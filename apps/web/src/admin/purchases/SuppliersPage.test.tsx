@@ -34,8 +34,8 @@ describe('«الموردون»', () => {
     const { user } = renderApp('/suppliers');
     const link = (await screen.findAllByRole('link', { name: 'مستودع النور' }))[0]!;
     expect(link).toHaveAttribute('href', '/suppliers/s-1/statement');
-    // The last purchase in words, the purchases total, and a button to add a supplier here
-    expect(screen.getAllByText(/تشرين الثاني/).length).toBeGreaterThan(0);
+    // The last purchase in numbers, the purchases total, and a button to add a supplier here
+    expect(screen.getAllByText(/03\/11\/2026/).length).toBeGreaterThan(0);
     expect(screen.getByRole('columnheader', { name: 'مشترياتنا منه' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'مورد جديد' })).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox', { name: 'من له مبلغ فقط' }));

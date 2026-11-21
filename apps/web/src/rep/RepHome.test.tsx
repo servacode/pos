@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepDaySheet } from '@serva/core/distribution';
+import { businessDateOf } from '@serva/core/sale';
 import { memoryLocal, type LocalStore } from '../offline/local';
 import type { CatalogSets } from '../pos/catalog';
 import { saveWith, type PosServices } from '../pos/services';
@@ -470,8 +471,8 @@ describe('the rep’s day (/rep)', () => {
     // The count goes to the server for the supervisor's settlement, and the phone remembers it was sent
     await waitFor(() => expect(h.calls.vanCounts).toHaveLength(1));
     expect(h.calls.vanCounts[0]).toEqual({
-      // The shift's day: today on the device's clock
-      businessDate: new Date().toLocaleDateString('en-CA'),
+      // The shift's day: today in the store's time zone (Damascus), not the test machine's
+      businessDate: businessDateOf(Date.now(), 'Asia/Damascus', '00:00'),
       lines: [{ variantId: PRODUCTS.milk.variant.id, counted: 10_000 }],
     });
     await waitFor(async () =>

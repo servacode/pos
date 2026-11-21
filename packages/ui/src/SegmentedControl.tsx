@@ -19,18 +19,20 @@ export const SEGMENT_SIZE: Record<Density, string> = {
  * segments stretch to fill it.
  */
 export function segmentTrackClass(density: Density): string {
-  return cn(CONTROL_HEIGHT[density], 'gap-1 rounded-control bg-surface-muted p-1');
+  return cn(CONTROL_HEIGHT[density], 'gap-1 rounded-control border border-line bg-surface p-1 shadow-e1');
 }
 
 /**
- * A segment: the chosen one lifted on surface, with a hairline as well as the soft shadow. A clear
+ * A segment: the chosen one is a navy pill, as the section tabs (owner 2026-11-22). A clear
  * layer (before:) reaches over the track's 4 inside above and below, so a finger aims at the full
  * control height (48 on a tablet) while the drawn segment stays 8 shorter.
  */
 export function segmentClass(on: boolean): string {
   return cn(
     'relative rounded-small font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard before:absolute before:inset-x-0 before:-inset-y-1 disabled:cursor-not-allowed disabled:opacity-50',
-    on ? 'bg-surface text-ink shadow-e1 ring-1 ring-line' : 'text-ink-muted enabled:hover:text-ink',
+    on
+      ? 'bg-sidebar text-sidebar-strong shadow-e1'
+      : 'text-ink-muted enabled:hover:bg-surface-muted enabled:hover:text-ink',
   );
 }
 

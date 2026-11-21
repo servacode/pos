@@ -198,14 +198,14 @@ describe('«القيود»', () => {
     });
 
     const table = await screen.findByRole('table', {
-      name: 'القيود من 1 تشرين الأول 2026 إلى 31 تشرين الأول 2026',
+      name: 'القيود من 01/10/2026 إلى 31/10/2026',
     });
     await within(table).findByText('JRN-2026-0000001');
     // The general journal: each entry heads its own group of rows (number, day, document, memo),
     // its lines under it with the debit and the credit in their own columns.
     expect(within(table).getAllByRole('row').map(text)).toEqual([
       'الحسابمديندائن',
-      'JRN-2026-000000131 تشرين الأول 2026فاتورة بيع INV-001-002-0000001فاتورة بيع',
+      'JRN-2026-000000131/10/2026فاتورة بيع INV-001-002-0000001فاتورة بيع',
       '1110 الصندوق (أدراج الكاشير)30 ل.س',
       '1111 الصندوق بالدولار9.00 $ بسعر 1301,170 ل.س',
       '4100 المبيعات1,200 ل.س',

@@ -37,7 +37,17 @@ describe('Button', () => {
       'secondary',
       ['bg-surface', 'text-ink', 'border-line-control/50', 'shadow-e1', 'hover:bg-surface-muted'],
     ],
-    ['ghost', ['text-ink-muted', 'hover:bg-surface-muted', 'hover:text-ink']],
+    [
+      'ghost',
+      [
+        'border',
+        'border-line-control/50',
+        'bg-surface',
+        'text-ink',
+        'hover:bg-surface-muted',
+        'hover:text-ink',
+      ],
+    ],
     ['danger', ['bg-danger', 'text-on-danger']],
     ['danger-soft', ['bg-danger-soft', 'text-danger-ink']],
   ] as const)('draws the %s variant with its tokens', (variant, tokens) => {
@@ -123,8 +133,8 @@ describe('Button', () => {
     expect(button.firstChild).toHaveClass('motion-safe:animate-spin');
     expect(button.lastChild?.nodeType).toBe(Node.TEXT_NODE);
     expect(button.lastChild?.textContent).toBe('إلغاء');
-    // Nothing covers the label, so a busy ghost needs no fill of its own.
-    expect(button).toHaveClass('text-ink-muted');
+    // A ghost with words is a quiet outlined button: surface fill, ink text.
+    expect(button).toHaveClass('text-ink', 'bg-surface', 'border-line-control/50');
     expect(button).not.toHaveClass('bg-surface-muted');
   });
 

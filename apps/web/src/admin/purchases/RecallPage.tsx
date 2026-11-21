@@ -651,7 +651,7 @@ export function RecallPage() {
               value={draft}
               onChange={(e) => setDraft(e.target.value.slice(0, 700))}
               rows={5}
-              className="w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden pointer-coarse:text-base"
+              className="w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:outline-hidden pointer-coarse:text-base"
             />
             <p className="text-sm text-ink-muted">
               اضغط «واتساب» أمام الزبون لتفتح محادثة جاهزة بهذه الرسالة. تُرسل كل رسالة منك.

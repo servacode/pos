@@ -17,9 +17,9 @@ describe('the warranty on a receipt', () => {
   });
 
   it('prints the end date in Arabic words from the sale day', () => {
-    expect(warrantyText(line, '2026-10-30T09:00:00.000Z', settings)).toBe('الكفالة حتى 30 تشرين الأول 2027');
+    expect(warrantyText(line, '2026-10-30T09:00:00.000Z', settings)).toBe('الكفالة حتى 30/10/2027');
     // After midnight in the store's zone it is the next day
-    expect(warrantyText(line, '2026-10-30T22:30:00.000Z', settings)).toBe('الكفالة حتى 31 تشرين الأول 2027');
+    expect(warrantyText(line, '2026-10-30T22:30:00.000Z', settings)).toBe('الكفالة حتى 31/10/2027');
     expect(warrantyText({ serials: ['A1B2C3'] }, '2026-10-30T09:00:00.000Z', settings)).toBeNull();
     expect(warrantyText({ warrantyMonths: 12 }, '2026-10-30T09:00:00.000Z', settings)).toBeNull();
   });

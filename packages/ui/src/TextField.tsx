@@ -77,8 +77,7 @@ const TEXT_PADDING: Record<Density, string> = {
   dense: 'px-1.5',
 };
 
-const FOCUS_HALO =
-  'focus-within:border-brand focus-within:hover:border-brand focus-within:ring-4 focus-within:ring-brand/15';
+const FOCUS_HALO = 'focus-within:border-brand focus-within:hover:border-brand';
 
 /**
  * The box's border, fill and halo in each state. An error keeps its colour when focused, so the
@@ -95,11 +94,7 @@ function boxTone({
   readOnly: boolean;
 }): string {
   if (error) {
-    return cn(
-      'border-danger ring-4 ring-danger/15',
-      'has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring',
-      disabled || readOnly ? 'bg-surface-muted' : 'bg-surface',
-    );
+    return cn('border-danger', disabled || readOnly ? 'bg-surface-muted' : 'bg-surface');
   }
   if (disabled) return 'cursor-not-allowed border-line bg-surface-muted';
   if (readOnly) return cn('border-line bg-surface-muted', FOCUS_HALO);

@@ -435,7 +435,7 @@ describe('DataTable', () => {
     expect(screen.getByText('أم محمد').closest('tr')).toHaveClass('h-8');
   });
 
-  it('sits in a card shell with soft column heads, hairline rows and the first column in semibold', () => {
+  it('sits in a card shell with bold ink column heads, hairline rows and the first column in semibold', () => {
     const { container } = renderUi(
       <DataTable caption="ديون الزبائن" columns={COLUMNS} rows={ROWS} rowKey={(row) => row.id} />,
     );
@@ -447,10 +447,10 @@ describe('DataTable', () => {
       'overflow-hidden',
     );
     const head = screen.getByRole('columnheader', { name: 'الزبون' });
-    expect(head).toHaveClass('text-xs', 'font-semibold', 'text-ink-muted');
-    expect(head.closest('tr')).toHaveClass('bg-surface-muted/60');
+    expect(head).toHaveClass('text-[0.8125rem]', 'font-bold', 'text-ink');
+    expect(head.closest('tr')).toHaveClass('bg-surface-muted');
     const row = screen.getByText('أم محمد').closest('tr')!;
-    expect(row).toHaveClass('h-12', 'border-b', 'border-line', 'hover:bg-surface-muted/60');
+    expect(row).toHaveClass('h-12', 'border-b', 'border-line', 'hover:bg-brand-soft/50');
     expect(screen.getByText('أم محمد')).toHaveClass('font-semibold');
   });
 
@@ -513,8 +513,23 @@ describe('Tabs', () => {
     expect(onChange).toHaveBeenLastCalledWith('week');
   });
 
-  it('underlines the active section of a page by default, at the control height of its density', () => {
+  it('is a segmented track by default, with the chosen tab a navy pill, at the control height of its density', () => {
     renderUi(<Controlled onChange={() => {}} />);
+
+    expect(screen.getByRole('tablist', { name: 'الفترة' })).toHaveClass(
+      'bg-surface',
+      'border-line',
+      'shadow-e1',
+      'min-h-10',
+    );
+    const active = screen.getByRole('tab', { name: 'اليوم' });
+    expect(active).toHaveClass('bg-sidebar', 'text-sidebar-strong');
+  });
+
+  it('underlines the active section when asked for the underline variant', () => {
+    renderUi(
+      <Tabs label="الفترة" items={items} value="today" onValueChange={() => {}} variant="underline" />,
+    );
 
     expect(screen.getByRole('tablist', { name: 'الفترة' })).toHaveClass('border-b', 'border-line');
     const active = screen.getByRole('tab', { name: 'اليوم' });
@@ -525,20 +540,22 @@ describe('Tabs', () => {
     );
   });
 
-  it('can be a segmented track instead, keeping the same roles and keys', async () => {
+  it('can be given the segmented track explicitly, keeping the same roles and keys', async () => {
     const onChange = vi.fn();
     const { user } = renderUi(
       <Tabs label="الفترة" items={items} value="today" onValueChange={onChange} variant="pill" />,
     );
 
     expect(screen.getByRole('tablist', { name: 'الفترة' })).toHaveClass(
-      'bg-surface-muted',
+      'bg-surface',
+      'border-line',
+      'shadow-e1',
       'rounded-control',
       'min-h-10',
       'pointer-coarse:min-h-12',
     );
     const active = screen.getByRole('tab', { name: 'اليوم' });
-    expect(active).toHaveClass('bg-surface', 'text-ink', 'shadow-e1', 'ring-1', 'ring-line');
+    expect(active).toHaveClass('bg-sidebar', 'text-sidebar-strong', 'shadow-e1');
     expect(active).toHaveAttribute('aria-selected', 'true');
     active.focus();
     await user.keyboard('{ArrowLeft}');
@@ -588,7 +605,7 @@ describe('SegmentedControl', () => {
     expect(screen.getByRole('radiogroup')).toHaveClass('min-h-14', 'p-1');
   });
 
-  it('lifts the chosen segment out of a muted track; a finger gets 48 on the admin', () => {
+  it('lifts the chosen segment as a navy pill on a bordered track; a finger gets 48 on the admin', () => {
     renderUi(
       <SegmentedControl
         label="الفترة"
@@ -603,14 +620,16 @@ describe('SegmentedControl', () => {
 
     // The whole control is the admin's control height, 48 under a finger, like the fields beside it.
     expect(screen.getByRole('radiogroup')).toHaveClass(
-      'bg-surface-muted',
+      'bg-surface',
+      'border-line',
+      'shadow-e1',
       'p-1',
       'rounded-control',
       'min-h-10',
       'pointer-coarse:min-h-12',
     );
     const chosen = screen.getByRole('radio', { name: 'اليوم' });
-    expect(chosen).toHaveClass('bg-surface', 'text-ink', 'shadow-e1', 'ring-1', 'ring-line', 'rounded-small');
+    expect(chosen).toHaveClass('bg-sidebar', 'text-sidebar-strong', 'shadow-e1', 'rounded-small');
     // A clear layer over the track's 4 inside gives the finger the full height.
     expect(chosen).toHaveClass('relative', 'before:absolute', 'before:-inset-y-1');
     expect(screen.getByRole('radio', { name: 'الأسبوع' })).toHaveClass('text-ink-muted');

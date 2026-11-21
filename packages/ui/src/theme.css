@@ -304,6 +304,10 @@
     outline: 2px solid var(--color-ring);
     outline-offset: 2px;
   }
+  /* Owner 2026-11-22: no outline around fields; their border turns blue instead */
+  :is(input, select, textarea):focus-visible {
+    outline: none;
+  }
 
   ::selection {
     background-color: var(--color-brand-soft);

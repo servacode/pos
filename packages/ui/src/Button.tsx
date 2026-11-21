@@ -59,6 +59,13 @@ const VARIANTS: Record<ButtonVariant, VariantStyle> = {
 };
 
 /**
+ * A ghost button with words («اطبع», «صدّر إلى إكسل») wears a light frame so it reads as a button
+ * (owner 2026-11-22). An icon-only ghost (IconButton) stays bare.
+ */
+const GHOST_TEXT =
+  'border border-line-control/50 bg-surface text-ink aria-pressed:border-brand aria-pressed:bg-brand-soft aria-pressed:text-brand-ink';
+
+/**
  * The height of each size on each density: one class with a mouse and at most one under a finger
  * (pointer-coarse), so no two fight. Each size is a density's control height (context.tsx): xs dense,
  * sm compact, md comfortable, lg 48. Under a finger no density goes below its own touch target (tab 14
@@ -201,7 +208,7 @@ export function Button({
       className={cn(
         BASE,
         sizeClass(resolved, density),
-        VARIANTS[variant].rest,
+        variant === 'ghost' ? GHOST_TEXT : VARIANTS[variant].rest,
         stateClass(variant, disabled, loading),
         fullWidth && 'w-full',
         className,

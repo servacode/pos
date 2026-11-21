@@ -91,7 +91,6 @@ function TrialRing({ days, total }: { days: number; total: number }) {
 export function SidebarPanel({
   mode,
   rail,
-  store,
   groups,
   current,
   counts,
@@ -117,7 +116,7 @@ export function SidebarPanel({
       <div className="sh-head">
         <div className="sh-wm">
           <Link to="/" className="sh-wm-link" aria-label="سيرفا، الرئيسية">
-            {rail ? <LogoMark tone="sidebar" /> : <Logo tone="sidebar" className="h-16" />}
+            {rail ? <LogoMark tone="sidebar" /> : <Logo tone="sidebar" size="lg" />}
           </Link>
           {mode === 'drawer' ? (
             <button type="button" className="sh-sbbtn sh-close" aria-label="أغلق القائمة" onClick={onClose}>
@@ -125,20 +124,6 @@ export function SidebarPanel({
             </button>
           ) : null}
         </div>
-        <Hint rail={rail} text={store.name}>
-          <div className="sh-switch" role="group" aria-label={`المتجر: ${store.name}`}>
-            <span className="sh-sav" aria-hidden="true">
-              {store.initials}
-            </span>
-            <span className="sh-sw-t">
-              <b>{store.name}</b>
-              <span className="sh-sw-s">
-                <span className="sh-chip">{store.chip}</span>
-                {store.branches ? <span>{store.branches}</span> : null}
-              </span>
-            </span>
-          </div>
-        </Hint>
       </div>
 
       <nav aria-label="القائمة الرئيسية" className="sh-nav">

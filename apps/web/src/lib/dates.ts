@@ -68,11 +68,11 @@ export function monthStart(day: string): string {
   return `${day.slice(0, 8)}01`;
 }
 
-/** «31 تشرين الأول 2026» for an ISO day «2026-10-31». */
+/** «31/10/2026» for an ISO day «2026-10-31»: dates are written in numbers only (owner 2026-11-22). */
 export function dayText(day: string, digits: Digits = 'latn'): string {
   const [year, month, date] = day.split('-').map(Number);
   if (!year || !month || !date) return day;
-  return `${digitsOf(String(date), digits)} ${MONTHS[month - 1]} ${digitsOf(String(year), digits)}`;
+  return digitsOf(`${pad(date)}/${pad(month)}/${year}`, digits);
 }
 
 /** «4:32 م» of a moment in the store's time zone. */

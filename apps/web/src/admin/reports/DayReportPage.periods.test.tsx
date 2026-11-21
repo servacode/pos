@@ -53,7 +53,7 @@ describe('«مبيعات اليوم» — the days', () => {
     expect(screen.getByRole('button', { name: 'اليوم التالي' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'اليوم السابق' }));
-    expect(await screen.findByText(/30 تشرين الأول 2026/)).toBeInTheDocument();
+    expect(await screen.findByText(/30\/10\/2026/)).toBeInTheDocument();
     expect(requestsTo('GET', '/v1/reports/day?date=2026-10-30')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'اليوم التالي' })).toBeEnabled();
     expect(screen.getByRole('radio', { name: 'اليوم' })).not.toBeChecked();
@@ -96,8 +96,8 @@ describe('«مبيعات اليوم» — the days', () => {
     expect(requestsTo('GET', '/v1/reports/days?from=2026-10-01&to=2026-10-31')).toHaveLength(1);
     expect(within(table).getAllByRole('row').map(text)).toEqual([
       'اليومالفواتيرالمبيعاتالمرتجعاتالصافي',
-      '29 تشرين الأول 20261050,000 ل.س5,000 ل.س45,000 ل.س',
-      '30 تشرين الأول 2026525,000 ل.س0 ل.س25,000 ل.س',
+      '29/10/20261050,000 ل.س5,000 ل.س45,000 ل.س',
+      '30/10/2026525,000 ل.س0 ل.س25,000 ل.س',
       'المجموع1575,000 ل.س5,000 ل.س70,000 ل.س',
     ]);
     // The tiles: net 70,000 over 15 invoices, average 4,667
@@ -107,7 +107,7 @@ describe('«مبيعات اليوم» — the days', () => {
     expect(text(screen.getByText('متوسط الفاتورة').closest('div')!)).toContain('4,667 ل.س');
     expect(screen.getByRole('button', { name: 'اطبع' })).toBeDisabled();
 
-    fireEvent.click(within(table).getByRole('button', { name: '29 تشرين الأول 2026' }));
+    fireEvent.click(within(table).getByRole('button', { name: '29/10/2026' }));
     await vi.waitFor(() => expect(requestsTo('GET', '/v1/reports/day?date=2026-10-29')).toHaveLength(1));
     expect(await screen.findByText('المبيعات قبل الحسم والضريبة')).toBeInTheDocument();
   });
@@ -130,7 +130,7 @@ describe('«مبيعات اليوم» — the days', () => {
       },
       'GET /v1/reports/day?date=2026-10-28': { status: 200, body: dayReport({ date: '2026-10-28' }) },
     });
-    const link = await screen.findByRole('button', { name: /آخر يوم فيه مبيعات: 28 تشرين الأول 2026/ });
+    const link = await screen.findByRole('button', { name: /آخر يوم فيه مبيعات: 28\/10\/2026/ });
     fireEvent.click(link);
     await vi.waitFor(() => expect(requestsTo('GET', '/v1/reports/day?date=2026-10-28')).toHaveLength(1));
     expect(await screen.findByText('المبيعات قبل الحسم والضريبة')).toBeInTheDocument();

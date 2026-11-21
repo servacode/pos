@@ -21,8 +21,8 @@ export interface TabsProps<V extends string> {
   value: V;
   onValueChange: (value: V) => void;
   /**
-   * 'underline' (the default, هوية 4 › Underline tabs): the sections of a page, over a hairline with
-   * a brand line under the active one. 'pill': a segmented track, for views inside a card.
+   * 'pill' (the default since 2026-11-22, the owner's one look for tabs): a segmented track with the
+   * open tab a navy pill. 'underline': a brand line under the active one, over a hairline.
    */
   variant?: 'underline' | 'pill';
   className?: string;
@@ -37,7 +37,7 @@ export function Tabs<V extends string>({
   items,
   value,
   onValueChange,
-  variant = 'underline',
+  variant = 'pill',
   className,
 }: TabsProps<V>) {
   const density = useDensity();

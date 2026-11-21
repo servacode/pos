@@ -45,16 +45,12 @@ export function Select({
   const errorId = error ? `${selectId}-error` : undefined;
   const inset = INSET[density];
 
-  // The box shows the focus. An error keeps its colour when focused, so the global focus ring says
-  // where you are instead.
+  // The box's border shows the focus (owner 2026-11-22: no outline or halo around fields).
   const tone = error
-    ? cn(
-        'border-danger ring-4 ring-danger/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-        disabled ? 'bg-surface-muted' : 'bg-surface',
-      )
+    ? cn('border-danger focus:outline-hidden', disabled ? 'bg-surface-muted' : 'bg-surface')
     : disabled
       ? 'border-line bg-surface-muted'
-      : 'border-line-control bg-surface hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden';
+      : 'border-line-control bg-surface hover:border-ink-subtle focus:border-brand focus:outline-hidden';
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>

@@ -523,7 +523,7 @@ describe('the price checker', () => {
     expect(plain(check)).toContain('4,000');
     expect(plain(check)).toContain('350 ل.س');
     expect(plain(check)).toContain('T-9');
-    expect(plain(check)).toContain('1 كانون الأول 2026');
+    expect(plain(check)).toContain('01/12/2026');
     expect(plain(check)).not.toContain('01-12-2026');
     expect(screen.getByText('السلة فارغة')).toBeInTheDocument();
   });

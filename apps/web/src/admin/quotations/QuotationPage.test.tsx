@@ -509,7 +509,7 @@ describe('«عروض الأسعار»: the words of an ended offer', () => {
     });
     renderApp('/quotations/q-1');
     const note = await screen.findByText(/أُنهي هذا العرض قبل موعده/);
-    expect(note.textContent).toContain('1 كانون الثاني 2030');
+    expect(note.textContent).toContain('01/01/2030');
     expect(note.textContent).not.toContain('2030-01-01');
     expect(screen.queryByText(/انتهت صلاحية هذا العرض/)).not.toBeInTheDocument();
   });
@@ -518,7 +518,7 @@ describe('«عروض الأسعار»: the words of an ended offer', () => {
     mockFetch({ ...base, 'GET /v1/quotations/q-1': { status: 200, body: quotation({ status: 'expired' }) } });
     renderApp('/quotations/q-1');
     const note = await screen.findByText(/انتهت صلاحية هذا العرض/);
-    expect(note.textContent).toContain('16 تشرين الثاني 2026');
+    expect(note.textContent).toContain('16/11/2026');
     expect(note.textContent).not.toContain('2026-11-16');
   });
 });

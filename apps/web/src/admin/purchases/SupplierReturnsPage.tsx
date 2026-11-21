@@ -633,7 +633,7 @@ export function SupplierReturnsPage() {
                                     all.map((x, j) => (j === i ? { ...x, serials: e.target.value } : x)),
                                   )
                                 }
-                                className="num rounded-control border border-line-control bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden"
+                                className="num rounded-control border border-line-control bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:outline-hidden"
                               />
                               {fields[`lines.${i}.serials`] ? (
                                 <span className="text-sm text-danger-ink">

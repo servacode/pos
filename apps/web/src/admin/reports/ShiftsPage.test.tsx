@@ -52,7 +52,7 @@ describe('«الورديات»', () => {
       '/shifts',
     );
 
-    const table = await screen.findByRole('table', { name: 'ورديات 31 تشرين الأول 2026' });
+    const table = await screen.findByRole('table', { name: 'ورديات 31/10/2026' });
     await within(table).findByText('SFT-001-002-0000231');
     const rows = within(table).getAllByRole('row').map(text);
     expect(rows).toEqual([
@@ -95,7 +95,7 @@ describe('«الورديات»', () => {
       '/shifts',
     );
 
-    const table = await screen.findByRole('table', { name: 'ورديات 31 تشرين الأول 2026' });
+    const table = await screen.findByRole('table', { name: 'ورديات 31/10/2026' });
     await within(table).findByText('عجز');
     const row = within(table).getAllByRole('row').map(text)[1] ?? '';
     // The list says only the difference, as a badge (the close report has the expected and the counted)
@@ -121,7 +121,7 @@ describe('«الورديات»', () => {
       },
       '/shifts',
     );
-    await screen.findByRole('table', { name: 'ورديات 31 تشرين الأول 2026' });
+    await screen.findByRole('table', { name: 'ورديات 31/10/2026' });
     expect(requestsTo('GET', `/v1/shifts?date=${TODAY}`)).toHaveLength(1);
     expect(requests.some((r) => /\/v1\/shifts\/[^?]/.test(r.path))).toBe(false);
   });
@@ -227,7 +227,7 @@ describe('«الورديات»', () => {
       },
       '/shifts',
     );
-    const table = await screen.findByRole('table', { name: 'ورديات 31 تشرين الأول 2026' });
+    const table = await screen.findByRole('table', { name: 'ورديات 31/10/2026' });
     await within(table).findByText('SFT-001-002-0000231');
     expect(text(within(table).getAllByRole('row')[1]!)).toContain('28,372.50 ل.س');
   });
@@ -371,7 +371,7 @@ describe('the shift close report', () => {
       'إيداع في الدرجفكّة من الخزنة12,000 ل.سخالد العلي10:15 ص',
       'سحب من الدرجثلج ومواد تنظيف1,500 ل.س—12:40 م',
     ]);
-    expect(screen.getByText('31 تشرين الأول 2026، 8:00 ص')).toBeInTheDocument();
+    expect(screen.getByText('31/10/2026، 8:00 ص')).toBeInTheDocument();
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 

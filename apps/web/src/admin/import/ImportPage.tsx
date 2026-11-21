@@ -30,7 +30,7 @@ import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
-import { isoDay, MONTHS } from '../../lib/dates';
+import { isoDay } from '../../lib/dates';
 import { downloadText } from '../accounting/csv';
 import { postImport } from './api';
 import { applyOldPound, OldPoundSwitch } from './oldPound';
@@ -129,10 +129,10 @@ const TONE: Record<ImportRowResult['status'], BadgeTone> = {
 };
 
 const SHOWN_ROWS = 300;
-/** «2026-10-30» as «30 تشرين الأول 2026», the way the boards and receipts write dates. */
+/** «2026-10-30» as «30/10/2026», the way the boards and receipts write dates. */
 const arabicDate = (iso: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  return m ? `${String(Number(m[3]))} ${MONTHS[Number(m[2]) - 1] ?? ''} ${m[1]}` : undefined;
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : undefined;
 };
 
 /** «استيراد البيانات»: products, customers or suppliers from an Excel or CSV file, checked before it is applied. */

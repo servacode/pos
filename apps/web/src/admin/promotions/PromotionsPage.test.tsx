@@ -94,9 +94,7 @@ describe('«العروض»', () => {
     const list = await screen.findByRole('table', { name: 'العروض' });
     expect(await within(list).findByText('خصم الألبان')).toBeInTheDocument();
     expect(list).toHaveTextContent('خصم 10% على 1 تصنيف');
-    expect(list).toHaveTextContent(
-      'من 1 تشرين الثاني 2026 · حتى 30 تشرين الثاني 2026 · الخميس، الجمعة · 18:00–22:00',
-    );
+    expect(list).toHaveTextContent('من 01/11/2026 · حتى 30/11/2026 · الخميس، الجمعة · 18:00–22:00');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
     await user.click(within(list).getByRole('button', { name: 'أوقف' }));
     // A stopped offer leaves the live list at once, with a sentence saying where it went

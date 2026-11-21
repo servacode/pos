@@ -1,5 +1,4 @@
 import { displayNumber, type Digits } from '@serva/ui';
-import { MONTHS } from '../lib/dates';
 
 /** «4:32 م» in the store's digits. */
 export function clockText(ms: number, digits: Digits = 'latn'): string {
@@ -17,7 +16,9 @@ function plainDigits(text: string, digits: Digits): string {
 
 export function dateText(ms: number, digits: Digits = 'latn'): string {
   const date = new Date(ms);
-  return `${displayNumber(String(date.getDate()), digits)} ${MONTHS[date.getMonth()]} ${plainDigits(String(date.getFullYear()), digits)}`;
+  // Numbers only, day first: «22/11/2026» (owner 2026-11-22)
+  const two = (n: number) => String(n).padStart(2, '0');
+  return plainDigits(`${two(date.getDate())}/${two(date.getMonth() + 1)}/${date.getFullYear()}`, digits);
 }
 
 /** «3 س 12 د» since a moment. */

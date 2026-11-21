@@ -131,7 +131,7 @@ describe('«الفواتير»', () => {
     const rows = within(table).getAllByRole('row').map(text);
     expect(rows[0]).toBe('الفاتورةالوقتالزبونالدفعالحالةالإجمالي');
     // The list is read by its days: one header per day, with the weekday and how many invoices
-    expect(rows[1]).toContain('30 تشرين الأول 2026');
+    expect(rows[1]).toContain('30/10/2026');
     expect(rows[1]).toContain('فاتورتان');
     expect(rows[2]).toContain('INV-001-002-0000419');
     expect(rows[2]).toContain('ريم');

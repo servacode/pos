@@ -106,7 +106,7 @@ describe('«مبيعات اليوم»', () => {
     expect(await screen.findByRole('heading', { name: 'مبيعات اليوم', level: 1 })).toBeInTheDocument();
     expect(await screen.findByText('المبيعات قبل الحسم والضريبة')).toBeInTheDocument();
     expect(requestsTo('GET', `/v1/reports/day?date=${TODAY}`)).toHaveLength(1);
-    expect(screen.getByText('كل الفروع · 31 تشرين الأول 2026')).toBeInTheDocument();
+    expect(screen.getByText('كل الفروع · 31/10/2026')).toBeInTheDocument();
 
     const breakdown = screen.getByRole('region', { name: 'من المبيعات إلى الصافي' });
     expect(text(breakdown)).toContain('المبيعات قبل الحسم والضريبة13,000 ل.س');
@@ -139,7 +139,7 @@ describe('«مبيعات اليوم»', () => {
     await screen.findByText('المبيعات قبل الحسم والضريبة');
 
     fireEvent.change(screen.getByLabelText('الفرع'), { target: { value: 'branch-2' } });
-    expect(await screen.findByText('دوار النعيم · 31 تشرين الأول 2026')).toBeInTheDocument();
+    expect(await screen.findByText('دوار النعيم · 31/10/2026')).toBeInTheDocument();
     expect(requestsTo('GET', `/v1/reports/day?branchId=branch-2&date=${TODAY}`)).toHaveLength(1);
 
     fireEvent.change(screen.getByLabelText('الفرع'), { target: { value: '' } });

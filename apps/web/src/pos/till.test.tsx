@@ -720,7 +720,7 @@ describe('«التعديلات»: the deposit, the delivery and the late ones', 
     await open(user);
     const card = await screen.findByRole('listitem', { name: 'التذكرة ALT-000001' });
     expect(within(card).getByText('متأخرة')).toBeInTheDocument();
-    expect(card).toHaveTextContent('2 كانون الثاني 2020');
+    expect(card).toHaveTextContent('02/01/2020');
     expect(card).toHaveTextContent('المتبقي');
 
     await user.click(within(card).getByRole('button', { name: 'سُلّمت' }));

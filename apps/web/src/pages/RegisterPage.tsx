@@ -333,12 +333,11 @@ const CODE_BOX =
 /** The box the next digit goes in carries the focus halo while the field has the focus. */
 function codeBoxTone(error: boolean, next: boolean): string {
   if (error) {
-    return cn('border-danger', next && 'group-focus-within:ring-4 group-focus-within:ring-danger/15');
+    return cn('border-danger', next && '');
   }
   return cn(
     'border-line-control group-hover:border-ink-subtle',
-    next &&
-      'group-focus-within:border-brand group-focus-within:ring-4 group-focus-within:ring-brand/15 group-focus-within:group-hover:border-brand',
+    next && 'group-focus-within:border-brand group-focus-within:group-hover:border-brand',
   );
 }
 

@@ -207,7 +207,7 @@ export function BroadcastsPage() {
                   onChange={(e) => setText(e.target.value.slice(0, 700))}
                   rows={5}
                   placeholder={PLACEHOLDER}
-                  className="w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden pointer-coarse:text-base"
+                  className="w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:outline-hidden pointer-coarse:text-base"
                 />
                 <p className="sx-wait m-0 text-end">
                   <bdi dir="ltr" className="sx-n">

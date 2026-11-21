@@ -71,7 +71,7 @@ describe('the WhatsApp message of an offer', () => {
     expect(text).toContain('1. كمامات: 2 علبة 100 = 18,000 ل.س');
     expect(text).toContain('الخصم: 2,000 ل.س');
     expect(text).toContain('الإجمالي: 18,000 ل.س');
-    expect(text).toContain('الأسعار صالحة حتى 31 كانون الأول 2026');
+    expect(text).toContain('الأسعار صالحة حتى 31/12/2026');
     expect(text).toContain('ملاحظات: التوصيل مجاني');
     expect(text).not.toContain('الشروط');
     // No bidi marks inside the amounts: they are copied into a chat

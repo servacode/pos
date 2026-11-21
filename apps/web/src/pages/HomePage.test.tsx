@@ -192,8 +192,16 @@ describe('HomePage', () => {
       const morning = await screen.findByRole('list', { name: 'نظرة الصباح' });
       expect(await within(morning).findByText(/أمس/)).toBeInTheDocument();
       // The pounds in the drawer and, beside them, the dollars (never added together)
-      expect(within(morning).getByText(/في الأدراج/)).toHaveTextContent(/25,000.*312\.50/);
-      expect(within(morning).getByText(/سعر الدولار/)).toHaveTextContent('13,000');
+      expect(
+        within(morning)
+          .getByText(/في الأدراج/)
+          .closest('li'),
+      ).toHaveTextContent(/25,000.*312\.50/);
+      expect(
+        within(morning)
+          .getByText(/سعر الدولار/)
+          .closest('li'),
+      ).toHaveTextContent('13,000');
     });
 
     it('gives a cashier the way to his till, not the shop card', async () => {

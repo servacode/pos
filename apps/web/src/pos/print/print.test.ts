@@ -185,7 +185,7 @@ describe('the receipt as printer lines', () => {
         withRx({ ref: 'RX-77', doctor: 'د. سامر', patientName: 'ليلى', patientId: '01020304' }),
       );
       const text = JSON.stringify(lines);
-      expect(text).toContain('دفعة B-07 · تنتهي 1 كانون الثاني 2027');
+      expect(text).toContain('دفعة B-07 · تنتهي 01/01/2027');
       expect(lines).toContainEqual({ kind: 'pair', start: 'رقم الوصفة', end: 'RX-77' });
       expect(lines).toContainEqual({ kind: 'pair', start: 'الطبيب', end: 'د. سامر' });
       expect(lines).toContainEqual({ kind: 'pair', start: 'المريض', end: 'ليلى' });
@@ -199,7 +199,7 @@ describe('the receipt as printer lines', () => {
         { batchNo: null, expiry: null, qty: 1000 },
       ];
       const text = JSON.stringify(receiptLines(split));
-      expect(text).toContain('دفعة G-OLD · تنتهي 1 كانون الثاني 2027 ×');
+      expect(text).toContain('دفعة G-OLD · تنتهي 01/01/2027 ×');
       expect(text).toContain('دفعة — ×');
     });
 

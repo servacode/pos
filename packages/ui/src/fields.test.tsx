@@ -47,16 +47,16 @@ describe('TextField', () => {
     expect(screen.getByLabelText('الاسم').parentElement).toHaveClass('min-h-10', 'pointer-coarse:min-h-12');
   });
 
-  it('draws the identity box: a surface, the 3:1 border and the brand halo on focus, no shadow', () => {
+  it('draws the identity box: a surface, the 3:1 border and a brand border on focus, no halo or shadow', () => {
     renderUi(<TextField label="الاسم" hint="كما يظهر على الإيصال" />);
 
     const input = screen.getByLabelText('الاسم');
-    expect(input.parentElement).toHaveClass(
-      'border-line-control',
-      'bg-surface',
+    expect(input.parentElement).toHaveClass('border-line-control', 'bg-surface', 'focus-within:border-brand');
+    expect(input.parentElement).not.toHaveClass(
+      'shadow-e1',
+      'focus-within:ring-4',
       'focus-within:ring-brand/15',
     );
-    expect(input.parentElement).not.toHaveClass('shadow-e1');
     expect(input).toHaveAccessibleDescription('كما يظهر على الإيصال');
     // A browser fill paints the input itself: rounded like the box, it never squares its corners.
     expect(input).toHaveClass('rounded-[inherit]');
@@ -97,15 +97,11 @@ describe('TextField', () => {
     expect(input).toHaveFocus();
   });
 
-  it('marks an error on the box, and rings the box while you type in it', () => {
+  it('marks an error on the box with a red border and no ring', () => {
     renderUi(<TextField label="رقم الجوال" error="رقم الجوال ناقص." />);
     const input = screen.getByLabelText('رقم الجوال');
-    expect(input.parentElement).toHaveClass('border-danger', 'ring-danger/15');
-    // The border stays red when focused, so the global focus ring shows where the typing goes.
-    expect(input.parentElement).toHaveClass(
-      'has-[input:focus-visible]:outline-2',
-      'has-[input:focus-visible]:outline-ring',
-    );
+    expect(input.parentElement).toHaveClass('border-danger');
+    expect(input.parentElement).not.toHaveClass('ring-danger/15');
     expect(input).toHaveAttribute('aria-invalid', 'true');
   });
 
@@ -237,9 +233,9 @@ describe('Select', () => {
     const select = screen.getByRole('combobox', { name: 'المدينة' });
     expect(select).toHaveAttribute('aria-invalid', 'true');
     expect(select).toHaveAccessibleDescription('اختر مدينة.');
-    // It has no caret: with the border kept red, the global focus ring shows the keyboard's place.
-    expect(select).toHaveClass('focus-visible:outline-2', 'focus-visible:outline-ring');
-    expect(select).not.toHaveClass('focus:outline-hidden');
+    // The border stays red when focused, and there is no outline.
+    expect(select).toHaveClass('border-danger', 'focus:outline-hidden');
+    expect(select).not.toHaveClass('focus-visible:outline-2');
   });
 
   it('is the field box itself, at the density height', () => {

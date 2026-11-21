@@ -117,6 +117,9 @@ export function TopBar({
           </li>
           <li className="sh-crumb-store">
             <Link to="/">
+              <span className="sh-crumb-av" aria-hidden="true">
+                {[...storeName.trim()][0] ?? ''}
+              </span>
               <span title={storeName} className="line-clamp-2 leading-tight">
                 {storeName}
               </span>

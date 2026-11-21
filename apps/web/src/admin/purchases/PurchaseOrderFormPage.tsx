@@ -68,7 +68,7 @@ interface Facts {
 const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_9rem_9rem_8rem_2.5rem]';
 
 const NOTES_CLASS =
-  'w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden pointer-coarse:text-base';
+  'w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:outline-hidden pointer-coarse:text-base';
 
 /**
  * A purchase order being written (new, or a draft or sent order edited): the supplier, the day it

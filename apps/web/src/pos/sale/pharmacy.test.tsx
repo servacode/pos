@@ -38,7 +38,7 @@ describe('a pharmacy till', () => {
   it('warns when the shelf has expired, and tells when it soon will', async () => {
     const { user } = await saleScreen({ sets: pharmacySets('2020-01-31') });
     await scan(user, PRODUCTS.tea.barcode!.code);
-    expect(await screen.findByText(/صلاحية «بانادول 500» انتهت في 31 كانون الثاني 2020/)).toBeInTheDocument();
+    expect(await screen.findByText(/صلاحية «بانادول 500» انتهت في 31\/01\/2020/)).toBeInTheDocument();
     // It is still added: the cashier checks the box
     expect(plain(screen.getByRole('list', { name: 'أسطر الفاتورة' }))).toContain('بانادول 500');
   });
