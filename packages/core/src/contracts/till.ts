@@ -63,6 +63,11 @@ export const tillSettingsSchema = z.object({
   /** «قفل الكاشير»: a cashier cannot leave the sale screen without a manager's PIN; off by default */
   cashierLock: z.boolean().optional(),
   /**
+   * «اطلب الرقم التسلسلي عند الإتلاف» (round 66): writing off or expiring a serial-tracked item (damaged goods,
+   * expiry, «سجّل هدراً») must name exactly one serial number per piece. Left out or false: the numbers may be put right later.
+   */
+  serialsOnWaste: z.boolean().optional(),
+  /**
    * «أسباب التالف / الهدر» (round 38, #41): the reasons the till's «تالف / هدر» offers. Left out (or empty): the
    * built-in ones (wasteReasonsOf). Giving the list also turns the button on for a store of any type.
    */

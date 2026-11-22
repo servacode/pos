@@ -566,6 +566,55 @@ describe('serial tracking at the till and on the server', () => {
       expect((await fix(store, 'LT-3', 'in_stock')).statusCode).toBe(200);
     });
 
+    it('round 66: «اطلب الرقم التسلسلي عند الإتلاف» refuses a write-off with no numbers, and takes one that names them', async () => {
+      const store = await openStore(app);
+      const a15 = await phone(store);
+      await received(store, a15, ['WS-1', 'WS-2', 'WS-3']);
+      const till = await app.inject({
+        method: 'PUT',
+        url: '/v1/store/till',
+        headers: as(store),
+        payload: { returnWindowDays: 7, cardApprovalRequired: false, serialsOnWaste: true },
+      });
+      expect(till.statusCode, till.body).toBe(200);
+      const me = await app.inject({ method: 'GET', url: '/v1/me', headers: as(store) });
+      expect(me.json<{ settings: { serialsOnWaste?: boolean } }>().settings.serialsOnWaste).toBe(true);
+      // The pages that leave the numbers for later are refused, with the setting named
+      const later = await count(store, a15.variantId, 2000, { serialsLater: true });
+      expect(later.statusCode).toBe(400);
+      expect(later.body).toContain('اطلب الرقم التسلسلي عند الإتلاف');
+      // A write-off with a reason and no numbers is refused too, even when counted offline
+      const reasoned = await app.inject({
+        method: 'POST',
+        url: '/v1/stocktakes',
+        headers: as(store),
+        payload: {
+          date: '2026-10-30',
+          countedAt: '2099-01-01T00:00:00Z',
+          lines: [{ variantId: a15.variantId, countedQty: 2000, wasteReason: 'تالف' }],
+        },
+      });
+      expect(reasoned.statusCode).toBe(400);
+      expect(reasoned.body).toContain('اختر 1 رقماً تسلسلياً');
+      expect(await history(store, 'WS-3')).toMatchObject({ status: 'in_stock' });
+      // Exactly one number for the one piece goes through, and the number is lost
+      const named = await count(store, a15.variantId, 2000, {
+        lines: [{ variantId: a15.variantId, countedQty: 2000, wasteReason: 'تالف', serials: ['WS-3'] }],
+      });
+      expect(named.statusCode, named.body).toBe(201);
+      expect(await history(store, 'WS-3')).toMatchObject({ status: 'lost' });
+      expect(await drift(store)).toEqual([]);
+      // Set off again: the numbers may be left for later as before
+      await app.inject({
+        method: 'PUT',
+        url: '/v1/store/till',
+        headers: as(store),
+        payload: { returnWindowDays: 7, cardApprovalRequired: false, serialsOnWaste: false },
+      });
+      const free = await count(store, a15.variantId, 1000, { serialsLater: true });
+      expect(free.statusCode, free.body).toBe(201);
+    });
+
     it('a surplus of a tracked product needs its numbers, the lenient paths do not', async () => {
       const store = await openStore(app);
       const a15 = await phone(store);

@@ -1209,7 +1209,7 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
         count={null}
         tone="warning"
         icon={<CalendarIcon />}
-        action="راجع الدفعات"
+        action="راجعها"
       >
         {batchNamed(
           expiringRows,

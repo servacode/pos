@@ -73,6 +73,40 @@ describe('«الصندوق» in the settings', () => {
     expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({ blockNegativeStock: true });
   });
 
+  it('saves «اطلب الرقم التسلسلي عند الإتلاف», off until turned on', async () => {
+    const current = store(['electronics']);
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+      'PUT /v1/store/till': (r: MockRequest) => ({ status: 200, body: { ...current, till: r.body } }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    const ask = within(form).getByRole('switch', { name: /اطلب الرقم التسلسلي عند الإتلاف/ });
+    expect(ask).not.toBeChecked();
+    await user.click(ask);
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({ serialsOnWaste: true });
+  });
+
+  it('leaves «اطلب الرقم التسلسلي عند الإتلاف» unsent when the owner never touched it', async () => {
+    const current = store(['electronics']);
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+      'PUT /v1/store/till': (r: MockRequest) => ({ status: 200, body: { ...current, till: r.body } }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    await user.click(within(form).getByRole('switch', { name: /امنع البيع فوق المخزون/ }));
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).not.toHaveProperty('serialsOnWaste');
+  });
+
   it('saves the old-pound line, the scan sound and the cashier lock (on by default until July 2027, on, off)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-18T10:00:00Z'));

@@ -222,8 +222,13 @@ export function createStocktake(
     // The count is of one branch: the permission must hold there, not only somewhere
     await requirePermission(tx, auth.userId, 'inventory.adjust', await branchOf(tx, input.branchId));
     // A count made against a phone's older sheet is never refused for want of serial numbers (it was counted offline)
+    // Round 66: a store that asks for the numbers on every write-off refuses one that names none (the till's own waste is not asked)
+    const [till] = await tx.execute<{ on: string | null }>(
+      sql`select (till->>'serialsOnWaste') as "on" from tenant_settings`,
+    );
     return createStocktakeIn(tx, auth, input, meta, {
       strictSerials: !input.countedAt && !opts.lenientSerials,
+      serialsOnWaste: till?.on === 'true',
     });
   });
 }
@@ -234,7 +239,7 @@ export async function createStocktakeIn(
   auth: AccessClaims,
   input: StocktakeInput,
   meta: RequestMeta,
-  opts: { strictSerials?: boolean } = {},
+  opts: { strictSerials?: boolean; serialsOnWaste?: boolean } = {},
 ): Promise<StocktakeDetail> {
   await requirePermission(tx, auth.userId, 'inventory.adjust');
   // Round 38: a count with an id the device made (a phone's offline count, a till's waste) posts once: the
@@ -363,12 +368,22 @@ export async function createStocktakeIn(
   // A tracked product's count says which serial numbers left, so the serial list and the stock agree (round 60)
   const serialsOf = new Map<string, string[]>();
   for (const l of input.lines) if (l.serials?.length) serialsOf.set(l.variantId, l.serials);
+  // A write-off line: it names a reason, or its page said the numbers come later
+  const wasteOf = new Set(
+    input.lines.filter((l) => l.wasteReason || input.serialsLater === true).map((l) => l.variantId),
+  );
   await countSerials(
     tx,
     auth.tenantId,
     branchId,
-    rows.map((r) => ({ variantId: r.variantId, diffQty: r.diffQty, serials: serialsOf.get(r.variantId) })),
+    rows.map((r) => ({
+      variantId: r.variantId,
+      diffQty: r.diffQty,
+      serials: serialsOf.get(r.variantId),
+      waste: wasteOf.has(r.variantId),
+    })),
     !opts.strictSerials,
+    opts.serialsOnWaste === true,
   );
 
   const id = input.id ?? newId();

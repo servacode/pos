@@ -88,6 +88,7 @@ export function ExpiryPage() {
   const [done, setDone] = useState<string | null>(null);
   const [urgency, setUrgency] = useState<Urgency>('all');
   const [action, setAction] = useState<Action | null>(null);
+  const onWaste = me.settings.serialsOnWaste === true;
   const [qty, setQty] = useState('');
   const [saving, setSaving] = useState(false);
   const [printing, setPrinting] = useState<ExpiryRow | null>(null);
@@ -138,6 +139,10 @@ export function ExpiryPage() {
     const label = `${row.batchNo ?? ''} من «${row.name}»`;
     // How many numbers leave: the whole batch, the shortage a count finds, or the pieces sent back
     const leaving = pickPieces(action, qty);
+    if (leaving > 0 && onWaste && kind === 'writeoff' && serials.length !== leaving) {
+      setError(`المحل يطلب الرقم التسلسلي عند الإتلاف: اختر ${leaving} رقماً تسلسلياً، واحداً لكل قطعة.`);
+      return;
+    }
     const later = leaving > 0 && serials.length === 0 && kind !== 'return';
     if (leaving > 0 && serials.length > 0 && serials.length !== leaving) {
       setError(
@@ -611,7 +616,7 @@ export function ExpiryPage() {
               pieces={pickPieces(action, qty)}
               picked={serials}
               onChange={setSerials}
-              optional={action.kind !== 'return'}
+              optional={action.kind !== 'return' && !(onWaste && action.kind === 'writeoff')}
             />
           </div>
         ) : null}

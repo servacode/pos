@@ -22,7 +22,7 @@ export function InventoryGrid({
 }: {
   rows: readonly InventoryRow[];
   numberFormat: 'latn' | 'arab';
-  /** «صحّح بالجرد»: opens the count on these pieces; absent when the person cannot count */
+  /** «صحّح بالجرد» (on the open model only): opens the count on these pieces; absent when the person cannot count */
   onCount?: (variantIds: string[]) => void;
 }) {
   // Which models show: all, those with a piece below zero or out, those running low (2 or fewer)
@@ -125,7 +125,7 @@ export function InventoryGrid({
                   <bdi>{negativePieces(minus / 1000, formatQuantity(minus, numberFormat))}</bdi>
                 </span>
               ) : null}
-              {minus > 0 && onCount ? (
+              {minus > 0 && onCount && open ? (
                 <span className="ms-auto">
                   <Button size="sm" variant="secondary" onClick={() => onCount(minusIds)}>
                     صحّح بالجرد

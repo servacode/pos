@@ -404,3 +404,35 @@
   width: fit-content;
   margin-top: 4px;
 }
+
+/* serials on a phone: a card is two lines (number and state, then name and documents on one line) */
+.sx .ix-scard .n {
+  font-size: 15px;
+}
+.sx .ix-scard .ix-sline {
+  grid-column: 1 / -1;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.sx .ix-scard .ix-sline > span {
+  flex: none;
+}
+.sx .ix-scard .ix-sline > .ix-sname {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+.sx .ix-scard .ix-sline > span + span::before {
+  content: '·';
+  margin-inline-end: 8px;
+  color: var(--ink-subtle);
+}
+.sx .ix-more {
+  list-style: none;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+}

@@ -1,11 +1,14 @@
-import type { Dispatch, SetStateAction } from 'react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
 import { Link } from 'react-router';
 import type { InventoryResponse, InventoryRow } from '@serva/core';
-import { formatQuantity, StockIcon, TextField, type Digits } from '@serva/ui';
+import { Button, formatQuantity, StockIcon, TextField, type Digits } from '@serva/ui';
 import { Paged } from '../pager';
 import { Amt, StatusPill, SxTable, type SxColumn } from '../sales/ui';
 import { countProblem } from './stocktakeReview';
 import { belowReorder } from './inventoryShared';
+
+/** The rows a phone shows before «اعرض الكل» */
+const PHONE_FIRST = 15;
 
 /** The stock list: a table on a wide screen, cards on a phone; with a count box on each row while counting. */
 export function InventoryList({
@@ -41,6 +44,9 @@ export function InventoryList({
   driftIds?: ReadonlySet<string>;
   setCounts: Dispatch<SetStateAction<Record<string, string>>>;
 }) {
+  // A phone folds a long list to its first rows; the choice lasts until the filter, search or order changes
+  const [openKey, setOpenKey] = useState('');
+  const folded = phone && !counting && openKey !== pagerKey && shown.length > PHONE_FIRST;
   const stateOf = (r: InventoryRow) =>
     r.qty < 0 ? (
       <StatusPill kind="danger">سالب</StatusPill>
@@ -146,7 +152,7 @@ export function InventoryList({
   return (
     <Paged
       key={pagerKey}
-      rows={shown}
+      rows={folded ? shown.slice(0, PHONE_FIRST) : shown}
       size={counting ? 100000 : 50}
       noun="الأصناف"
       render={(page) => (
@@ -172,6 +178,13 @@ export function InventoryList({
                   {counting ? <span className="c">{countInput(r)}</span> : null}
                 </li>
               ))}
+              {folded ? (
+                <li className="ix-more">
+                  <Button variant="secondary" onClick={() => setOpenKey(pagerKey)}>
+                    اعرض الكل ({shown.length})
+                  </Button>
+                </li>
+              ) : null}
             </ul>
           ) : (
             <SxTable

@@ -163,6 +163,8 @@ export interface MeResponse {
     catalogOptions?: CatalogOptions;
     /** The terms printed on the warranty certificate (الصندوق › شروط الكفالة) */
     warrantyTerms?: string | null;
+    /** «اطلب الرقم التسلسلي عند الإتلاف»: a write-off or expiry of a serial-tracked item must name its numbers; absent: off */
+    serialsOnWaste?: boolean;
   };
   subscription: {
     status: SubscriptionStatus;

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { SerialRow } from '@serva/core';
@@ -129,5 +129,24 @@ describe('«الأرقام التسلسلية»: numbers ahead of the stock', ()
     expect((await screen.findAllByText(/لا يغيّر المخزون ولا الحسابات/))[0]).toBeInTheDocument();
     await user.click(screen.getAllByRole('button', { name: 'نعم، يبقى معها' })[0]!);
     await waitFor(() => expect(fixed).toMatchObject({ serial: 'DUP-1', status: 'sold', keepSaleId: 's-2' }));
+  });
+});
+
+describe('«الأرقام التسلسلية»: the phone cards fold (round 66)', () => {
+  it('shows the first 15 cards and «اعرض الكل (N)» opens the rest', async () => {
+    const many = Array.from({ length: 24 }, (_, i) => row(`S-${String(i + 1).padStart(2, '0')}`, 'in_stock'));
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: electronicsMe() }),
+      'GET /v1/serials?': () => ({ status: 200, body: { items: many } }),
+      'GET /v1/serials/drift': () => ({ status: 200, body: { items: [] } }),
+      'GET /v1/serials/unassigned': () => ({ status: 200, body: { items: [] } }),
+    });
+    const { user } = renderApp('/serials');
+    const cards = await screen.findByRole('list', { name: 'الأجهزة بأرقامها' });
+    await waitFor(() => expect(within(cards).getAllByRole('listitem').length).toBe(16));
+    await user.click(within(cards).getByRole('button', { name: 'اعرض الكل (24)' }));
+    expect(within(cards).getAllByRole('listitem')).toHaveLength(24);
+    expect(within(cards).queryByRole('button', { name: /اعرض الكل/ })).not.toBeInTheDocument();
   });
 });

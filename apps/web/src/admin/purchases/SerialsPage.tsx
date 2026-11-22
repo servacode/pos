@@ -19,6 +19,9 @@ import { getSerialDrift } from './api';
 import { splitSerials } from './SerialPick';
 import './inventory.css';
 
+/** The phone cards shown before «اعرض الكل» */
+const PHONE_FIRST = 15;
+
 /** A document number over its date, or a dash when there is none. */
 function DocCell({
   number,
@@ -57,6 +60,10 @@ export function SerialsPage() {
   const [items, setItems] = useState<SerialRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
+  // The phone cards fold to the first few; the choice lasts until the search, view or product changes
+  const cardsKey = `${q}|${view}|${only?.variantId ?? ''}`;
+  const [cardsOpenKey, setCardsOpenKey] = useState('');
+  const cardsOpen = cardsOpenKey === cardsKey;
   // The row being put right (and, for a number two sales took, the sale picked to keep it)
   const [confirming, setConfirming] = useState<{ serial: string; keep?: string } | null>(null);
   // Round 62: tracked products whose stock and in-stock numbers disagree (the server computes it on read)
@@ -492,32 +499,39 @@ export function SerialsPage() {
           </div>
           <div className="sm:hidden">
             <ul className="sx-cards" aria-label="الأجهزة بأرقامها">
-              {(items ?? []).map((r) => (
-                <li key={r.serial} className="ix-icard">
+              {(items ?? []).slice(0, cardsOpen ? undefined : PHONE_FIRST).map((r) => (
+                <li key={r.serial} className="ix-icard ix-scard">
                   <bdi dir="ltr" className="n sx-n">
                     {r.serial}
                   </bdi>
                   <span className="v">{statusBadge(r)}</span>
-                  <span className="q">{r.name}</span>
-                  <span className="q" style={{ gridColumn: '1 / -1' }}>
+                  <span className="q ix-sline">
+                    <span className="ix-sname">{r.name}</span>
                     {r.purchaseNumber ? (
-                      <span className="flex items-center gap-1">
-                        استُلم <DocCell number={r.purchaseNumber} date={r.receivedOn} />
+                      <span title={r.receivedOn ? dayText(r.receivedOn, digits) : undefined}>
+                        استُلم <bdi dir="ltr">{r.purchaseNumber}</bdi>
                       </span>
                     ) : (
                       <span className="sx-sub">أُضيف يدوياً</span>
                     )}
                     {r.saleNumber ? (
-                      <span className="flex items-center gap-1">
-                        بيع <DocCell number={r.saleNumber} date={r.soldOn} />
+                      <span title={r.soldOn ? dayText(r.soldOn, digits) : undefined}>
+                        بيع <bdi dir="ltr">{r.saleNumber}</bdi>
                       </span>
                     ) : null}
-                    {r.warrantyUntil ? <span>الكفالة حتى {dayText(r.warrantyUntil, digits)}</span> : null}
+                    {r.warrantyUntil ? <span>كفالة {dayText(r.warrantyUntil, digits)}</span> : null}
                   </span>
                   {r.flags.length > 0 ? <span className="c">{flagsCell(r)}</span> : null}
                   {fixCell(r) ? <div className="c">{fixCell(r)}</div> : null}
                 </li>
               ))}
+              {items && !cardsOpen && items.length > PHONE_FIRST ? (
+                <li className="ix-more">
+                  <Button variant="secondary" onClick={() => setCardsOpenKey(cardsKey)}>
+                    اعرض الكل ({items.length})
+                  </Button>
+                </li>
+              ) : null}
               {items && items.length === 0 ? (
                 <li className="sx-card ix-empty">
                   <BarcodeIcon size={32} />

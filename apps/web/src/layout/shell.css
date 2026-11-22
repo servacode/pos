@@ -1848,7 +1848,7 @@ a.sh-trial:hover {
 }
 .sh-stabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   width: max-content;
   min-width: 0;
   margin: 0;
@@ -1863,10 +1863,10 @@ a.sh-trial:hover {
   display: inline-flex;
   align-items: center;
   height: 40px;
-  padding-inline: 18px;
+  padding-inline: 12px;
   border-radius: 10px;
   color: var(--color-ink-muted);
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
   white-space: nowrap;
   text-decoration: none;

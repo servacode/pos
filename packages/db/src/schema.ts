@@ -447,6 +447,7 @@ export const tenantSettings = pgTable(
       blockNegativeStock?: boolean;
       warrantyAskCustomer?: boolean | null;
       warrantyTerms?: string | null;
+      serialsOnWaste?: boolean;
     }>(),
     /**
      * «الأصناف» (packages/core › contracts/catalog-options.ts): barcodes made for new variants, and the

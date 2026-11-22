@@ -196,6 +196,7 @@ function ActDialog({
   const me = useMe();
   const digits = useDigits();
   const base = me.settings.baseCurrency;
+  const onWaste = me.settings.serialsOnWaste === true;
   const { way, location, item } = act;
   const [qty, setQty] = useState(String(item.qty / 1000));
   const [suppliers, setSuppliers] = useState<SupplierListResponse | null>(null);
@@ -228,6 +229,10 @@ function ActDialog({
     }
     if (tracked && way === 'send_back' && serials.length !== wholePieces) {
       setError(`اختر ${wholePieces} رقماً تسلسلياً، واحداً لكل قطعة.`);
+      return;
+    }
+    if (tracked && way === 'write_off' && onWaste && serials.length !== wholePieces) {
+      setError(`المحل يطلب الرقم التسلسلي عند الإتلاف: اختر ${wholePieces} رقماً تسلسلياً، واحداً لكل قطعة.`);
       return;
     }
     if (tracked && way === 'write_off' && serials.length > 0 && serials.length !== wholePieces) {
@@ -317,7 +322,7 @@ function ActDialog({
               pieces={wholePieces}
               picked={serials}
               onChange={setSerials}
-              optional={way === 'write_off'}
+              optional={way === 'write_off' && !onWaste}
             />
           </div>
         ) : null}

@@ -113,6 +113,7 @@ export async function loadMe(
         numberFormat: settings.numberFormat === 'arab' ? 'arab' : 'latn',
         catalogOptions: catalogOptionsOf(settings.catalogOptions),
         warrantyTerms: settings.till?.warrantyTerms ?? null,
+        ...(settings.till?.serialsOnWaste === true ? { serialsOnWaste: true } : {}),
       },
       subscription: {
         status: s.status,

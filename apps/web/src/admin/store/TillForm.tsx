@@ -34,6 +34,7 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
   const [cartHours, setCartHours] = useState(String(heldCartHoursOf(store.till)));
   const [beep, setBeep] = useState(store.till?.scanBeep !== false);
   const [lock, setLock] = useState(store.till?.cashierLock === true);
+  const [serialsOnWaste, setSerialsOnWaste] = useState(store.till?.serialsOnWaste === true);
   const [askCustomer, setAskCustomer] = useState(warrantyAsksCustomer(store.till, store.sectors));
   const [terms, setTerms] = useState(store.till?.warrantyTerms ?? '');
   // «أسباب التالف / الهدر»: separated by «،»; the till's built-in ones until the owner writes their own
@@ -80,6 +81,7 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
       cartHours,
       beep,
       lock,
+      serialsOnWaste,
       askCustomer,
       terms,
       reasons,
@@ -126,6 +128,7 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
             : {}),
           scanBeep: beep,
           cashierLock: lock,
+          ...(serialsOnWaste || store.till?.serialsOnWaste !== undefined ? { serialsOnWaste } : {}),
           warrantyAskCustomer: askCustomer,
           warrantyTerms: terms.trim() || null,
           // Only a list that differs from the built-in one (or one already stored) is kept
@@ -253,6 +256,12 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
         hint="تُطبع أسفل شهادة الكفالة A4. اتركها فارغة لتُطبع الشروط المعتادة."
         value={terms}
         onChange={(e) => setTerms(e.target.value.slice(0, 600))}
+      />
+      <Switch
+        label="اطلب الرقم التسلسلي عند الإتلاف"
+        description="مشعل: لا يُشطب جهاز تالف أو منتهي إلا باختيار رقمه التسلسلي، رقم لكل قطعة. مطفأ: يجوز الشطب وتصحيح الأرقام لاحقاً من صفحة «الأرقام التسلسلية»."
+        checked={serialsOnWaste}
+        onCheckedChange={setSerialsOnWaste}
       />
       <TextField
         label="أسباب التالف / الهدر"

@@ -113,6 +113,73 @@ describe('«البضاعة التالفة»', () => {
     expect(await screen.findByText(/شُطبت «زيت ١ لتر»/)).toBeInTheDocument();
   });
 
+  it('round 66: a store that asks for the serial numbers on write-off refuses one with none', async () => {
+    const me = keeper();
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: { ...me, settings: { ...me.settings, serialsOnWaste: true } } },
+      'GET /v1/damaged-stock': {
+        status: 200,
+        body: {
+          ...damaged,
+          locations: [
+            {
+              ...damaged.locations[0]!,
+              items: [
+                { variantId: 'v-1', name: 'آيفون 13', qty: 2000, valueMinor: 80_000, tracksSerial: true },
+              ],
+            },
+          ],
+        },
+      },
+      'GET /v1/inventory/serials': { status: 200, body: { items: ['IM-1', 'IM-2'], truncated: false } },
+      'POST /v1/stocktakes': { status: 201, body: { id: 'st-1', number: 'STK-2026-000001' } },
+    });
+    const { user } = renderApp('/damaged-stock');
+    await screen.findByText('آيفون 13');
+    await user.click(screen.getByRole('button', { name: 'اشطبها' }));
+    const dialog = await screen.findByRole('dialog');
+    const qty = within(dialog).getByLabelText('العدد');
+    await user.clear(qty);
+    await user.type(qty, '1');
+    await user.click(within(dialog).getByRole('button', { name: 'اشطب' }));
+    expect(await within(dialog).findByText(/المحل يطلب الرقم التسلسلي عند الإتلاف/)).toBeInTheDocument();
+    expect(mock.requestsTo('POST', '/v1/stocktakes')).toHaveLength(0);
+  });
+
+  it('round 66: with the setting off a tracked write-off with no numbers still goes through, flagged for later', async () => {
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: keeper() },
+      'GET /v1/damaged-stock': {
+        status: 200,
+        body: {
+          ...damaged,
+          locations: [
+            {
+              ...damaged.locations[0]!,
+              items: [
+                { variantId: 'v-1', name: 'آيفون 13', qty: 2000, valueMinor: 80_000, tracksSerial: true },
+              ],
+            },
+          ],
+        },
+      },
+      'GET /v1/inventory/serials': { status: 200, body: { items: ['IM-1', 'IM-2'], truncated: false } },
+      'POST /v1/stocktakes': { status: 201, body: { id: 'st-1', number: 'STK-2026-000001' } },
+    });
+    const { user } = renderApp('/damaged-stock');
+    await screen.findByText('آيفون 13');
+    await user.click(screen.getByRole('button', { name: 'اشطبها' }));
+    const dialog = await screen.findByRole('dialog');
+    const qty = within(dialog).getByLabelText('العدد');
+    await user.clear(qty);
+    await user.type(qty, '1');
+    await user.click(within(dialog).getByRole('button', { name: 'اشطب' }));
+    await waitFor(() => expect(mock.requestsTo('POST', '/v1/stocktakes')).toHaveLength(1));
+    expect(mock.requestsTo('POST', '/v1/stocktakes')[0]?.body).toMatchObject({ serialsLater: true });
+  });
+
   it('shows no action the user cannot take', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,

@@ -308,3 +308,40 @@ describe('stock numbers that explain themselves', () => {
     expect(requestsTo('POST', '/v1/stocktakes')).toHaveLength(0);
   });
 });
+
+describe('the stock list on a phone folds (round 66)', () => {
+  it('shows the first 15 items and «اعرض الكل (N)» opens the rest', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      const many: InventoryResponse = {
+        ...stock,
+        items: Array.from({ length: 22 }, (_, i) => ({
+          variantId: `v-${i + 1}`,
+          name: `صنف ${i + 1}`,
+          branchId: 'b-1',
+          qty: 1000 * (i + 1),
+          valueMinor: 1000 * (i + 1),
+          unitCostMinor: 1,
+        })),
+      };
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': () => ({ status: 200, body: owner() }),
+        'GET /v1/inventory': () => ({ status: 200, body: many }),
+      });
+      const { user } = renderApp('/inventory');
+      const cards = await screen.findByRole('list', { name: 'المخزون على الهاتف' });
+      expect(within(cards).getAllByRole('listitem')).toHaveLength(16);
+      await user.click(within(cards).getByRole('button', { name: 'اعرض الكل (22)' }));
+      expect(within(cards).getAllByRole('listitem')).toHaveLength(22);
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+});
