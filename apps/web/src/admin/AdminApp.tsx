@@ -218,7 +218,8 @@ function PrefetchSections() {
   const { state } = useAuth();
   const signedIn = state.status === 'signedIn';
   useEffect(() => {
-    if (!signedIn) return;
+    // Tests render one page at a time: loading every section there only slows them down
+    if (!signedIn || import.meta.env.MODE === 'test') return;
     const idle = (window as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
     let index = 0;
     let timer = 0;

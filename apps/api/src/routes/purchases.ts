@@ -21,6 +21,7 @@ import {
   supplierOpeningBalanceInput,
   supplierPaymentInput,
   supplierReturnInput,
+  supplierReturnListQuery,
   transferInput,
   transferReceiveInput,
   transferSettingsInput,
@@ -40,6 +41,7 @@ import {
   listPurchases,
   listSuppliers,
   listSupplierReturns,
+  readSupplierReturn,
   listTransfers,
   openSupplierBalance,
   paySupplier,
@@ -273,12 +275,10 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.post('/v1/stocktakes', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
     await dateOpen(request.auth, request.body);
-    const done = await createStocktake(
-      app.db,
-      request.auth,
-      parseBody(stocktakeInput, request.body),
-      meta(request),
-    );
+    const input = parseBody(stocktakeInput, request.body);
+    const done = await createStocktake(app.db, request.auth, input, meta(request), {
+      lenientSerials: input.serialsLater === true,
+    });
     return reply.code(201).send(done);
   });
 
@@ -341,7 +341,11 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/v1/supplier-returns', opts, async (request) => {
     if (!request.auth) throw unauthorized();
-    return listSupplierReturns(app.db, request.auth);
+    return listSupplierReturns(app.db, request.auth, parseBody(supplierReturnListQuery, request.query));
+  });
+  app.get('/v1/supplier-returns/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return readSupplierReturn(app.db, request.auth, idOf(request.params, 'هذا المرتجع'));
   });
   app.post('/v1/supplier-returns', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();

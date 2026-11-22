@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import type { CurrencyCode, PartyStatement, PartyStatementLine } from '@serva/core';
+import { getCurrency, type CurrencyCode, type PartyStatement, type PartyStatementLine } from '@serva/core';
 import {
   AddIcon,
   BackIcon,
@@ -83,16 +83,18 @@ function Balance({
   minor,
   currency,
   className,
+  symbol,
 }: {
   minor: number;
   currency: CurrencyCode;
   className?: string;
+  symbol?: boolean;
 }) {
   const side = minor > 0 ? 'عليه' : minor < 0 ? 'له' : null;
   return (
     <span className={`inline-flex items-center gap-1 whitespace-nowrap text-ink ${className ?? ''}`}>
       {side ? <span className="font-semibold">{side}</span> : null}
-      <Money minor={minor} currency={currency} signDisplay="never" />
+      <Money minor={minor} currency={currency} signDisplay="never" symbol={symbol} />
     </span>
   );
 }
@@ -239,6 +241,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
   const canReceive = type === 'customer' && me.user.permissions.includes('receipt.create');
   const canOpen = type === 'customer' && me.user.permissions.includes('accounting.post');
 
+  const unit = getCurrency(base).symbolAr;
   const columns: DataColumn<PartyStatementLine>[] = [
     {
       key: 'date',
@@ -263,19 +266,19 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
     },
     {
       key: 'debit',
-      header: SIDES[type].debit,
+      header: `${SIDES[type].debit} (${unit})`,
       numeric: true,
       className: 'hidden sm:table-cell',
-      cell: (l) => (l.debitMinor ? <Money minor={l.debitMinor} currency={base} /> : ''),
-      total: data ? <Money minor={data.totalDebitMinor} currency={base} /> : null,
+      cell: (l) => (l.debitMinor ? <Money minor={l.debitMinor} currency={base} symbol={false} /> : ''),
+      total: data ? <Money minor={data.totalDebitMinor} currency={base} symbol={false} /> : null,
     },
     {
       key: 'credit',
-      header: SIDES[type].credit,
+      header: `${SIDES[type].credit} (${unit})`,
       numeric: true,
       className: 'hidden sm:table-cell',
-      cell: (l) => (l.creditMinor ? <Money minor={l.creditMinor} currency={base} /> : ''),
-      total: data ? <Money minor={data.totalCreditMinor} currency={base} /> : null,
+      cell: (l) => (l.creditMinor ? <Money minor={l.creditMinor} currency={base} symbol={false} /> : ''),
+      total: data ? <Money minor={data.totalCreditMinor} currency={base} symbol={false} /> : null,
     },
     {
       key: 'move',
@@ -293,31 +296,35 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
     },
     {
       key: 'balance',
-      header: 'الرصيد',
+      header: `الرصيد (${unit})`,
       numeric: true,
-      cell: (l) => <Balance minor={copy.signed(l.balanceMinor)} currency={base} />,
-      total: data ? <Balance minor={copy.signed(data.closingMinor)} currency={base} /> : null,
+      cell: (l) => <Balance minor={copy.signed(l.balanceMinor)} currency={base} symbol={false} />,
+      total: data ? <Balance minor={copy.signed(data.closingMinor)} currency={base} symbol={false} /> : null,
     },
     // A supplier with dollar invoices (round 36, decision 11): the same account in dollars
     ...(data?.usd
       ? [
           {
             key: 'usd',
-            header: 'بالدولار',
+            header: 'بالدولار ($)',
             numeric: true,
             cell: (l: PartyStatementLine) =>
-              l.usdBalanceMinor === undefined ? null : (
+              l.usdBalanceMinor === undefined ? null : l.usdBalanceMinor === 0 &&
+                !l.usdDebitMinor &&
+                !l.usdCreditMinor ? (
+                <span className="text-ink-subtle">—</span>
+              ) : (
                 <div className="flex flex-col items-end">
                   {l.usdDebitMinor || l.usdCreditMinor ? (
                     <span className="text-xs text-ink-muted">
                       {l.usdDebitMinor ? SIDES[type].debit : SIDES[type].credit}{' '}
-                      <Money minor={l.usdDebitMinor || l.usdCreditMinor || 0} currency="USD" />
+                      <Money minor={l.usdDebitMinor || l.usdCreditMinor || 0} currency="USD" symbol={false} />
                     </span>
                   ) : null}
-                  <Balance minor={copy.signed(l.usdBalanceMinor)} currency="USD" />
+                  <Balance minor={copy.signed(l.usdBalanceMinor)} currency="USD" symbol={false} />
                 </div>
               ),
-            total: <Balance minor={copy.signed(data.usd.closingMinor)} currency="USD" />,
+            total: <Balance minor={copy.signed(data.usd.closingMinor)} currency="USD" symbol={false} />,
           } satisfies DataColumn<PartyStatementLine>,
         ]
       : []),
@@ -474,6 +481,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
           </Card>
         ) : (
           <DataTable
+            className="cx-stm-tbl"
             caption={copy.title}
             columns={columns}
             rows={data?.lines ?? []}

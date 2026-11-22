@@ -23,6 +23,7 @@ import { rateSchema } from './store';
  *   GET  /v1/reports/waste?from&to     wasteReportQuery → WasteReport (inventory.adjust or reports.financial)
  *   GET  /v1/reports/profit?from&to    ProfitReport                  (reports.financial)
  *   GET  /v1/inventory/expiry?days     ExpiryResponse                (purchases.manage)
+ *   GET  /v1/inventory/serials?variantId&branchId  the in-stock serial numbers of a product in a branch (inventory.adjust, round 60)
  */
 
 const optionalText = (max: number, message: string) =>
@@ -323,6 +324,10 @@ export interface InventoryRow {
   /** The branch's name and kind (store, van), so a van's stock is told apart from a store's; absent from older servers */
   branchName?: string;
   branchKind?: string;
+  /** The product tracks serial numbers (a count names which ones left); absent from older servers */
+  tracksSerial?: boolean;
+  /** The reorder level of the piece (base units, thousandths); null when none is set. Absent from older servers */
+  minStockQty?: number | null;
   /** Base units, thousandths */
   qty: number;
   valueMinor: number;
@@ -363,6 +368,8 @@ export const stocktakeInput = z.object({
    * gone from the shelf, so the count does not bring those pieces back. Without it the counts are taken as of now.
    */
   countedAt: z.iso.datetime({ offset: true }).optional(),
+  /** Round 60: a write-off page with no serial picker (damaged goods, expiry) says the serial numbers are put right later */
+  serialsLater: z.literal(true).optional(),
   note: optionalText(200, 'الملاحظة طويلة'),
   lines: z
     .array(
@@ -381,6 +388,11 @@ export const stocktakeInput = z.object({
          * line for the waste report; the posting is the count's own.
          */
         wasteReason: optionalText(40, 'السبب طويل'),
+        /**
+         * Round 60: for a product that tracks serial numbers, WHICH numbers left (a shortage: one in-stock number per
+         * missing piece) or came in (a surplus), so the serial list agrees with the count. Absent for other products.
+         */
+        serials: z.array(z.string().trim().min(1).max(60)).max(5000).optional(),
       }),
     )
     .min(1, 'عدّ صنفاً واحداً على الأقل')
@@ -561,6 +573,9 @@ export const serialQuery = z.object({
   /** Only the numbers the owner has to look at (sold unknown, twice, or out of stock under another product) */
   flagged: z.enum(['1']).optional(),
 });
+
+/** GET /v1/inventory/serials (inventory.adjust, round 60): the numbers in stock for one product in one branch */
+export const stockSerialsQuery = z.object({ variantId: uuidSchema, branchId: uuidSchema });
 
 /** Why a serial needs the owner's look: never received, sold more than once, or another product's number */
 export const SERIAL_FLAG_LABELS = {
@@ -941,6 +956,12 @@ export interface SupplierReturnDetail {
   costMinor: number;
   baseCurrency: CurrencyCode;
 }
+
+/** Round 60: `GET /v1/supplier-returns?limit&cursor`; without `limit` the newest 200, `nextCursor` says if more wait */
+export const supplierReturnListQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().max(20).optional(),
+});
 
 export interface SupplierReturnRow {
   id: string;

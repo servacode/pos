@@ -176,11 +176,18 @@ export async function sellSerials(
         .from(serials)
         .where(eq(serials.serial, serial));
       if (!row) {
-        flags.add('unknown_serial');
-        await tx.execute(sql`
+        // Two tills syncing the same number never received here: the first row wins, the second is a duplicate
+        const made = await tx.execute<{ id: string }>(sql`
           insert into serials (tenant_id, variant_id, serial, status, sale_id, sold_on, warranty_until, branch_id)
-          values (${tenantId}, ${line.variantId}, ${serial}, 'sold', ${saleId}, ${date}, ${until}, ${branchId})`);
-        await remember(serial, line.variantId, overrides.has(serial) ? 'override' : 'unknown');
+          values (${tenantId}, ${line.variantId}, ${serial}, 'sold', ${saleId}, ${date}, ${until}, ${branchId})
+          on conflict (tenant_id, serial) do nothing returning id`);
+        if (made.length > 0) {
+          flags.add('unknown_serial');
+          await remember(serial, line.variantId, overrides.has(serial) ? 'override' : 'unknown');
+        } else {
+          flags.add('serial_sold_twice');
+          await remember(serial, line.variantId, 'duplicate');
+        }
       } else if (row.variantId !== line.variantId) {
         flags.add('serial_other_product');
         await remember(serial, line.variantId, 'other_product');
@@ -338,38 +345,48 @@ async function missingBySale(tx: Transaction, saleId: string): Promise<Map<strin
 export function unassignedSales(
   db: Database,
   auth: AccessClaims,
-): Promise<{ items: UnassignedSerialSale[] }> {
+): Promise<{ items: UnassignedSerialSale[]; more?: boolean }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'catalog.manage');
-    const sales = await tx.execute<{ id: string; number: string; business_date: string }>(sql`
-      select id, number, business_date::text as business_date from invoices
-      where 'serial_missing' = any(flags) order by business_date desc, number desc limit 500`);
     const items: UnassignedSerialSale[] = [];
-    for (const sale of sales) {
-      // The list shows the 50 newest sales still missing a number: the resolved ones are skipped, not counted
-      if (items.length >= 50) break;
-      for (const [variantId, missing] of await missingBySale(tx, sale.id)) {
-        const [named] = await tx.execute<{ name: string }>(sql`
-          select p.name_ar || coalesce(' ' || v.label, '') as name from variants v
-          join products p on p.tenant_id = v.tenant_id and p.id = v.product_id where v.id = ${variantId}`);
-        const candidates = await tx
-          .select({ serial: serials.serial })
-          .from(serials)
-          .where(and(eq(serials.variantId, variantId), eq(serials.status, 'in_stock')))
-          .orderBy(serials.serial)
-          .limit(100);
-        items.push({
-          saleId: sale.id,
-          saleNumber: sale.number,
-          soldOn: sale.business_date,
-          variantId,
-          name: named?.name ?? '',
-          missing,
-          candidates: candidates.map((c) => c.serial),
-        });
+    // The list shows the 50 newest sales still missing a number: the resolved ones are skipped, not counted.
+    // The flagged sales are read in pages, so an old backlog never hides behind a fixed cut; `more` says the list was cut.
+    const PAGE = 200;
+    let more = false;
+    for (let offset = 0; offset < 10_000 && !more; offset += PAGE) {
+      const sales = await tx.execute<{ id: string; number: string; business_date: string }>(sql`
+        select id, number, business_date::text as business_date from invoices
+        where 'serial_missing' = any(flags) order by business_date desc, number desc
+        limit ${PAGE} offset ${offset}`);
+      for (const sale of sales) {
+        if (items.length >= 50) {
+          more = true;
+          break;
+        }
+        for (const [variantId, missing] of await missingBySale(tx, sale.id)) {
+          const [named] = await tx.execute<{ name: string }>(sql`
+            select p.name_ar || coalesce(' ' || v.label, '') as name from variants v
+            join products p on p.tenant_id = v.tenant_id and p.id = v.product_id where v.id = ${variantId}`);
+          const candidates = await tx
+            .select({ serial: serials.serial })
+            .from(serials)
+            .where(and(eq(serials.variantId, variantId), eq(serials.status, 'in_stock')))
+            .orderBy(serials.serial)
+            .limit(100);
+          items.push({
+            saleId: sale.id,
+            saleNumber: sale.number,
+            soldOn: sale.business_date,
+            variantId,
+            name: named?.name ?? '',
+            missing,
+            candidates: candidates.map((c) => c.serial),
+          });
+        }
       }
+      if (sales.length < PAGE) break;
     }
-    return { items };
+    return { items, ...(more ? { more } : {}) };
   });
 }
 
@@ -551,4 +568,109 @@ export async function returnSerialsToSupplier(tx: Transaction, ids: readonly str
       .update(serials)
       .set({ status: 'returned' })
       .where(inArray(serials.id, [...ids]));
+}
+
+/**
+ * Round 60: a count or waste of a product that tracks serial numbers says WHICH numbers left (or came in), so the
+ * serial list and the stock agree. A shortage names one in-stock number per missing piece (they become «lost»);
+ * a surplus may name the new numbers (they come in stock). Nothing is posted here: the count's own entry stands.
+ * A shortage with no numbers is refused, unless `lenient` (a phone's offline count, a till's waste: those are
+ * never refused, and the owner puts the list right from the serial page).
+ */
+export async function countSerials(
+  tx: Transaction,
+  tenantId: string,
+  branchId: string,
+  lines: readonly { variantId: string; diffQty: number; serials?: readonly string[] | undefined }[],
+  lenient: boolean,
+): Promise<void> {
+  const tracked = await tracking(
+    tx,
+    lines.map((l) => l.variantId),
+  );
+  const leaving: { variantId: string; qty: number; serials: string[] }[] = [];
+  const arriving: { variantId: string; serial: string }[] = [];
+  for (const [i, line] of lines.entries()) {
+    const field = `lines.${i}.serials`;
+    const given = [...new Set((line.serials ?? []).map(normalized))];
+    if (!tracked.get(line.variantId)?.tracks) {
+      if (given.length > 0) throw invalid({ [field]: 'هذا الصنف لا يُباع بأرقام تسلسلية' });
+      continue;
+    }
+    if (line.diffQty < 0) {
+      const pieces = Math.ceil(-line.diffQty / 1000);
+      if (given.length === 0) {
+        if (lenient) continue;
+        throw invalid({
+          [field]: `هذا الصنف له أرقام تسلسلية: اختر ${pieces} رقماً للقطع الناقصة`,
+        });
+      }
+      if (given.length !== pieces) {
+        throw invalid({ [field]: `اختر ${pieces} رقماً تسلسلياً للقطع الناقصة (اخترت ${given.length})` });
+      }
+      leaving.push({ variantId: line.variantId, qty: pieces * 1000, serials: given });
+    } else if (line.diffQty > 0 && given.length > 0) {
+      if (given.length * 1000 !== Math.ceil(line.diffQty / 1000) * 1000) {
+        throw invalid({ [field]: `اكتب ${Math.ceil(line.diffQty / 1000)} رقماً للقطع الزائدة` });
+      }
+      for (const serial of given) arriving.push({ variantId: line.variantId, serial });
+    }
+  }
+  if (leaving.length > 0) {
+    const ids = await outgoingSerials(tx, branchId, leaving);
+    await tx
+      .update(serials)
+      .set({ status: 'lost' })
+      .where(inArray(serials.id, [...ids]));
+  }
+  if (arriving.length > 0) {
+    const known = await tx
+      .select({ serial: serials.serial })
+      .from(serials)
+      .where(
+        inArray(
+          serials.serial,
+          arriving.map((a) => a.serial),
+        ),
+      );
+    if (known.length > 0) throw invalid({ lines: `الرقم ${known[0]!.serial} موجود في المحل من قبل` });
+    await tx.insert(serials).values(
+      arriving.map((a) => ({
+        tenantId,
+        variantId: a.variantId,
+        serial: a.serial,
+        status: 'in_stock',
+        branchId,
+      })),
+    );
+  }
+}
+
+/** The numbers in stock in a branch for a product: what a count picks the missing pieces from (inventory.adjust) */
+export function stockSerials(
+  db: Database,
+  auth: AccessClaims,
+  query: { variantId: string; branchId: string },
+): Promise<{ items: string[]; truncated: boolean }> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'inventory.adjust', query.branchId);
+    const [known] = await tx
+      .select({ id: variants.id })
+      .from(variants)
+      .where(eq(variants.id, query.variantId));
+    if (!known) throw new AppError(404, 'not_found', 'هذا الصنف غير موجود.');
+    const rows = await tx
+      .select({ serial: serials.serial })
+      .from(serials)
+      .where(
+        and(
+          eq(serials.variantId, query.variantId),
+          eq(serials.status, 'in_stock'),
+          sql`(${serials.branchId} is null or ${serials.branchId} = ${query.branchId})`,
+        ),
+      )
+      .orderBy(serials.serial)
+      .limit(1001);
+    return { items: rows.slice(0, 1000).map((r) => r.serial), truncated: rows.length > 1000 };
+  });
 }

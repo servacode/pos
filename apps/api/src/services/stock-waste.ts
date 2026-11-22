@@ -146,7 +146,14 @@ export function wasteReport(
     const allowed = [...new Set(mayRead.flatMap((scope) => [...scope.branchIds]))];
     if (query.branchId && !everywhere && !allowed.includes(query.branchId)) throw forbidden();
     if (query.from > query.to) throw invalid({ from: 'تاريخ البداية بعد تاريخ النهاية' });
-    // A line is a waste when it names a reason; a document an older version recorded says «هدر» in its note
+    // A line is a waste when it names a reason; a document an older version recorded with the note «هدر» alone
+    // (before round 38) counts too. A count whose own note merely starts with the word is a count, not a waste.
+    const where = sql`
+      where s.business_date between ${query.from} and ${query.to}
+        ${query.branchId ? sql`and s.branch_id = ${query.branchId}` : sql``}
+        ${everywhere ? sql`` : sql`and s.branch_id = any(${uuidArray(allowed)})`}
+        and (l->>'diffQty')::bigint < 0
+        and (nullif(l->>'reason', '') is not null or s.note = ${LEGACY_WASTE_NOTE})`;
     const found = await tx.execute<{
       date: string;
       number: string;
@@ -161,11 +168,7 @@ export function wasteReport(
              l->>'name' as name, nullif(l->>'reason', '') as reason,
              (-(l->>'diffQty')::bigint)::text as qty, (-(l->>'diffValueMinor')::bigint)::text as cost
       from stocktakes s, jsonb_array_elements(s.lines) l
-      where s.business_date between ${query.from} and ${query.to}
-        ${query.branchId ? sql`and s.branch_id = ${query.branchId}` : sql``}
-        ${everywhere ? sql`` : sql`and s.branch_id = any(${uuidArray(allowed)})`}
-        and (l->>'diffQty')::bigint < 0
-        and (nullif(l->>'reason', '') is not null or s.note like ${`${LEGACY_WASTE_NOTE}%`})
+      ${where}
       order by s.business_date desc, s.number desc, l->>'name'
       limit 5001`);
     const truncated = found.length > 5000;
@@ -179,38 +182,50 @@ export function wasteReport(
       qty: Number(r.qty),
       costMinor: Number(r.cost),
     }));
-    const byReason = new Map<string, { reason: string; qty: number; costMinor: number; count: number }>();
-    const byProduct = new Map<
-      string,
-      { variantId: string; name: string; qty: number; costMinor: number; count: number }
-    >();
-    for (const r of rows) {
-      const a = byReason.get(r.reason) ?? { reason: r.reason, qty: 0, costMinor: 0, count: 0 };
-      a.qty += r.qty;
-      a.costMinor += r.costMinor;
-      a.count += 1;
-      byReason.set(r.reason, a);
-      const p = byProduct.get(r.variantId) ?? {
-        variantId: r.variantId,
-        name: r.name,
-        qty: 0,
-        costMinor: 0,
-        count: 0,
-      };
-      p.qty += r.qty;
-      p.costMinor += r.costMinor;
-      p.count += 1;
-      byProduct.set(r.variantId, p);
-    }
+    // The totals are summed by the database over every matching line, so a long period that cuts the row list
+    // at 5000 still shows the true figures
+    const reasonSums = await tx.execute<{ reason: string; qty: string; cost: string; n: string }>(sql`
+      select coalesce(nullif(l->>'reason', ''), 'بلا سبب') as reason,
+             sum(-(l->>'diffQty')::bigint)::text as qty, sum(-(l->>'diffValueMinor')::bigint)::text as cost,
+             count(*)::text as n
+      from stocktakes s, jsonb_array_elements(s.lines) l
+      ${where}
+      group by 1`);
+    const productSums = await tx.execute<{
+      variant_id: string;
+      name: string;
+      qty: string;
+      cost: string;
+      n: string;
+    }>(sql`
+      select l->>'variantId' as variant_id, max(l->>'name') as name,
+             sum(-(l->>'diffQty')::bigint)::text as qty, sum(-(l->>'diffValueMinor')::bigint)::text as cost,
+             count(*)::text as n
+      from stocktakes s, jsonb_array_elements(s.lines) l
+      ${where}
+      group by 1`);
+    const byReason = reasonSums.map((r) => ({
+      reason: r.reason,
+      qty: Number(r.qty),
+      costMinor: Number(r.cost),
+      count: Number(r.n),
+    }));
+    const byProduct = productSums.map((r) => ({
+      variantId: r.variant_id,
+      name: r.name,
+      qty: Number(r.qty),
+      costMinor: Number(r.cost),
+      count: Number(r.n),
+    }));
     const byCost = <T extends { costMinor: number }>(list: Iterable<T>) =>
       [...list].sort((a, b) => b.costMinor - a.costMinor);
     return {
       from: query.from,
       to: query.to,
       rows,
-      byReason: byCost(byReason.values()),
-      byProduct: byCost(byProduct.values()),
-      totalCostMinor: rows.reduce((sum, r) => sum + r.costMinor, 0),
+      byReason: byCost(byReason),
+      byProduct: byCost(byProduct),
+      totalCostMinor: byReason.reduce((sum, r) => sum + r.costMinor, 0),
       baseCurrency: await baseCurrency(tx),
       ...(truncated ? { truncated } : {}),
     };

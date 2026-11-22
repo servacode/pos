@@ -83,7 +83,13 @@ import {
 } from './batches';
 import { applyReceipt } from './purchase-order-receipt';
 import { bookValueOfPayment, usdTerms, usdToBase, type UsdTerms } from './purchase-usd';
-import { outgoingSerials, receiveSerials, relocateSerials, returnSerialsToSupplier } from './serials';
+import {
+  countSerials,
+  outgoingSerials,
+  receiveSerials,
+  relocateSerials,
+  returnSerialsToSupplier,
+} from './serials';
 
 /**
  * Suppliers, purchases, payments to suppliers, counts, the stock's value and the profit
@@ -1002,8 +1008,10 @@ export async function inventory(
       product_id: string;
       product_name: string;
       allows_fraction: boolean | null;
+      min_stock: string | null;
+      tracks_serial: boolean;
     }>(sql`
-      select l.variant_id, l.branch_id, br.name as branch_name, br.kind as branch_kind,
+      select l.variant_id, l.branch_id, br.name as branch_name, br.kind as branch_kind, v.min_stock_qty::text as min_stock, p.tracks_serial,
              trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
              v.attributes, p.id as product_id, p.name_ar as product_name, un.allows_fraction,
              l.qty::text, coalesce(sv.value_minor, 0)::text as value_minor,
@@ -1054,6 +1062,8 @@ export async function inventory(
         productId: r.product_id,
         productName: r.product_name,
         allowsFraction: r.allows_fraction ?? false,
+        minStockQty: r.min_stock === null ? null : Number(r.min_stock),
+        tracksSerial: r.tracks_serial,
         qty,
         valueMinor: value,
         sellableQty: Math.max(0, qty - Number(r.dead_qty)),
@@ -1154,11 +1164,15 @@ export function createStocktake(
   auth: AccessClaims,
   input: StocktakeInput,
   meta: RequestMeta,
+  opts: { lenientSerials?: boolean } = {},
 ): Promise<StocktakeDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     // The count is of one branch: the permission must hold there, not only somewhere
     await requirePermission(tx, auth.userId, 'inventory.adjust', await branchOf(tx, input.branchId));
-    return createStocktakeIn(tx, auth, input, meta);
+    // A count made against a phone's older sheet is never refused for want of serial numbers (it was counted offline)
+    return createStocktakeIn(tx, auth, input, meta, {
+      strictSerials: !input.countedAt && !opts.lenientSerials,
+    });
   });
 }
 
@@ -1168,6 +1182,7 @@ export async function createStocktakeIn(
   auth: AccessClaims,
   input: StocktakeInput,
   meta: RequestMeta,
+  opts: { strictSerials?: boolean } = {},
 ): Promise<StocktakeDetail> {
   await requirePermission(tx, auth.userId, 'inventory.adjust');
   // Round 38: a count with an id the device made (a phone's offline count, a till's waste) posts once: the
@@ -1293,6 +1308,16 @@ export async function createStocktakeIn(
     moves.push({ lineNo: i + 1, variantId: l.variantId, qty: diff });
   }
   await saveValues(tx, auth.tenantId, values);
+  // A tracked product's count says which serial numbers left, so the serial list and the stock agree (round 60)
+  const serialsOf = new Map<string, string[]>();
+  for (const l of input.lines) if (l.serials?.length) serialsOf.set(l.variantId, l.serials);
+  await countSerials(
+    tx,
+    auth.tenantId,
+    branchId,
+    rows.map((r) => ({ variantId: r.variantId, diffQty: r.diffQty, serials: serialsOf.get(r.variantId) })),
+    !opts.strictSerials,
+  );
 
   const id = input.id ?? newId();
   const number = await nextNumber(tx, auth.tenantId, 'STK', input.date);
@@ -1757,6 +1782,20 @@ export async function createSupplierReturn(
     const invoice = input.purchaseId
       ? await invoiceForReturn(tx, input.purchaseId, supplier.id, input.lines, currency)
       : null;
+    // Round 60: with no invoice, a typed credit cannot pass the dearest price the item was ever bought at (nor its average cost)
+    const typed = input.lines
+      .filter((l) => !invoice && l.amountMinor !== null && l.amountMinor !== undefined)
+      .map((l) => l.variantId);
+    const dearest = new Map<string, number>();
+    if (typed.length > 0) {
+      const peak = await tx.execute<{ variant_id: string; unit: string }>(sql`
+        select pl.variant_id, max(pl.cost_minor::numeric * 1000 / nullif(pl.qty, 0))::text as unit
+        from purchase_lines pl
+        where pl.variant_id = any(${uuidArray(typed)})
+          and not exists (select 1 from purchase_reversals rv where rv.tenant_id = pl.tenant_id and rv.purchase_id = pl.purchase_id)
+        group by pl.variant_id`);
+      for (const r of peak) dearest.set(r.variant_id, Number(r.unit));
+    }
     const lines: SupplierReturnDetail['lines'] = [];
     for (const [index, l] of input.lines.entries()) {
       const onHand = held.get(l.variantId) ?? 0;
@@ -1768,6 +1807,15 @@ export async function createSupplierReturn(
       values.set(key, out.after);
       const costMinor = Math.max(0, out.costMinor);
       const credit = invoice?.credits[index];
+      if (!credit && l.amountMinor !== null && l.amountMinor !== undefined) {
+        const unit = dearest.get(l.variantId);
+        const cap = Math.max(costMinor, unit === undefined ? 0 : Math.ceil((unit * l.qty) / 1000));
+        if (l.amountMinor > cap) {
+          throw invalid({
+            [`lines.${index}.amountMinor`]: 'المبلغ أكبر من كلفة هذه القطع. اختر الفاتورة لتُرجَع بسعرها',
+          });
+        }
+      }
       lines.push({
         variantId: l.variantId,
         name: names.get(l.variantId)!,
@@ -2052,12 +2100,36 @@ async function invoiceForReturn(
   return { id: purchase.id, number: purchase.number, usd, credits, foreignTotal };
 }
 
+/** Round 60: one return in full (its lines, the invoice it was credited against): the detail and the print */
+export function readSupplierReturn(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+): Promise<SupplierReturnDetail> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
+    const found = await supplierReturnById(tx, id);
+    if (!found || !inScope(scope, found.branchId)) throw notFound('هذا المرتجع');
+    return found;
+  });
+}
+
 export function listSupplierReturns(
   db: Database,
   auth: AccessClaims,
-): Promise<{ items: SupplierReturnRow[] }> {
+  query: { limit?: number | undefined; cursor?: string | undefined } = {},
+): Promise<{ items: SupplierReturnRow[]; nextCursor: string | null }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
+    // Round 60: pages; a page continues after the rows before it (the cursor is how many came first)
+    const pageSize = query.limit ?? 200;
+    const offset = query.cursor ? Number(query.cursor.slice(2)) : 0;
+    if (
+      query.cursor &&
+      (!query.cursor.startsWith('o:') || !Number.isSafeInteger(offset) || offset < 0 || offset > 9_999_999)
+    ) {
+      throw invalid({ cursor: 'صفحة غير صالحة' });
+    }
     const rows = await tx.execute<{
       id: string;
       number: string;
@@ -2073,10 +2145,11 @@ export function listSupplierReturns(
       from supplier_returns r
       join suppliers s on s.tenant_id = r.tenant_id and s.id = r.supplier_id
       ${scope.all ? sql`` : sql`where r.branch_id = any(${uuidArray([...scope.branchIds])})`}
-      order by r.business_date desc, r.created_at desc
-      limit 200`);
+      order by r.business_date desc, r.created_at desc, r.id desc
+      limit ${pageSize + 1} offset ${offset}`);
     return {
-      items: rows.map((r) => ({
+      nextCursor: rows.length > pageSize ? `o:${offset + pageSize}` : null,
+      items: rows.slice(0, pageSize).map((r) => ({
         id: r.id,
         number: r.number,
         date: r.date,

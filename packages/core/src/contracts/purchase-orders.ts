@@ -93,6 +93,9 @@ export const purchaseOrderStatusInput = z.object({
 export const purchaseOrderListQuery = z.object({
   status: z.enum(PURCHASE_ORDER_STATUSES).optional(),
   supplierId: uuidSchema.optional(),
+  /** Round 60: pages. Without `limit` the list is the newest 500 and `nextCursor` says if more wait */
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  cursor: z.string().max(20).optional(),
 });
 
 export const purchaseOrderSuggestQuery = z.object({
@@ -148,6 +151,8 @@ export interface PurchaseOrderDetail extends PurchaseOrderRow {
 
 export interface PurchaseOrderListResponse {
   items: PurchaseOrderRow[];
+  /** Round 60: where the next page starts; null when this is the last */
+  nextCursor?: string | null;
 }
 
 /** `requested`: a customer asked for it and the shelf lacked it (round 38, «النواقص») */

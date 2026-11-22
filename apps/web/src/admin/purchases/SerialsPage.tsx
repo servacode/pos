@@ -51,11 +51,17 @@ export function SerialsPage() {
   const [stock, setStock] = useState<Map<string, number> | null>(null);
   // «بيعات بلا رقم»: sales accepted from a till without a number for a device; the owner picks which piece left
   const [unassigned, setUnassigned] = useState<UnassignedSerialSale[]>([]);
+  // More sales wait than the 50 shown: the rest come after these are settled
+  const [unassignedMore, setUnassignedMore] = useState(false);
   const [picked, setPicked] = useState<{ key: string; serial: string } | null>(null);
   useEffect(() => {
     let alive = true;
     void unassignedSerialSales().then(
-      (r) => alive && setUnassigned(r.items),
+      (r) => {
+        if (!alive) return;
+        setUnassigned(r.items);
+        setUnassignedMore(Boolean(r.more));
+      },
       () => undefined,
     );
     return () => {
@@ -280,6 +286,9 @@ export function SerialsPage() {
               <span className="font-semibold">
                 بيعات خرجت بلا رقم تسلسلي. اختر الجهاز الذي خرج مع كل بيعة:
               </span>
+              {unassignedMore ? (
+                <span>تُعرض أحدث 50 بيعة، وهناك بيعات أقدم تظهر بعد أن تُنهي هذه.</span>
+              ) : null}
               {unassigned.map((item) => {
                 const key = `${item.saleId}:${item.variantId}`;
                 return (

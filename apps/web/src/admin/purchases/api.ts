@@ -164,3 +164,10 @@ export const getRecall = (batchNo: string) =>
 /** `POST /v1/supplier-returns` (purchases.manage): pieces back to their supplier, a batch named per line */
 export const createSupplierReturn = (input: SupplierReturnInput) =>
   apiFetch<SupplierReturnDetail>('/v1/supplier-returns', { method: 'POST', body: input, auth: true });
+
+/** `GET /v1/inventory/serials` (inventory.adjust): the numbers in stock for one product in one branch (round 60) */
+export const stockSerialsOf = (variantId: string, branchId: string) =>
+  apiFetch<{ items: string[]; truncated: boolean }>(
+    `/v1/inventory/serials?variantId=${encodeURIComponent(variantId)}&branchId=${encodeURIComponent(branchId)}`,
+    { auth: true },
+  );

@@ -45,15 +45,27 @@ import {
   storeToday,
 } from './api';
 import { Caption, LinesHead, LinesTable, RemoveLine, WayArrow } from './parts';
+import { SupplierReturnDialog } from './SupplierReturnDialog';
+import { useIsPhone } from '../../lib/useIsPhone';
 import { PackQty } from './PackQty';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
 import { BatchSelect, type BatchChoice, type BatchSuggestion } from './BatchSelect';
 import { prefillOf } from './returnPrefill';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 
-const listReturns = () => apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier-returns', { auth: true });
+const listReturns = (cursor: string | null = null) =>
+  apiFetch<{ items: SupplierReturnRow[]; nextCursor?: string | null }>(
+    `/v1/supplier-returns${cursor ? `?cursor=${cursor}` : ''}`,
+    { auth: true },
+  );
 const createReturn = (input: SupplierReturnInput) =>
   apiFetch<SupplierReturnDetail>('/v1/supplier-returns', { method: 'POST', body: input, auth: true });
+
+const REFUND_SHORT: Record<SupplierReturnRow['refund'], string> = {
+  credit: 'من رصيده',
+  cash: 'نقداً',
+  bank: 'بنكي',
+};
 
 /** Each way the supplier pays back, as a choice and as a state in the list. */
 const REFUND_CHOICE: Record<SupplierReturnRow['refund'], { title: string; hint: string; icon: Icon }> = {
@@ -96,7 +108,12 @@ export function SupplierReturnsPage() {
   // «رجّعو للمورد» from the expiring-soon report opens the form already filled (round 38)
   const prefill = prefillOf(useLocation().state);
   const [suppliers, setSuppliers] = useState<SupplierListResponse | null>(null);
+  const phone = useIsPhone();
   const [items, setItems] = useState<SupplierReturnRow[] | null>(null);
+  // Round 60: the list comes in pages; «أظهر المزيد» brings the next, so no return vanishes past a cap
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [opened, setOpened] = useState<SupplierReturnRow | null>(null);
   const [supplierId, setSupplierId] = useState(prefill?.supplierId ?? '');
   const [branchId, setBranchId] = useState(prefill?.branchId ?? branches[0]?.id ?? '');
   const [refund, setRefund] = useState<SupplierReturnRow['refund']>('credit');
@@ -137,9 +154,23 @@ export function SupplierReturnsPage() {
 
   const load = useCallback(() => {
     listReturns()
-      .then((r) => setItems(r.items))
+      .then((r) => {
+        setItems(r.items);
+        setNextCursor(r.nextCursor ?? null);
+      })
       .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
+  function loadMore() {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    listReturns(nextCursor)
+      .then((r) => {
+        setItems((now) => [...(now ?? []), ...r.items]);
+        setNextCursor(r.nextCursor ?? null);
+      })
+      .catch((e: unknown) => setError(errorMessage(e)))
+      .finally(() => setLoadingMore(false));
+  }
   useEffect(load, [load]);
   useEffect(() => {
     listSuppliers()
@@ -677,28 +708,64 @@ export function SupplierReturnsPage() {
           </section>
         ) : null}
         <section aria-label="المرتجعات السابقة" className="flex flex-col gap-3">
-          <SxTable
-            caption="المرتجعات إلى الموردين"
-            columns={columns}
-            rows={items ?? []}
-            rowKey={(r) => r.id}
-            loading={!items && !error}
-            empty={
-              <EmptyState
-                icon={UndoIcon}
-                title="لا مرتجعات بعد."
-                description="كل مرتجع تسجّله يظهر هنا بمبلغه وطريقة استرداده."
-                action={
-                  formOpen ? undefined : (
-                    <Button icon={<AddIcon />} onClick={() => setFormOpen(true)}>
-                      مرتجع جديد
-                    </Button>
-                  )
-                }
-              />
-            }
-          />
+          {phone && items && items.length > 0 ? (
+            <ul className="sx-cards" aria-label="المرتجعات إلى الموردين">
+              {items.map((r) => (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    className="sx-icard px-amt-first"
+                    aria-label={`افتح المرتجع ${r.number}`}
+                    onClick={() => setOpened(r)}
+                  >
+                    <span className="n">{r.number}</span>
+                    <span className="st">
+                      <StatusPill kind={r.refund === 'credit' ? 'open' : 'ok'}>
+                        {REFUND_SHORT[r.refund]}
+                      </StatusPill>
+                    </span>
+                    <span className="d">
+                      {r.supplierName} · {dayText(r.date, digits)}
+                    </span>
+                    <span className="t">
+                      <Amt minor={r.amountMinor} currency={base} />
+                    </span>
+                    <span className="x">{formatQuantity(r.pieces, digits)} قطعة</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <SxTable
+              caption="المرتجعات إلى الموردين"
+              columns={columns}
+              rows={items ?? []}
+              rowKey={(r) => r.id}
+              onRowClick={setOpened}
+              loading={!items && !error}
+              empty={
+                <EmptyState
+                  icon={UndoIcon}
+                  title="لا مرتجعات بعد."
+                  description="كل مرتجع تسجّله يظهر هنا بمبلغه وطريقة استرداده."
+                  action={
+                    formOpen ? undefined : (
+                      <Button icon={<AddIcon />} onClick={() => setFormOpen(true)}>
+                        مرتجع جديد
+                      </Button>
+                    )
+                  }
+                />
+              }
+            />
+          )}
+          {nextCursor ? (
+            <Button variant="secondary" className="self-center" loading={loadingMore} onClick={loadMore}>
+              أظهر المزيد
+            </Button>
+          ) : null}
         </section>
+        {opened ? <SupplierReturnDialog row={opened} onClose={() => setOpened(null)} /> : null}
       </SalesPage>
     </ReportScreen>
   );

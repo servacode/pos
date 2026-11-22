@@ -141,6 +141,8 @@ function spanRange(span: Span, today: string): { from?: string; to?: string } {
 }
 
 const PAGE_SIZE = 50;
+/** A phone shows cards that are tall: twenty to a page keeps the list short (round 60) */
+const PHONE_PAGE_SIZE = 20;
 
 /**
  * «المشتريات» (08 › فاتورة شراء): the purchases (paged, searched and filtered by the server), a new
@@ -195,7 +197,7 @@ export function PurchasesPage() {
     () => ({ ...spanRange(span, today), supplierId, payment, q }),
     [span, today, supplierId, payment, q],
   );
-  const fetchKey = JSON.stringify(filters);
+  const fetchKey = JSON.stringify({ ...filters, phone });
   const {
     data: page,
     error: listError,
@@ -203,7 +205,9 @@ export function PurchasesPage() {
     retry,
     topRef,
     pager,
-  } = useCursorPages(fetchKey, (cursor) => listPurchasePage(filters, cursor, PAGE_SIZE));
+  } = useCursorPages(fetchKey, (cursor) =>
+    listPurchasePage(filters, cursor, phone ? PHONE_PAGE_SIZE : PAGE_SIZE),
+  );
   const items = useMemo(() => page?.items ?? [], [page]);
 
   // This month's total, whatever the list shows: one small request (the invoices corrected are not in it)
@@ -645,7 +649,7 @@ export function PurchasesPage() {
                     <li key={p.id}>
                       <button
                         type="button"
-                        className="sx-icard"
+                        className="sx-icard px-amt-first"
                         aria-label={`تفاصيل ${p.number}`}
                         onClick={() => setOpened(p)}
                       >

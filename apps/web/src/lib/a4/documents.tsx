@@ -4,6 +4,7 @@ import type { SalePayload } from '@serva/core/contracts/documents';
 import { oldPoundText } from '@serva/core/contracts/till';
 import type { Quotation } from '@serva/core/contracts/quotations';
 import type { PurchaseOrderDetail } from '@serva/core/contracts/purchase-orders';
+import type { SupplierReturnDetail } from '@serva/core/contracts/purchases';
 import { formatQuantity, Money, useDigits } from '@serva/ui';
 import { METHOD_TEXT } from '../../admin/sales/labels';
 import { dayText, zonedClock } from '../dates';
@@ -563,6 +564,74 @@ export function PurchaseOrderA4({ order, store }: { order: PurchaseOrderDetail; 
       ) : null}
       <p className="text-xs">هذه طلبية شراء وليست فاتورة، والكلفة المذكورة متوقّعة وتُعتمد بفاتورة المورد.</p>
       <Signatures left="عن المحل" right="تأكيد المورد" />
+      <p className="text-center text-xs">سيرفا · Serva</p>
+    </div>
+  );
+}
+
+/** «مرتجع إلى المورد»: the pieces sent back and what the supplier credits for them. */
+export function SupplierReturnA4({ back, store }: { back: SupplierReturnDetail; store: A4Store }) {
+  const digits = useDigits();
+  const base = back.baseCurrency;
+  const way =
+    back.refund === 'credit'
+      ? 'تنقص من رصيد المورد'
+      : back.refund === 'cash'
+        ? 'تُستردّ نقداً'
+        : 'تُستردّ بتحويل بنكي';
+  return (
+    <div
+      dir="rtl"
+      lang="ar"
+      aria-label="مرتجع إلى المورد A4"
+      className="flex flex-col gap-3 p-2 text-sm text-ink"
+    >
+      <Heading
+        store={store}
+        title="مرتجع إلى المورد"
+        number={back.number}
+        when={`التاريخ ${dayText(back.date, digits)}`}
+        extra={back.purchaseNumber ? <p className="font-bold">من الفاتورة {back.purchaseNumber}</p> : null}
+      />
+      <CustomerBlock customer={{ name: back.supplierName, phone: null }} label="السادة المورّدون" />
+      <table className="w-full border-collapse" aria-label="أصناف المرتجع">
+        <thead>
+          <tr className="bg-surface-muted">
+            <th className={`${cell} w-8 text-center`}>#</th>
+            <th className={`${cell} text-start`}>الصنف</th>
+            <th className={`${cell} text-end`}>الكمية</th>
+            <th className={`${cell} text-end`}>المبلغ المقبول</th>
+          </tr>
+        </thead>
+        <tbody>
+          {back.lines.map((line, idx) => (
+            <tr key={`${line.variantId}-${idx}`} className="break-inside-avoid">
+              <td className={`${cell} num text-center`}>{idx + 1}</td>
+              <td className={cell}>
+                {line.name}
+                {line.batchNo ? ` · دفعة ${line.batchNo}` : ''}
+              </td>
+              <td className={`${cell} num text-end`}>{formatQuantity(line.qty, digits)}</td>
+              <td className={`${cell} text-end`}>
+                <Money minor={line.amountMinor} currency={base} symbol={false} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <dl className="ms-auto flex w-64 flex-col gap-1 break-inside-avoid">
+        <div className="flex justify-between border-t-2 border-ink pt-1 text-base font-bold">
+          <dt>مجموع الاعتماد</dt>
+          <dd>
+            <Money minor={back.amountMinor} currency={base} />
+          </dd>
+        </div>
+      </dl>
+      <p>
+        <strong>طريقة الاسترداد:</strong> {way}
+        {back.reference ? ` · إشعار المورد ${back.reference}` : ''}
+      </p>
+      <Signatures left="عن المحل" right="استلام المورد" />
       <p className="text-center text-xs">سيرفا · Serva</p>
     </div>
   );

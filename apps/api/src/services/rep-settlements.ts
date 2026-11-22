@@ -658,6 +658,7 @@ export async function approveSettlement(
             lines: counted.map((l) => ({ variantId: l.variantId, countedQty: l.countedQty! })),
           },
           meta,
+          { lenientSerials: true },
         );
         await save({ stocktakeId: made.id, stocktakeNumber: made.number });
       }

@@ -56,6 +56,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/inventory': 'signed-in',
   'GET /v1/inventory/expiry': 'signed-in',
   'GET /v1/inventory/count-sheet': 'signed-in',
+  'GET /v1/inventory/serials': 'signed-in',
   'GET /v1/reports/waste': 'signed-in',
   'POST /v1/device/waste': 'device',
   'GET /v1/damaged-stock': 'signed-in',
@@ -277,6 +278,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/pharmacy/shortages/resolve': 'signed-in',
   'GET /v1/transfers': 'signed-in',
   'GET /v1/supplier-returns': 'signed-in',
+  'GET /v1/supplier-returns/:id': 'signed-in',
   'POST /v1/supplier-returns': 'signed-in',
   'POST /v1/transfers': 'signed-in',
   'GET /v1/transfers/settings': 'signed-in',
@@ -1514,6 +1516,37 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       { n: string }[]
     >`select count(*)::text as n from transfer_receipts where transfer_id = ${transferId}`;
     expect(row!.n).toBe('0');
+  },
+  // Round 60: another store's supplier return answers 404 on the detail, with nothing of it in the body
+  'GET /v1/supplier-returns/:id': async (app, { a, b }) => {
+    const supplierId = await supplierOf(app, a);
+    const product = await productOf(app, a);
+    const variantId = product.variants[0]!.id;
+    const bought = await app.inject({
+      method: 'POST',
+      url: '/v1/purchases',
+      headers: owner(a),
+      payload: {
+        supplierId,
+        date: '2026-10-30',
+        payment: 'credit',
+        lines: [{ variantId, qty: 2000, costMinor: 100 }],
+      },
+    });
+    expect(bought.statusCode, bought.body).toBe(201);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/supplier-returns',
+      headers: owner(a),
+      payload: { supplierId, date: '2026-10-31', refund: 'credit', lines: [{ variantId, qty: 1000 }] },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const id = made.json<{ id: string }>().id;
+    const own = await app.inject({ method: 'GET', url: `/v1/supplier-returns/${id}`, headers: owner(a) });
+    expect(own.statusCode).toBe(200);
+    const res = await app.inject({ method: 'GET', url: `/v1/supplier-returns/${id}`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain(id);
   },
   // Another store's purchase order answers 404 for reading, editing and moving on, and stays as it was
   'GET /v1/purchase-orders/:id': async (app, { a, b }) => {
@@ -3175,6 +3208,27 @@ describe('route registry', () => {
       (await app.inject({ method: 'GET', url: '/v1/me/home-summary?branchId=nope', headers: owner(a) }))
         .statusCode,
     ).toBe(400);
+  });
+
+  it('the in-stock serial list refuses another store’s product and branch and leaks nothing', async () => {
+    const { a, b } = await twoStores();
+    const product = await productOf(app, a);
+    const variantId = product.variants[0]!.id;
+    const branchA = await firstBranch(a.tenantId);
+    const branchB = await firstBranch(b.tenantId);
+    const foreignVariant = await app.inject({
+      method: 'GET',
+      url: `/v1/inventory/serials?variantId=${variantId}&branchId=${branchB}`,
+      headers: owner(b),
+    });
+    expect(foreignVariant.statusCode).toBe(404);
+    const foreignBranch = await app.inject({
+      method: 'GET',
+      url: `/v1/inventory/serials?variantId=${variantId}&branchId=${branchA}`,
+      headers: owner(b),
+    });
+    expect([403, 404]).toContain(foreignBranch.statusCode);
+    expect(foreignBranch.body).not.toContain('items');
   });
 
   it('IDOR probes: another store’s ids answer 404', async () => {

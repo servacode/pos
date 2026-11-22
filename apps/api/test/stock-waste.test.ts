@@ -235,6 +235,43 @@ describe('تالف / هدر at the till', () => {
   });
 });
 
+describe('the waste report totals (round 60)', () => {
+  it('a count whose note only starts with «هدر» is a count, and the totals come from the database', async () => {
+    const { store, milk, rice } = await world();
+    const post = (payload: object) =>
+      app.inject({ method: 'POST', url: '/v1/stocktakes', headers: as(store), payload });
+    expect(
+      (
+        await post({
+          date: '2026-10-30',
+          note: 'هدر الشهر الماضي',
+          lines: [{ variantId: rice, countedQty: 9000 }],
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await post({
+          date: '2026-10-30',
+          note: 'هدر',
+          lines: [{ variantId: milk, countedQty: 8000, wasteReason: 'انكسر' }],
+        })
+      ).statusCode,
+    ).toBe(201);
+    const report = (
+      await app.inject({
+        method: 'GET',
+        url: '/v1/reports/waste?from=2026-10-01&to=2026-10-31',
+        headers: as(store),
+      })
+    ).json<WasteReport>();
+    expect(report.rows).toHaveLength(1);
+    expect(report.byReason).toMatchObject([{ reason: 'انكسر', qty: 2000, costMinor: 80_000, count: 1 }]);
+    expect(report.byProduct).toMatchObject([{ variantId: milk, qty: 2000, costMinor: 80_000 }]);
+    expect(report.totalCostMinor).toBe(80_000);
+  });
+});
+
 describe('the phone count', () => {
   it('the sheet carries the barcodes and can be narrowed to a category', async () => {
     const { store, milk, rice, categoryId } = await world();

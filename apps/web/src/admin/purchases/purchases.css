@@ -107,3 +107,19 @@
 .sx a.sx-icard {
   text-decoration: none;
 }
+
+/* Round 60: on a phone card the amount is on the first line, beside the number; the state sits under it */
+.sx .sx-icard.px-amt-first .t {
+  grid-row: 1;
+  grid-column: 2;
+  font-size: 17px;
+}
+.sx .sx-icard.px-amt-first .n {
+  grid-column: 1;
+  grid-row: 1;
+  text-align: start;
+}
+.sx .sx-icard.px-amt-first .st {
+  grid-row: 2;
+  grid-column: 2;
+}

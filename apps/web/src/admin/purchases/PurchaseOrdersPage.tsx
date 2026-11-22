@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { PURCHASE_ORDER_STATUS_LABELS, type PurchaseOrderRow, type PurchaseOrderStatus } from '@serva/core';
-import { AddIcon, Button, EmptyState, formatQuantity, ListIcon, useDigits, type BadgeTone } from '@serva/ui';
+import {
+  AddIcon,
+  Alert,
+  Button,
+  EmptyState,
+  formatQuantity,
+  ListIcon,
+  useDigits,
+  type BadgeTone,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { ReportScreen } from '../reports/parts';
 import { errorMessage } from '../../lib/api';
@@ -50,6 +59,8 @@ export function PurchaseOrdersPage() {
   const today = storeToday(me.tenant.timezone);
   const [status, setStatus] = useState<Filter>('all');
   const [all, setAll] = useState<PurchaseOrderRow[] | null>(null);
+  // More orders than one read brings (4000): said, never cut silently
+  const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -58,7 +69,11 @@ export function PurchaseOrdersPage() {
     let alive = true;
     setError(null);
     listOrders().then(
-      (r) => alive && setAll(r.items),
+      (r) => {
+        if (!alive) return;
+        setAll(r.items);
+        setMore(Boolean(r.nextCursor));
+      },
       (e: unknown) => alive && setError(errorMessage(e)),
     );
     return () => {
@@ -170,6 +185,7 @@ export function PurchaseOrdersPage() {
             </Button>
           }
         />
+        {more ? <Alert tone="warning">الطلبيات أكثر من أن تُعرض كلها: ظهرت الأحدث فقط.</Alert> : null}
         <div role="radiogroup" aria-label="حالة الطلبية" className="sx-chips px-chips">
           {FILTERS.filter((f) => f.value === 'all' || f.value === status || counts[f.value] > 0 || !all).map(
             (f) => (
@@ -192,7 +208,7 @@ export function PurchaseOrdersPage() {
               <li key={r.id}>
                 <button
                   type="button"
-                  className="sx-icard"
+                  className="sx-icard px-amt-first"
                   aria-label={`افتح الطلبية ${r.number}`}
                   onClick={() => void navigate(`/purchase-orders/${r.id}`)}
                 >

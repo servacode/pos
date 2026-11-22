@@ -547,3 +547,15 @@
     min-width: 0;
   }
 }
+
+/* Round 60: a long statement keeps its column heads in view while the rows scroll under them */
+.cx-stm-tbl > div {
+  max-height: 75vh;
+  overflow-y: auto;
+}
+.cx-stm-tbl thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-muted, var(--surface));
+}

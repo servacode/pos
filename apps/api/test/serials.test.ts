@@ -464,4 +464,53 @@ describe('serial tracking at the till and on the server', () => {
     );
     expect(lost.statusCode).toBe(400);
   });
+
+  it('a count that finds fewer phones names the numbers that left, so the serial list agrees (round 60)', async () => {
+    const store = await openStore(app);
+    const a15 = await phone(store);
+    await received(store, a15, ['CNT-1', 'CNT-2', 'CNT-3']);
+    const count = (payload: Record<string, unknown>) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/stocktakes',
+        headers: as(store),
+        payload: { date: '2026-10-30', ...payload },
+      });
+    const line = (extra: Record<string, unknown>) => ({
+      lines: [{ variantId: a15.variantId, countedQty: 2000, ...extra }],
+    });
+    // A shortage with no numbers is refused, one with the wrong number too: nothing was posted
+    const bare = await count(line({}));
+    expect(bare.statusCode).toBe(400);
+    expect(bare.json().error.fields['lines.0.serials']).toContain('1');
+    const ghost = await count(line({ serials: ['NOPE'] }));
+    expect(ghost.json().error.fields['lines.0.serials']).toContain('NOPE');
+    expect(await history(store, 'CNT-2')).toMatchObject({ status: 'in_stock' });
+    const ok = await count(line({ serials: ['cnt-2'] }));
+    expect(ok.statusCode, ok.body).toBe(201);
+    expect(await history(store, 'CNT-2')).toMatchObject({ status: 'lost' });
+    expect(await history(store, 'CNT-1')).toMatchObject({ status: 'in_stock' });
+    // Counted at its book figure (no shortage): no numbers asked
+    expect((await count(line({ countedQty: 2000 }))).statusCode).toBe(201);
+    // The phone's count against an older sheet is never refused for want of numbers
+    const phoneCount = await count({
+      countedAt: new Date().toISOString(),
+      lines: [{ variantId: a15.variantId, countedQty: 1000 }],
+    });
+    expect(phoneCount.statusCode, phoneCount.body).toBe(201);
+    // The list the count picks from: only what is in stock
+    const pick = await app.inject({
+      method: 'GET',
+      url: `/v1/inventory/serials?variantId=${a15.variantId}&branchId=${
+        (
+          await owner.db.execute<{ id: string }>(
+            sql`select id from branches where tenant_id = ${store.tenantId}`,
+          )
+        )[0]!.id
+      }`,
+      headers: as(store),
+    });
+    expect(pick.statusCode, pick.body).toBe(200);
+    expect(pick.json().items).toEqual(['CNT-1', 'CNT-3']);
+  });
 });

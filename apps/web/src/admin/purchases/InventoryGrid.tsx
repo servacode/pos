@@ -5,6 +5,9 @@ import { negativePieces } from '../stockWords';
 import { ChevDown, ChevLeft } from '../sales/ui';
 import { gridOf } from './SizeGrid';
 
+/** The models the grid shows before «اعرض الكل» */
+const GRID_FIRST = 10;
+
 type Piece = Pick<InventoryRow, 'variantId' | 'qty'> & { attributes: { name: string; value: string }[] };
 
 /**
@@ -25,6 +28,8 @@ export function InventoryGrid({
   // Which models show: all, those with a piece below zero or out, those running low (2 or fewer)
   const [filter, setFilter] = useState<'all' | 'out' | 'low'>('all');
   // A model the person opened or closed by hand; the others follow the default (the thinnest few open)
+  // A long list shows its first ten models (the thinnest sizes); the rest open from «اعرض الكل»
+  const [showAll, setShowAll] = useState(false);
   const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
   const byProduct = new Map<string, { name: string; pieces: Map<string, Piece> }>();
   for (const r of rows) {
@@ -42,10 +47,11 @@ export function InventoryGrid({
     })
     // The models with the thinnest size first: that is the one to restock
     .sort((a, b) => a.lowest - b.lowest || a.name.localeCompare(b.name, 'ar'));
-  const models = allModels.filter((m) =>
+  const matching = allModels.filter((m) =>
     filter === 'out' ? m.lowest <= 0 : filter === 'low' ? m.lowest <= 2000 : true,
   );
-  if (models.length === 0) {
+  const models = showAll ? matching : matching.slice(0, GRID_FIRST);
+  if (matching.length === 0) {
     return <p className="text-sm text-ink-muted">لا أصناف بمقاسات وألوان لتُعرض شبكة.</p>;
   }
   const isOpen = (id: string, index: number) => toggled.get(id) ?? index < 4;
@@ -77,7 +83,6 @@ export function InventoryGrid({
       <p className="text-xs text-ink-muted">
         الأحمر: نفد أو سالب (والسالب مكتوب بكلمته) · الأصفر: قليل (2 أو أقل) · «—»: لا توجد هذه القطعة.
       </p>
-      {models.length === 0 ? <p className="text-sm text-ink-muted">لا صنف في هذه المجموعة.</p> : null}
       {models.map((m, index) => {
         const grid = gridOf(m.pieces as never);
         if (!grid.fits) return null;
@@ -223,6 +228,13 @@ export function InventoryGrid({
           </section>
         );
       })}
+      {matching.length > GRID_FIRST ? (
+        <div className="flex justify-center">
+          <Button variant="secondary" onClick={() => setShowAll((now) => !now)}>
+            {showAll ? `اعرض أول ${GRID_FIRST} فقط` : `اعرض الكل (${matching.length})`}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

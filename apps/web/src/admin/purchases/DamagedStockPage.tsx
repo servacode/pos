@@ -241,6 +241,7 @@ function ActDialog({
       } else {
         await createStocktake({
           id: docId,
+          serialsLater: true,
           branchId: location.branchId,
           date: storeToday(me.tenant.timezone),
           ...(asOf ? { countedAt: asOf } : {}),

@@ -229,7 +229,9 @@ describe('«الجرد السابق»', () => {
         },
       },
     });
-    renderApp('/inventory');
+    const { user } = renderApp('/inventory');
+    // The counts already made sit on a tab of their own (round 60)
+    await user.click(await screen.findByRole('radio', { name: 'الجرد السابق' }));
     const table = await screen.findByRole('table', { name: 'الجرد السابق' });
     expect(within(table).getByText('STK-2026-000003')).toBeInTheDocument();
     expect(within(table).getByText('سامر')).toBeInTheDocument();

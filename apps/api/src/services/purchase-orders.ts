@@ -315,7 +315,12 @@ export function readPurchaseOrder(
 export function listPurchaseOrders(
   db: Database,
   auth: AccessClaims,
-  query: { status?: PurchaseOrderStatus | undefined; supplierId?: string | undefined },
+  query: {
+    status?: PurchaseOrderStatus | undefined;
+    supplierId?: string | undefined;
+    limit?: number | undefined;
+    cursor?: string | undefined;
+  },
 ): Promise<PurchaseOrderListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
@@ -324,6 +329,15 @@ export function listPurchaseOrders(
     if (query.status) conditions.push(eq(purchaseOrders.status, query.status));
     if (query.supplierId) conditions.push(eq(purchaseOrders.supplierId, query.supplierId));
     const zone = await zoneOf(tx);
+    // Round 60: a page continues after the rows before it (the cursor is how many came first)
+    const pageSize = query.limit ?? 500;
+    const offset = query.cursor ? Number(query.cursor.slice(2)) : 0;
+    if (
+      query.cursor &&
+      (!query.cursor.startsWith('o:') || !Number.isSafeInteger(offset) || offset < 0 || offset > 9_999_999)
+    ) {
+      throw invalid({ cursor: 'صفحة غير صالحة' });
+    }
     const rows = await tx
       .select({ order: purchaseOrders, name: suppliers.name, phone: suppliers.phone })
       .from(purchaseOrders)
@@ -333,8 +347,12 @@ export function listPurchaseOrders(
       )
       .where(and(...conditions))
       .orderBy(desc(purchaseOrders.createdAt), desc(purchaseOrders.number))
-      .limit(500);
-    return { items: rows.map((r) => rowOf(r.order, { name: r.name, phone: r.phone }, zone)) };
+      .limit(pageSize + 1)
+      .offset(offset);
+    return {
+      items: rows.slice(0, pageSize).map((r) => rowOf(r.order, { name: r.name, phone: r.phone }, zone)),
+      nextCursor: rows.length > pageSize ? `o:${offset + pageSize}` : null,
+    };
   });
 }
 

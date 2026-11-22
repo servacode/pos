@@ -281,3 +281,39 @@
   gap: 12px;
   padding: 16px;
 }
+
+/* the serial numbers a count picks the missing pieces from (round 60) */
+.sx .ix-serials {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px 12px;
+  margin: 0;
+  min-width: 0;
+}
+.sx .ix-serials legend {
+  padding: 0 6px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.sx .ix-serial-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0 12px;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+/* the valuation method line and the reorder pill (round 60) */
+.sx .ix-method {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 14px;
+  line-height: 22px;
+}
+.sx .ix-method b {
+  color: var(--ink);
+}

@@ -129,6 +129,7 @@ export function ExpiryPage() {
         // The existing write-off path: a count of this batch alone, down to nothing, noted «هدر»
         await createStocktake({
           id: docId,
+          serialsLater: true,
           branchId: row.branchId,
           date: storeToday(me.tenant.timezone),
           note: 'هدر',
@@ -141,6 +142,7 @@ export function ExpiryPage() {
         if (typed === null) throw new Refused('اكتب الكمية التي عددتها.');
         await createStocktake({
           id: docId,
+          serialsLater: true,
           branchId: row.branchId,
           date: storeToday(me.tenant.timezone),
           lines: [
