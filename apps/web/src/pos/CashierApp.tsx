@@ -333,6 +333,8 @@ function CashierScreens({
   const [waJob, setWaJob] = useState<ReceiptData | null>(null);
   // The close is saved and its Z report is showing: the header must not still say «وردية منذ…»
   const [shiftClosed, setShiftClosed] = useState(false);
+  // What the open cart came to when the till last priced it, for the warning when the shift is closed
+  const [cartTotal, setCartTotal] = useState<number | null>(null);
   const [printer, setPrinter] = useState<PrinterSetting>(DEFAULT_PRINTER);
   // The sale just finished, printed on A4 (an invoice, or its delivery note)
   const [a4Job, setA4Job] = useState<{ data: ReceiptData; kind: A4Kind } | null>(null);
@@ -1329,6 +1331,16 @@ function CashierScreens({
                 catalog={catalog}
                 shift={shift}
                 onBack={() => setView('sale')}
+                openCart={
+                  cart.lines.length > 0
+                    ? {
+                        lines: cart.lines.length,
+                        totalMinor: cartTotal,
+                        currency: catalog.settings!.baseCurrency,
+                      }
+                    : null
+                }
+                onHoldCart={() => hold()}
                 onSaved={() => setShiftClosed(true)}
                 onClosed={() => {
                   setShiftClosed(false);
@@ -1532,6 +1544,7 @@ function CashierScreens({
   return (
     <>
       <SaleScreen
+        onTotal={setCartTotal}
         statusBar={statusBar}
         session={session}
         catalog={catalog}

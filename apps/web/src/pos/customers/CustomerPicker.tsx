@@ -202,10 +202,7 @@ export function CustomerPicker({
           >
             زبون جديد
           </Button>
-          <ul
-            aria-label="الزبائن"
-            className="-mx-1 flex flex-col gap-1 px-1 pb-1 md:max-h-[min(32rem,60vh)] md:overflow-y-auto"
-          >
+          <ul aria-label="الزبائن" className="-mx-1 flex flex-col gap-1 px-1 pb-1 max-h-60 overflow-y-auto">
             {found.map((c) => (
               <li key={c.id}>
                 <button

@@ -1,0 +1,13 @@
+/* Owner 2026-11-22: the till's top bar wears the admin's navy in light and dark: the colour names are
+   re-pointed inside it (as «.sh-top» in layout/shell.css) so every control follows; a taller bar. */
+.till-top > header {
+  --color-surface: var(--color-sidebar);
+  --color-surface-muted: var(--color-sidebar-hover);
+  --color-line: var(--color-sidebar-line);
+  --color-ink: var(--color-sidebar-strong);
+  --color-ink-muted: var(--color-sidebar-muted);
+  --color-ink-subtle: var(--color-sidebar-muted);
+  --color-brand-ink: var(--color-sidebar-strong);
+  --color-brand-soft: var(--color-sidebar-active);
+  height: 4.5rem;
+}

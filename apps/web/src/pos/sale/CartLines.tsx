@@ -129,13 +129,17 @@ export function CartLines({
               ) : null,
               discounted && p && adj?.kind === 'price' ? (
                 <span key="pd" className="font-semibold text-info-ink">
-                  −<ExactMoney minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                  <bdi dir="ltr">
+                    −<ExactMoney minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                  </bdi>
                 </span>
               ) : null,
               p && p.priced.lineDiscountMinor > 0 && p.discount?.source === 'promotion' ? (
                 <span key="o" className="font-semibold text-success-ink">
-                  {p.discount.reason} −
-                  <ExactMoney minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                  {p.discount.reason}{' '}
+                  <bdi dir="ltr">
+                    −<ExactMoney minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                  </bdi>
                 </span>
               ) : null,
               promoHint ? (

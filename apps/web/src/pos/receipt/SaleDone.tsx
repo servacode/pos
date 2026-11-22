@@ -1,5 +1,17 @@
 import type { SalePayload } from '@serva/core/contracts/documents';
-import { Button, CartIcon, CheckIcon, cn, Menu, MenuItem, MoreIcon, OfflineIcon, PrintIcon } from '@serva/ui';
+import {
+  Button,
+  CartIcon,
+  CheckIcon,
+  cn,
+  displayNumber,
+  Menu,
+  MenuItem,
+  MoreIcon,
+  OfflineIcon,
+  PrintIcon,
+  useDigits,
+} from '@serva/ui';
 import { ExactMoney } from '../ExactMoney';
 import { notesFor } from '../shift/shift';
 import { changeNotes } from '../pay/payment';
@@ -40,9 +52,17 @@ export function SaleDone({
 }) {
   const sale = data.doc.payload as unknown as SalePayload;
   const change = sale.change;
+  const digits = useDigits();
   const notes = change
     ? changeNotes(change.amountMinor, notesFor(data.settings.till, change.currency) ?? [])
     : [];
+  // Equal notes come together: «9 × 500», not nine cards
+  const noteGroups = notes.reduce<{ note: number; count: number }[]>((groups, note) => {
+    const last = groups[groups.length - 1];
+    if (last && last.note === note) last.count += 1;
+    else groups.push({ note, count: 1 });
+    return groups;
+  }, []);
   // A sale on account or by cheque has no change: it says what stays with the customer instead
   const onAccount = (['credit', 'cheque'] as const).flatMap((method) => {
     const parts = sale.payments.filter((p) => p.method === method);
@@ -99,14 +119,19 @@ export function SaleDone({
               {notes.length > 0 ? (
                 <span className="flex flex-wrap items-center gap-2 pt-1 text-sm text-ink-muted">
                   أعطه:
-                  {notes.map((note, i) => (
-                    <ExactMoney
+                  {noteGroups.map(({ note, count }, i) => (
+                    <span
                       key={i}
-                      minor={note}
-                      currency={change.currency}
-                      symbol={false}
-                      className="rounded-small border border-line-control/50 bg-surface px-2.5 py-1 font-bold text-ink shadow-e1"
-                    />
+                      dir="ltr"
+                      className="flex items-center gap-1.5 rounded-small border border-line-control/50 bg-surface px-2.5 py-1 font-bold text-ink shadow-e1"
+                    >
+                      {count > 1 ? (
+                        <bdi className="num font-semibold text-ink-muted">
+                          {displayNumber(String(count), digits)} ×
+                        </bdi>
+                      ) : null}
+                      <ExactMoney minor={note} currency={change.currency} symbol={false} />
+                    </span>
                   ))}
                 </span>
               ) : null}

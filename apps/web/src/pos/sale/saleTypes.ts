@@ -62,6 +62,8 @@ export interface SaleScreenProps {
   heldCount: number;
   /** The held carts, for the list to pick from */
   heldList?: readonly Cart[];
+  /** The cart's total as priced here, told up so closing the shift can name what is still open */
+  onTotal?: (totalMinor: number) => void;
   /** Puts the cart aside under an optional name */
   onHold: (name?: string, sellerId?: string) => void;
   /** Brings a held cart back (the last one when none is named) */

@@ -207,7 +207,10 @@ export function ReturnScreen({
   const pickedId = picked?.id ?? null;
   const savedId = saved?.id ?? null;
   useEffect(() => {
-    if (pickedId || savedId) resultTop.current?.scrollIntoView?.({ block: 'start' });
+    // Only where the result sits under the list (a phone, a narrow tablet); beside it, the page stays where it is
+    const stacked =
+      typeof window.matchMedia === 'function' ? !window.matchMedia('(min-width: 1024px)').matches : true;
+    if ((pickedId || savedId) && stacked) resultTop.current?.scrollIntoView?.({ block: 'start' });
   }, [pickedId, savedId]);
 
   useEffect(() => {

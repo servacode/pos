@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import type { CashMovementKind, CashMovementPayload } from '@serva/core/contracts/documents';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
@@ -319,11 +320,17 @@ export function ShiftCloseScreen({
   onBack,
   onClosed,
   onSaved,
+  openCart = null,
+  onHoldCart,
 }: {
   session: StaffSession;
   catalog: Catalog;
   shift: OpenShift;
   onBack: () => void;
+  /** An invoice still open in the cart: the close warns about it (its total when known) */
+  openCart?: { lines: number; totalMinor: number | null; currency: CurrencyCode } | null;
+  /** Puts that invoice aside (held) so it does not wait unpaid after the close */
+  onHoldCart?: () => void;
   onClosed: () => void;
   /** The close is saved: the Z report is showing, the shift is no longer open (the header says so) */
   onSaved?: () => void;
@@ -773,21 +780,54 @@ export function ShiftCloseScreen({
             ) : null}
             {error ? <Alert tone="error">{error}</Alert> : null}
             {confirming ? (
-              <div
-                role="alertdialog"
-                aria-label="تأكيد إغلاق الوردية"
-                className="flex flex-col gap-3 rounded-card border border-warning/20 bg-warning-soft p-4"
-              >
-                <p className="font-semibold text-warning-ink">
-                  تغلق الوردية الآن؟ بعد الإغلاق لا يُعدَّل العدّ ولا تُضاف مبيعات إلى هذه الوردية.
-                </p>
-                <Button size="lg" fullWidth icon={<LockIcon />} onClick={close} loading={saving}>
-                  نعم، أغلق الوردية
-                </Button>
-                <Button variant="ghost" fullWidth onClick={() => setConfirming(false)} disabled={saving}>
-                  لا، ارجع
-                </Button>
-              </div>
+              // A box over the page, centred and dimmed: the page behind does not move and its head stays
+              createPortal(
+                <div className="fixed inset-0 z-40 flex justify-center overflow-y-auto bg-ink/45 p-4">
+                  <div
+                    role="alertdialog"
+                    aria-label="تأكيد إغلاق الوردية"
+                    className="my-auto flex w-full max-w-md flex-col gap-3 rounded-card border border-warning/20 bg-warning-soft p-4 shadow-e3"
+                  >
+                    <p className="font-semibold text-warning-ink">
+                      تغلق الوردية الآن؟ بعد الإغلاق لا يُعدَّل العدّ ولا تُضاف مبيعات إلى هذه الوردية.
+                    </p>
+                    {openCart ? (
+                      <div role="alert" className="flex flex-col gap-2 rounded-control bg-surface p-3">
+                        <p className="flex items-start gap-2 text-sm font-semibold text-warning-ink">
+                          <WarningIcon size={20} className="shrink-0" />
+                          <span>
+                            في السلة فاتورة مفتوحة لم تُدفع
+                            {openCart.totalMinor !== null ? (
+                              <>
+                                {' '}
+                                بقيمة <Money minor={openCart.totalMinor} currency={openCart.currency} />
+                              </>
+                            ) : null}
+                            . علّقها لتبقى محفوظة، أو ارجع وأتمّ بيعها.
+                          </span>
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {onHoldCart ? (
+                            <Button variant="secondary" onClick={onHoldCart} disabled={saving}>
+                              علّق الفاتورة
+                            </Button>
+                          ) : null}
+                          <Button variant="secondary" onClick={onBack} disabled={saving}>
+                            ارجع للبيع
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                    <Button size="lg" fullWidth icon={<LockIcon />} onClick={close} loading={saving}>
+                      نعم، أغلق الوردية
+                    </Button>
+                    <Button variant="ghost" fullWidth onClick={() => setConfirming(false)} disabled={saving}>
+                      لا، ارجع
+                    </Button>
+                  </div>
+                </div>,
+                document.body,
+              )
             ) : (
               <Button
                 size="lg"

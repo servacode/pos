@@ -398,38 +398,40 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
         </div>
       ) : null}
       {catalog.categories.length > 0 ? (
-        <div
-          role="group"
-          aria-label="التصنيفات"
-          className="-m-1 flex shrink-0 gap-2 overflow-x-auto p-1 scrollbar-none sm:flex-wrap sm:overflow-visible"
-        >
-          {[{ id: null, name: 'الكل' }, ...catalog.categories].map((c) => {
-            const on = !query && category === c.id;
-            return (
-              <button
-                key={c.id ?? 'all'}
-                type="button"
-                aria-pressed={on}
-                onClick={() => {
-                  setCategory(c.id);
-                  setShown(60);
-                  setQuery('');
-                }}
-                className={cn(
-                  CONTROL_HEIGHT.touch,
-                  'shrink-0 rounded-small border px-5 text-base font-semibold whitespace-nowrap max-sm:min-h-11 max-sm:px-4 transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard',
-                  on
-                    ? 'border-brand/30 bg-brand-soft text-brand-ink'
-                    : 'border-line-control/50 bg-surface text-ink-muted shadow-e1 hover:bg-surface-muted hover:text-ink',
-                )}
-              >
-                {c.name}
-              </button>
-            );
-          })}
+        <div className="flex shrink-0 items-start gap-2">
+          <div
+            role="group"
+            aria-label="التصنيفات"
+            className="-m-1 flex min-w-0 flex-1 gap-2 overflow-x-auto p-1 scrollbar-none xl:flex-wrap"
+          >
+            {[{ id: null, name: 'الكل' }, ...catalog.categories].map((c) => {
+              const on = !query && category === c.id;
+              return (
+                <button
+                  key={c.id ?? 'all'}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => {
+                    setCategory(c.id);
+                    setShown(60);
+                    setQuery('');
+                  }}
+                  className={cn(
+                    CONTROL_HEIGHT.touch,
+                    'shrink-0 rounded-small border px-4 text-base font-semibold whitespace-nowrap max-sm:min-h-11 max-sm:px-4 transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard',
+                    on
+                      ? 'border-brand/30 bg-brand-soft text-brand-ink'
+                      : 'border-line-control/50 bg-surface text-ink-muted shadow-e1 hover:bg-surface-muted hover:text-ink',
+                  )}
+                >
+                  {c.name}
+                </button>
+              );
+            })}
+          </div>
           {/* The two view switches sit apart at the row's end, drawn as buttons: not a last category that taps nothing */}
           {results.length > 0 ? (
-            <span className="ms-auto flex shrink-0 gap-2">
+            <span className="flex shrink-0 gap-2">
               <IconButton
                 variant="secondary"
                 size="md"
@@ -745,8 +747,14 @@ function SizeChips({
             </bdi>
           </button>
         ) : (
-          <bdi key={s.value} className="px-2 py-0.5 text-ink-muted line-through decoration-2">
+          <bdi key={s.value} className="px-2 py-0.5 text-ink-muted">
             {isolateSizes(s.value)}
+            <span
+              aria-hidden="true"
+              className="ms-1 rounded-small bg-surface-muted px-1 text-xs font-semibold"
+            >
+              نفد
+            </span>
             <span className="sr-only"> نفد</span>
           </bdi>
         ),

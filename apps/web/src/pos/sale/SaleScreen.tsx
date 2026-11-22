@@ -232,6 +232,8 @@ export function SaleScreen(props: SaleScreenProps) {
   // The instalment fee of the plan being made on the pay screen: shown with the total in the cart panel
   const [planFeeMinor, setPlanFeeMinor] = useState(0);
   usePayResume({ pos, priced, cart, session, mode, totalMinor, setMode });
+  const { onTotal } = props;
+  useEffect(() => onTotal?.(totalMinor), [onTotal, totalMinor]);
   const contractSaved = cart.lines.reduce((sum, l) => sum + contractSavingMinor(l, ctx), 0);
   const unnumbered = missingSerials(cart);
   const blocked =

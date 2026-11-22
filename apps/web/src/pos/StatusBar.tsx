@@ -15,6 +15,7 @@ import {
 } from '@serva/ui';
 import type { LocalDevice } from '../offline/device';
 import { clockText } from './format';
+import './till-top.css';
 
 export interface OutboxStatus {
   pending: number;
@@ -240,13 +241,13 @@ export function StatusBar({
     };
   }, []);
   return (
-    <div ref={chrome} className="relative z-60">
+    <div ref={chrome} className="till-top relative z-60">
       <CashierStatusBar>
         {/* The whole logo where the bar is wide; the mark alone where the store and the person need room */}
         <span className="hidden shrink-0 xl:flex">
-          <Logo />
+          <Logo tone="sidebar" className="h-12" />
         </span>
-        <LogoMark className="xl:hidden" />
+        <LogoMark tone="sidebar" className="size-11 xl:hidden" />
         {device ? (
           <>
             <span className="hidden sm:contents">

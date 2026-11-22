@@ -123,7 +123,7 @@ export function PinPad({
           />
         ))}
         <span className="sr-only">
-          {lockedNow ? 'الدخول متوقف مؤقتاً' : wrong ? 'رمز غير صحيح' : progress(pin.length, length)}
+          {lockedNow ? 'الدخول متوقف مؤقتاً' : wrong ? 'محاولة خاطئة' : progress(pin.length, length)}
         </span>
       </div>
 

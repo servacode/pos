@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Badge,
+  Button,
   CheckIcon,
   cn,
   EmptyState,
@@ -80,6 +81,12 @@ export function StaffSignIn({
         icon={UserIcon}
         title="لا أسماء موظفين على هذا الجهاز بعد"
         description="تصل أسماء الموظفين ورموز دخولهم مع أول اتصال بالإنترنت. إن طال الانتظار، اطلب من المالك أن يضع رمز دخول لكل موظف."
+        // The owner signs in to the admin (it asks for the password when it must) and sets the staff there
+        action={
+          <Button size="lg" onClick={() => window.location.assign('/staff')}>
+            ادخل كمالك وأضف الموظفين
+          </Button>
+        }
         className="w-full max-w-xl"
       />
     );

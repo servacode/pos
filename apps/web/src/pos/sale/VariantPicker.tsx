@@ -251,7 +251,7 @@ export function VariantPicker({
                           ? 'border-line-control/60 bg-surface-muted text-ink-muted'
                           : possible
                             ? 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted'
-                            : 'cursor-not-allowed border-dashed border-line-control/50 text-ink-subtle line-through',
+                            : 'cursor-not-allowed border-dashed border-line-control/50 text-ink-subtle opacity-50',
                     )}
                   >
                     <span aria-hidden="true" className="flex flex-col items-center leading-tight">
@@ -264,11 +264,7 @@ export function VariantPicker({
                         ) : null}
                         <span
                           className={cn(
-                            possible &&
-                              left !== null &&
-                              left <= 0 &&
-                              showStock &&
-                              'line-through decoration-2',
+                            possible && left !== null && left <= 0 && showStock && 'text-ink-muted',
                           )}
                         >
                           {isolateSizes(value)}

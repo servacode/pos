@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { draftFits, PAY_DRAFT_KEY, type PayDraft } from './payDraft';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { CURRENCIES } from '@serva/core/currencies';
@@ -1286,7 +1287,11 @@ export function PaymentPanel({
             <div
               role="group"
               aria-label="طريقة التقسيم"
-              className="grid grid-cols-2 gap-1 rounded-control bg-surface-muted p-1"
+              // While an optional customer list is open the tabs stay above it, not pushed down under the footer
+              className={cn(
+                'grid grid-cols-2 gap-1 rounded-control bg-surface-muted p-1',
+                picking && !collapsedPicker && !needsCustomer && 'order-first',
+              )}
             >
               {[false, true].map((on) => (
                 <button
@@ -1385,45 +1390,48 @@ export function PaymentPanel({
             أضف الجزء
           </Button>
         ) : null}
-        {approving && staff ? (
-          // A layer over the panel, scrolling by itself: in the footer the keypad overran a short screen
-          <div className="absolute inset-0 z-20 flex items-start justify-center overflow-y-auto bg-surface/95 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-md">
-              <ManagerCode
-                staff={staff}
-                permission={
-                  approving === 'cost'
-                    ? 'sale.discount_over_limit'
-                    : approving === 'down'
-                      ? 'installments.manage'
-                      : 'sale.credit'
-                }
-                reason={
-                  approving === 'down'
-                    ? 'الدفعة الأولى أقل من الحد الأدنى للتقسيط، وتخفيضها يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                    : approving === 'cost'
-                      ? 'البيع بأقل من التكلفة يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                      : tenders.some((t) => t.method === 'cheque')
-                        ? 'قبول الشيك يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                        : 'البيع على الحساب يزيد دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                }
-                onApproved={(approval) => {
-                  const kind = approving;
-                  setApproving(null);
-                  if (kind === 'down') {
-                    if (pendingPlan) applyPlan(pendingPlan);
-                    setPendingPlan(null);
-                    return;
-                  }
-                  if (kind === 'cost') setCostGrant(approval);
-                  else setCreditGrant(approval);
-                  void complete(kind === 'cost' ? { cost: approval } : { credit: approval });
-                }}
-                onCancel={() => setApproving(null)}
-              />
-            </div>
-          </div>
-        ) : null}
+        {approving && staff
+          ? // A layer over the whole till, centred and dimmed, scrolling by itself: in the footer the keypad overran a short screen
+            createPortal(
+              <div className="fixed inset-0 z-40 flex justify-center overflow-y-auto bg-ink/45 p-4">
+                <div className="my-auto w-full max-w-md">
+                  <ManagerCode
+                    staff={staff}
+                    permission={
+                      approving === 'cost'
+                        ? 'sale.discount_over_limit'
+                        : approving === 'down'
+                          ? 'installments.manage'
+                          : 'sale.credit'
+                    }
+                    reason={
+                      approving === 'down'
+                        ? 'الدفعة الأولى أقل من الحد الأدنى للتقسيط، وتخفيضها يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                        : approving === 'cost'
+                          ? 'البيع بأقل من التكلفة يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                          : tenders.some((t) => t.method === 'cheque')
+                            ? 'قبول الشيك يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                            : 'البيع على الحساب يزيد دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                    }
+                    onApproved={(approval) => {
+                      const kind = approving;
+                      setApproving(null);
+                      if (kind === 'down') {
+                        if (pendingPlan) applyPlan(pendingPlan);
+                        setPendingPlan(null);
+                        return;
+                      }
+                      if (kind === 'cost') setCostGrant(approval);
+                      else setCreditGrant(approval);
+                      void complete(kind === 'cost' ? { cost: approval } : { credit: approval });
+                    }}
+                    onCancel={() => setApproving(null)}
+                  />
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
         {waitingFor ? (
           // Tapping the reason goes to what is missing: the customer list, or the reference field
           <button
