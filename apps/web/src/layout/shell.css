@@ -1955,3 +1955,51 @@ a.sh-trial:hover {
     max-width: 440px;
   }
 }
+/* Owner 2026-11-22: the top bar's tools sit at even distances (the same gap between every button and
+   on both sides of each divider), with larger icons */
+@media (min-width: 768px) {
+  .sh-top .sh-tb {
+    gap: 12px;
+  }
+  .sh-top .sh-vr {
+    height: 28px;
+    margin-inline: 0;
+  }
+  .sh-top .sh-ibtn {
+    width: 44px;
+    height: 44px;
+  }
+  .sh-top .sh-ibtn svg,
+  .sh-top .sh-branch svg,
+  .sh-top .sh-primary svg,
+  .sh-top .sh-search svg {
+    width: 22px;
+    height: 22px;
+  }
+  .sh-top .sh-branch {
+    height: 44px;
+    padding: 0;
+    font-size: 15px;
+  }
+}
+@media (min-width: 768px) {
+  /* The theme button is the shared IconButton: the same 44 px box and 22 px icon as its neighbours */
+  .sh-top .sh-themewrap button {
+    width: 44px;
+    height: 44px;
+  }
+  .sh-top .sh-themewrap svg {
+    width: 22px;
+    height: 22px;
+  }
+  /* A divider stands as far from its neighbours' icons as the icons stand from each other */
+  .sh-top .sh-vr {
+    margin-inline: 10px;
+  }
+}
+@media (min-width: 768px) {
+  /* The tools always end at the bar's far edge, whatever room the search leaves */
+  .sh-top .sh-tb {
+    margin-inline-start: auto;
+  }
+}
