@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event';
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { InventoryResponse, MeResponse, StocktakeDetail } from '@serva/core';
@@ -240,6 +241,8 @@ describe('a clothing shop’s inventory', () => {
     const grids = await screen.findAllByRole('region', { name: /شبكة/ });
     // «بنطال» has a size at zero: it comes first
     expect(grids[0]).toHaveAccessibleName('شبكة بنطال');
+    // Only the first model opens by itself (round 62: the page stays short); the shirt opens by a press
+    await userEvent.click(within(screen.getByRole('region', { name: 'شبكة قميص' })).getByRole('button'));
     const shirt = within(screen.getByRole('region', { name: 'شبكة قميص' }));
     // Totals: the S row 3 + 1, the whole grid 10
     expect(shirt.getAllByText('المجموع').length).toBeGreaterThan(0);

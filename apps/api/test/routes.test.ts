@@ -40,11 +40,14 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/customers/:id/archive-duplicate': 'signed-in',
   'POST /v1/customers/:id/opening-debt': 'signed-in',
   'GET /v1/suppliers': 'signed-in',
+  'GET /v1/suppliers/due': 'signed-in',
   'POST /v1/suppliers': 'signed-in',
   'PUT /v1/suppliers/:id': 'signed-in',
   'GET /v1/purchases': 'signed-in',
   'POST /v1/purchases': 'signed-in',
   'GET /v1/purchases/:id': 'signed-in',
+  'POST /v1/purchases/:id/attachments': 'signed-in',
+  'DELETE /v1/purchases/:id/attachments/:attachmentId': 'signed-in',
   'POST /v1/purchases/:id/correct': 'signed-in',
   'GET /v1/purchase-orders': 'signed-in',
   'GET /v1/purchase-orders/suggest': 'signed-in',
@@ -65,6 +68,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/batches/unblock': 'signed-in',
   'GET /v1/serials': 'signed-in',
   'GET /v1/serials/unassigned': 'signed-in',
+  'GET /v1/serials/drift': 'signed-in',
   'POST /v1/serials/fix': 'signed-in',
   'GET /v1/recipes/:productId': 'signed-in',
   'PUT /v1/recipes/:productId': 'signed-in',
@@ -696,6 +700,23 @@ async function orderOf(app: FastifyInstance, a: Stores['a']) {
       supplierId: await supplierOf(app, a),
       notes: 'طلبية أ',
       lines: [{ variantId: product.variants[0]!.id, qty: 1000, costMinor: 100 }],
+    },
+  });
+  expect(made.statusCode, made.body).toBe(201);
+  return made.json<{ id: string }>().id;
+}
+
+/** A credit purchase in store A (round 62: the photo probes) */
+async function purchaseOf(app: FastifyInstance, a: Stores['a']): Promise<string> {
+  const made = await app.inject({
+    method: 'POST',
+    url: '/v1/purchases',
+    headers: owner(a),
+    payload: {
+      supplierId: await supplierOf(app, a),
+      date: '2026-10-30',
+      payment: 'credit',
+      lines: [{ variantId: (await productOf(app, a)).variants[0]!.id, qty: 1000, costMinor: 100 }],
     },
   });
   expect(made.statusCode, made.body).toBe(201);
@@ -1368,6 +1389,43 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       headers: owner(b),
     });
     expect(res.statusCode).toBe(404);
+  },
+  // Round 62: another store's invoice takes no photo and gives none up: 404, and A's photo stays
+  'POST /v1/purchases/:id/attachments': async (app, { a, b }) => {
+    const id = await purchaseOf(app, a);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 3]).toString('base64');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/purchases/${id}/attachments`,
+      headers: owner(b),
+      payload: { contentType: 'image/png', data: png, thumb: png, width: 1, height: 1 },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { n: string }[]
+    >`select count(*)::text as n from purchase_attachments where purchase_id = ${id}`;
+    expect(row!.n).toBe('0');
+  },
+  'DELETE /v1/purchases/:id/attachments/:attachmentId': async (app, { a, b }) => {
+    const id = await purchaseOf(app, a);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 4]).toString('base64');
+    const made = await app.inject({
+      method: 'POST',
+      url: `/v1/purchases/${id}/attachments`,
+      headers: owner(a),
+      payload: { contentType: 'image/png', data: png, thumb: png, width: 1, height: 1 },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/purchases/${id}/attachments/${made.json<{ id: string }>().id}`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { n: string }[]
+    >`select count(*)::text as n from purchase_attachments where purchase_id = ${id}`;
+    expect(row!.n).toBe('1');
   },
   // Round 36: another store's purchase cannot be corrected: 404, and nothing is reversed
   'POST /v1/purchases/:id/correct': async (app, { a, b }) => {
@@ -3229,6 +3287,32 @@ describe('route registry', () => {
     });
     expect([403, 404]).toContain(foreignBranch.statusCode);
     expect(foreignBranch.body).not.toContain('items');
+  });
+
+  it('the due list and the serial drift of one store show nothing of another', async () => {
+    const { a, b } = await twoStores();
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/purchases',
+      headers: owner(a),
+      payload: {
+        supplierId: await supplierOf(app, a),
+        date: '2026-10-30',
+        dueDate: '2026-10-31',
+        payment: 'credit',
+        lines: [{ variantId: (await productOf(app, a)).variants[0]!.id, qty: 1000, costMinor: 100 }],
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const mine = await app.inject({ method: 'GET', url: '/v1/suppliers/due?days=90', headers: owner(a) });
+    expect(mine.statusCode).toBe(200);
+    expect(mine.body).toContain('مورد أ');
+    const theirs = await app.inject({ method: 'GET', url: '/v1/suppliers/due?days=90', headers: owner(b) });
+    expect(theirs.json<{ items: unknown[] }>().items).toEqual([]);
+    expect(theirs.body).not.toContain('مورد أ');
+    const drift = await app.inject({ method: 'GET', url: '/v1/serials/drift', headers: owner(b) });
+    expect(drift.statusCode).toBe(200);
+    expect(drift.json<{ items: unknown[] }>().items).toEqual([]);
   });
 
   it('IDOR probes: another store’s ids answer 404', async () => {

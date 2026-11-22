@@ -7,6 +7,7 @@ import {
   Button,
   Dialog,
   EmptyState,
+  NumberField,
   SearchField,
   Switch,
   TextField,
@@ -29,7 +30,8 @@ import {
   openingRateOk,
   type OpeningState,
 } from './OpeningBalanceFields';
-import { SupplierForm } from './PurchasesPage';
+import { SupplierForm, termsDaysOf } from './PurchasesPage';
+import { DuePanel } from './DuePanel';
 import './purchases.css';
 
 /**
@@ -228,6 +230,7 @@ export function SuppliersPage() {
             </span>
           </div>
         </section>
+        <DuePanel />
         <div className="sx-card sx-filterbar print:hidden">
           <div className="sx-search">
             <SearchField label="ابحث بالاسم أو الجوال" value={search} onValueChange={setSearch} />
@@ -374,6 +377,9 @@ function SupplierEditDialog({
   const [name, setName] = useState(supplier.name);
   const [phone, setPhone] = useState(supplier.phone ?? '');
   const [notes, setNotes] = useState(supplier.notes ?? '');
+  const [terms, setTerms] = useState(
+    supplier.termsDays !== null && supplier.termsDays !== undefined ? String(supplier.termsDays) : '',
+  );
   const [archived, setArchived] = useState(supplier.archived);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -396,6 +402,7 @@ function SupplierEditDialog({
           name: name.trim(),
           phone: phone.trim(),
           notes: notes.trim(),
+          termsDays: termsDaysOf(terms),
           archived,
         }),
       );
@@ -451,6 +458,14 @@ function SupplierEditDialog({
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           error={fields.notes}
+        />
+        <NumberField
+          label="أيام السداد"
+          hint="اختياري: كم يوماً يمهلك هذا المورد. تبدأ منها مواعيد استحقاق فواتيره الجديدة"
+          decimals={0}
+          value={terms}
+          onValueChange={setTerms}
+          error={fields.termsDays}
         />
         <Switch
           label="أرشف هذا المورد"

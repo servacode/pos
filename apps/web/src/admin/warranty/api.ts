@@ -26,18 +26,25 @@ export const moveClaim = (id: string, input: WarrantyStatusInput) =>
   apiFetch<WarrantyClaim>(`/v1/warranty/claims/${id}/status`, { method: 'POST', body: input, auth: true });
 
 /** `GET /v1/serials?saleId=|customerId=|flagged=1` (catalog.manage): the pieces of one sale or customer, or the flagged ones */
-export const serialsOf = (by: { q?: string; saleId?: string; customerId?: string; flagged?: boolean }) => {
+export const serialsOf = (by: {
+  q?: string;
+  saleId?: string;
+  customerId?: string;
+  flagged?: boolean;
+  variantId?: string;
+}) => {
   const params = new URLSearchParams();
   if (by.q) params.set('q', by.q);
   if (by.saleId) params.set('saleId', by.saleId);
   if (by.customerId) params.set('customerId', by.customerId);
   if (by.flagged) params.set('flagged', '1');
+  if (by.variantId) params.set('variantId', by.variantId);
   return apiFetch<{ items: SerialRow[] }>(`/v1/serials?${params.toString()}`, { auth: true });
 };
 
 /** `POST /v1/serials/fix` (inventory.adjust): «تصحيح» a drifted serial row */
 export const fixSerialRow = (input: SerialFixInput) =>
-  apiFetch<{ serial: string; status: 'in_stock' | 'sold' }>('/v1/serials/fix', {
+  apiFetch<{ serial: string; status: 'in_stock' | 'sold' | 'lost' }>('/v1/serials/fix', {
     method: 'POST',
     body: input,
     auth: true,

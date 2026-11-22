@@ -22,6 +22,7 @@ import {
   Money,
   NumberField,
   RadioGroup,
+  SearchField,
   Select,
   TextField,
   UndoIcon,
@@ -51,25 +52,26 @@ import { PackQty } from './PackQty';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
 import { BatchSelect, type BatchChoice, type BatchSuggestion } from './BatchSelect';
 import { prefillOf } from './returnPrefill';
+import { REFUND_NAME } from './refundWording';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 
-const listReturns = (cursor: string | null = null) =>
-  apiFetch<{ items: SupplierReturnRow[]; nextCursor?: string | null }>(
-    `/v1/supplier-returns${cursor ? `?cursor=${cursor}` : ''}`,
+/** Round 62: a supplier's returns, or the ones a search finds; the cursor is a keyset (a return made meanwhile shifts no page) */
+const listReturns = (cursor: string | null = null, supplierId = '', q = '') => {
+  const query = new URLSearchParams();
+  if (cursor) query.set('cursor', cursor);
+  if (supplierId) query.set('supplierId', supplierId);
+  if (q) query.set('q', q);
+  return apiFetch<{ items: SupplierReturnRow[]; nextCursor?: string | null }>(
+    `/v1/supplier-returns${query.size > 0 ? `?${query.toString()}` : ''}`,
     { auth: true },
   );
+};
 const createReturn = (input: SupplierReturnInput) =>
   apiFetch<SupplierReturnDetail>('/v1/supplier-returns', { method: 'POST', body: input, auth: true });
 
-const REFUND_SHORT: Record<SupplierReturnRow['refund'], string> = {
-  credit: 'من رصيده',
-  cash: 'نقداً',
-  bank: 'بنكي',
-};
-
 /** Each way the supplier pays back, as a choice and as a state in the list. */
 const REFUND_CHOICE: Record<SupplierReturnRow['refund'], { title: string; hint: string; icon: Icon }> = {
-  credit: { title: 'من رصيده عندي', hint: 'ينزل مما تدين له', icon: BookIcon },
+  credit: { title: REFUND_NAME.credit, hint: 'ينزل من رصيده عندك', icon: BookIcon },
   cash: { title: 'نقداً', hint: 'تعود النقود إلى الخزنة', icon: CashIcon },
   bank: { title: 'تحويل بنكي', hint: 'تدخل حساب البنك', icon: ChequeIcon },
 };
@@ -114,6 +116,14 @@ export function SupplierReturnsPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [opened, setOpened] = useState<SupplierReturnRow | null>(null);
+  // Round 62: the list of past returns by supplier and by a search (a number, a name, the supplier's credit note)
+  const [filterSupplier, setFilterSupplier] = useState('');
+  const [typed, setTyped] = useState('');
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(typed.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [typed]);
   const [supplierId, setSupplierId] = useState(prefill?.supplierId ?? '');
   const [branchId, setBranchId] = useState(prefill?.branchId ?? branches[0]?.id ?? '');
   const [refund, setRefund] = useState<SupplierReturnRow['refund']>('credit');
@@ -152,20 +162,30 @@ export function SupplierReturnsPage() {
   const [done, setDone] = useState<SupplierReturnDetail | null>(null);
   const [doneCount, setDoneCount] = useState<string[]>([]);
 
+  // Only the answer of the latest filter is kept: a slow earlier read never overwrites the list of the one asked now
+  const latest = useRef(0);
   const load = useCallback(() => {
-    listReturns()
+    const mine = ++latest.current;
+    listReturns(null, filterSupplier, search)
       .then((r) => {
+        if (mine !== latest.current) return;
         setItems(r.items);
         setNextCursor(r.nextCursor ?? null);
       })
-      .catch((e: unknown) => setError(errorMessage(e)));
-  }, []);
+      .catch((e: unknown) => mine === latest.current && setError(errorMessage(e)));
+  }, [filterSupplier, search]);
   function loadMore() {
     if (!nextCursor) return;
     setLoadingMore(true);
-    listReturns(nextCursor)
+    const mine = latest.current;
+    listReturns(nextCursor, filterSupplier, search)
       .then((r) => {
-        setItems((now) => [...(now ?? []), ...r.items]);
+        if (mine !== latest.current) return;
+        // A row never shows twice, whatever was made while the pages were read
+        setItems((now) => {
+          const seen = new Set((now ?? []).map((x) => x.id));
+          return [...(now ?? []), ...r.items.filter((x) => !seen.has(x.id))];
+        });
         setNextCursor(r.nextCursor ?? null);
       })
       .catch((e: unknown) => setError(errorMessage(e)))
@@ -357,14 +377,14 @@ export function SupplierReturnsPage() {
       cell: (r) =>
         r.refund === 'credit' ? (
           <StatusPill kind="open" icon={<BookIcon size={16} />}>
-            تنقص من دينك له
+            {REFUND_NAME.credit}
           </StatusPill>
         ) : (
           <StatusPill
             kind="ok"
             icon={r.refund === 'cash' ? <CashIcon size={16} /> : <ChequeIcon size={16} />}
           >
-            {r.refund === 'cash' ? 'مبلغ نقدي مُستردّ' : 'تحويل بنكي مُستردّ'}
+            {REFUND_NAME[r.refund]}
           </StatusPill>
         ),
     },
@@ -708,6 +728,30 @@ export function SupplierReturnsPage() {
           </section>
         ) : null}
         <section aria-label="المرتجعات السابقة" className="flex flex-col gap-3">
+          {formOpen ? null : (
+            <div className="sx-card sx-filterbar print:hidden">
+              <div className="sx-search">
+                <SearchField
+                  label="ابحث في المرتجعات"
+                  placeholder="رقم المرتجع أو المورد أو إشعاره"
+                  value={typed}
+                  onValueChange={setTyped}
+                />
+              </div>
+              <Select
+                label="المورد"
+                value={filterSupplier}
+                onChange={(e) => setFilterSupplier(e.target.value)}
+              >
+                <option value="">كل الموردين</option>
+                {(suppliers?.items ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
           {phone && items && items.length > 0 ? (
             <ul className="sx-cards" aria-label="المرتجعات إلى الموردين">
               {items.map((r) => (
@@ -721,7 +765,7 @@ export function SupplierReturnsPage() {
                     <span className="n">{r.number}</span>
                     <span className="st">
                       <StatusPill kind={r.refund === 'credit' ? 'open' : 'ok'}>
-                        {REFUND_SHORT[r.refund]}
+                        {REFUND_NAME[r.refund]}
                       </StatusPill>
                     </span>
                     <span className="d">
@@ -746,10 +790,14 @@ export function SupplierReturnsPage() {
               empty={
                 <EmptyState
                   icon={UndoIcon}
-                  title="لا مرتجعات بعد."
-                  description="كل مرتجع تسجّله يظهر هنا بمبلغه وطريقة استرداده."
+                  title={filterSupplier || search ? 'لا مرتجع يطابق التصفية.' : 'لا مرتجعات بعد.'}
+                  description={
+                    filterSupplier || search
+                      ? 'جرّب رقماً آخر أو مورداً آخر.'
+                      : 'كل مرتجع تسجّله يظهر هنا بمبلغه وطريقة استرداده.'
+                  }
                   action={
-                    formOpen ? undefined : (
+                    formOpen || filterSupplier || search ? undefined : (
                       <Button icon={<AddIcon />} onClick={() => setFormOpen(true)}>
                         مرتجع جديد
                       </Button>

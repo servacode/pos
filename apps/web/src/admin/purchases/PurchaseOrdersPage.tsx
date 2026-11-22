@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { PURCHASE_ORDER_STATUS_LABELS, type PurchaseOrderRow, type PurchaseOrderStatus } from '@serva/core';
+import {
+  PURCHASE_ORDER_STATUS_LABELS,
+  type PurchaseOrderListResponse,
+  type PurchaseOrderRow,
+  type PurchaseOrderStatus,
+} from '@serva/core';
 import {
   AddIcon,
   Alert,
@@ -60,7 +65,9 @@ export function PurchaseOrdersPage() {
   const [status, setStatus] = useState<Filter>('all');
   const [all, setAll] = useState<PurchaseOrderRow[] | null>(null);
   // More orders than one read brings (4000): said, never cut silently
-  const [more, setMore] = useState(false);
+  const [more, setMore] = useState<string | null>(null);
+  const [serverCounts, setServerCounts] = useState<PurchaseOrderListResponse['counts']>();
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -72,7 +79,8 @@ export function PurchaseOrdersPage() {
       (r) => {
         if (!alive) return;
         setAll(r.items);
-        setMore(Boolean(r.nextCursor));
+        setMore(r.nextCursor ?? null);
+        setServerCounts(r.counts);
       },
       (e: unknown) => alive && setError(errorMessage(e)),
     );
@@ -87,12 +95,38 @@ export function PurchaseOrdersPage() {
 
   const counts = useMemo(() => {
     const out: Record<Filter, number> = { all: 0, draft: 0, sent: 0, partial: 0, received: 0, cancelled: 0 };
+    // Round 62: the server counts every order of the store, not only the rows loaded here
+    if (serverCounts) {
+      for (const key of Object.keys(serverCounts) as PurchaseOrderStatus[]) {
+        out[key] = serverCounts[key] ?? 0;
+        out.all += serverCounts[key] ?? 0;
+      }
+      return out;
+    }
     for (const r of all ?? []) {
       out.all += 1;
       out[r.status] += 1;
     }
     return out;
-  }, [all]);
+  }, [all, serverCounts]);
+  const loadOlder = () => {
+    if (!more) return;
+    setLoadingMore(true);
+    listOrders(undefined, more).then(
+      (r) => {
+        setAll((rows) => {
+          const known = new Set((rows ?? []).map((x) => x.id));
+          return [...(rows ?? []), ...r.items.filter((x) => !known.has(x.id))];
+        });
+        setMore(r.nextCursor ?? null);
+        setLoadingMore(false);
+      },
+      (e: unknown) => {
+        setError(errorMessage(e));
+        setLoadingMore(false);
+      },
+    );
+  };
   const rows = useMemo(
     () => (all ?? []).filter((r) => status === 'all' || r.status === status),
     [all, status],
@@ -185,7 +219,16 @@ export function PurchaseOrdersPage() {
             </Button>
           }
         />
-        {more ? <Alert tone="warning">الطلبيات أكثر من أن تُعرض كلها: ظهرت الأحدث فقط.</Alert> : null}
+        {more ? (
+          <Alert tone="warning">
+            <span className="flex flex-wrap items-center gap-3">
+              الطلبيات أكثر من أن تُعرض كلها: ظهرت الأحدث فقط.
+              <Button variant="secondary" size="sm" loading={loadingMore} onClick={loadOlder}>
+                حمّل الأقدم
+              </Button>
+            </span>
+          </Alert>
+        ) : null}
         <div role="radiogroup" aria-label="حالة الطلبية" className="sx-chips px-chips">
           {FILTERS.filter((f) => f.value === 'all' || f.value === status || counts[f.value] > 0 || !all).map(
             (f) => (

@@ -15,6 +15,8 @@ export interface DamagedStockItem {
   qty: number;
   /** What it cost, still in inventory (1300) until it is written off or sent back */
   valueMinor: number;
+  /** The product tracks serial numbers (the write-off may name which ones); absent from older servers */
+  tracksSerial?: boolean;
 }
 
 export interface DamagedStockLocation {

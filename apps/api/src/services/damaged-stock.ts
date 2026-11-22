@@ -80,10 +80,11 @@ export function listDamagedStock(db: Database, auth: AccessClaims): Promise<Dama
       name: string;
       qty: string;
       value: string | null;
+      tracks_serial: boolean;
     }>(sql`
       select d.id as branch_id, d.parent_branch_id as owner_id, o.name as owner_name, l.variant_id,
              trim(p.name_ar || ' ' || coalesce(v.label, '')) as name, l.qty::text as qty,
-             coalesce(sv.value_minor, 0)::text as value
+             coalesce(sv.value_minor, 0)::text as value, p.tracks_serial
       from branches d
       join branches o on o.tenant_id = d.tenant_id and o.id = d.parent_branch_id
       join stock_levels l on l.tenant_id = d.tenant_id and l.branch_id = d.id and l.qty > 0
@@ -107,7 +108,13 @@ export function listDamagedStock(db: Database, auth: AccessClaims): Promise<Dama
         locations.set(r.branch_id, loc);
       }
       const valueMinor = Number(r.value);
-      loc.items.push({ variantId: r.variant_id, name: r.name, qty: Number(r.qty), valueMinor });
+      loc.items.push({
+        variantId: r.variant_id,
+        name: r.name,
+        qty: Number(r.qty),
+        valueMinor,
+        ...(r.tracks_serial ? { tracksSerial: true } : {}),
+      });
       loc.totalValueMinor += valueMinor;
     }
     const [settings] = await tx.execute<{ base: string }>(

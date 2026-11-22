@@ -1,20 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   COUNT_NOUNS,
   countNoun,
   SERIAL_FLAG_LABELS,
   serialLabel,
+  type SerialDriftRow,
   type SerialRow,
   type UnassignedSerialSale,
 } from '@serva/core';
-import { Alert, Button, SearchField, BarcodeIcon, useDigits } from '@serva/ui';
+import { Alert, Button, SearchField, BarcodeIcon, TextField, useDigits } from '@serva/ui';
 import { dayText } from '../../lib/dates';
 import { errorMessage } from '../../lib/api';
 import { useMe } from '../../auth/useAuth';
 import { ReportScreen } from '../reports/parts';
 import { PageTop, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
 import { fixSerialRow, serialsOf, unassignedSerialSales } from '../warranty/api';
-import { getInventory } from './api';
+import { getSerialDrift } from './api';
+import { splitSerials } from './SerialPick';
 import './inventory.css';
 
 /** A document number over its date, or a dash when there is none. */
@@ -41,14 +43,18 @@ export function SerialsPage() {
   const label = serialLabel(me.tenant.sectors);
   const [q, setQ] = useState('');
   const [view, setView] = useState<'all' | 'flagged'>('all');
+  // One product's numbers, opened from the «stock and numbers disagree» note
+  const [only, setOnly] = useState<{ variantId: string; name: string } | null>(null);
   const [items, setItems] = useState<SerialRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
   // The row being put right (and, for a number two sales took, the sale picked to keep it)
   const [confirming, setConfirming] = useState<{ serial: string; keep?: string } | null>(null);
-  // Read-only check: a device with more numbers «في المحل» than pieces in stock (a sale went out without its number)
-  const [all, setAll] = useState<SerialRow[] | null>(null);
-  const [stock, setStock] = useState<Map<string, number> | null>(null);
+  // Round 62: tracked products whose stock and in-stock numbers disagree (the server computes it on read)
+  const [drift, setDrift] = useState<SerialDriftRow[]>([]);
+  // Numbers typed for a product that has more pieces than numbers
+  const [adding, setAdding] = useState<Record<string, string>>({});
+  const [added, setAdded] = useState<string | null>(null);
   // «بيعات بلا رقم»: sales accepted from a till without a number for a device; the owner picks which piece left
   const [unassigned, setUnassigned] = useState<UnassignedSerialSale[]>([]);
   // More sales wait than the 50 shown: the rest come after these are settled
@@ -70,57 +76,43 @@ export function SerialsPage() {
   }, [reloads]);
   useEffect(() => {
     let alive = true;
-    void Promise.all([serialsOf({ q: '', flagged: false }), getInventory()]).then(
-      ([serialList, inventory]) => {
-        if (!alive) return;
-        setAll(serialList.items);
-        const byVariant = new Map<string, number>();
-        for (const row of inventory.items)
-          byVariant.set(row.variantId, (byVariant.get(row.variantId) ?? 0) + row.qty);
-        setStock(byVariant);
-      },
+    void getSerialDrift().then(
+      (r) => alive && setDrift(r.items),
       () => undefined,
     );
     return () => {
       alive = false;
     };
   }, [reloads]);
-  const ahead = useMemo(() => {
-    if (!all || !stock) return [];
-    const counts = new Map<string, { name: string; n: number }>();
-    for (const r of all) {
-      if (r.status !== 'in_stock') continue;
-      const c = counts.get(r.variantId) ?? { name: r.name, n: 0 };
-      c.n += 1;
-      counts.set(r.variantId, c);
-    }
-    return [...counts.entries()]
-      .map(([variantId, c]) => ({
-        name: c.name,
-        n: c.n,
-        inStock: Math.max(0, Math.round((stock.get(variantId) ?? 0) / 1000)),
-      }))
-      .filter((x) => x.n > x.inStock);
-  }, [all, stock]);
+  const ahead = drift.filter((d) => d.serialPieces > d.stockPieces);
+  const behind = drift.filter((d) => d.serialPieces < d.stockPieces);
+  const driftOf = new Set(ahead.map((d) => d.variantId));
 
   useEffect(() => {
     const timer = setTimeout(() => {
       setError(null);
-      serialsOf({ q: q.trim(), flagged: view === 'flagged' })
+      serialsOf({
+        q: q.trim(),
+        flagged: view === 'flagged',
+        ...(only ? { variantId: only.variantId } : {}),
+      })
         .then((r) => setItems(r.items))
         .catch((e: unknown) => setError(errorMessage(e)));
     }, 250);
     return () => clearTimeout(timer);
-  }, [q, view, reloads]);
+  }, [q, view, only, reloads]);
 
   /** «تصحيح»: a sold number back in stock, or an in-stock one that was sold, by its history */
-  async function fix(r: SerialRow, keepSaleId?: string) {
+  async function fix(r: SerialRow, keepSaleId?: string, lost = false) {
     setConfirming(null);
+    setAdded(null);
     try {
       await fixSerialRow(
         keepSaleId
           ? { serial: r.serial, status: 'sold', keepSaleId }
-          : { serial: r.serial, status: r.status === 'sold' ? 'in_stock' : 'sold' },
+          : lost
+            ? { serial: r.serial, status: 'lost' }
+            : { serial: r.serial, status: r.status === 'sold' || r.status === 'lost' ? 'in_stock' : 'sold' },
       );
       setReloads((n) => n + 1);
     } catch (e) {
@@ -139,7 +131,28 @@ export function SerialsPage() {
     }
   }
 
+  /** The numbers typed for a product with more pieces than numbers go in stock one by one (nothing is posted) */
+  async function addNumbers(d: SerialDriftRow) {
+    const typed = splitSerials(adding[d.variantId] ?? '');
+    if (typed.length === 0) return;
+    setError(null);
+    setAdded(null);
+    let made = 0;
+    try {
+      for (const serial of typed) {
+        await fixSerialRow({ serial, status: 'in_stock', variantId: d.variantId });
+        made += 1;
+      }
+    } catch (e) {
+      setError(`${made > 0 ? `سُجّل ${made} ثم توقّف: ` : ''}${errorMessage(e)}`);
+    }
+    if (made > 0) setAdded(`سُجّل ${countNoun(made, COUNT_NOUNS.piece)} برقمها لـ«${d.name}».`);
+    setAdding((a) => ({ ...a, [d.variantId]: '' }));
+    setReloads((n) => n + 1);
+  }
+
   function statusBadge(r: SerialRow) {
+    if (r.status === 'lost') return <StatusPill kind="warn">ضائع</StatusPill>;
     return r.status === 'sold' ? (
       <StatusPill kind="ok">مباع</StatusPill>
     ) : r.status === 'returned' ? (
@@ -177,12 +190,32 @@ export function SerialsPage() {
   /** «تصحيح»: says what it does, then asks; «لا» leaves the row as it is */
   function fixCell(r: SerialRow) {
     const twice = r.status === 'sold' && r.sales.filter((x) => x.saleId).length > 1;
-    if (r.flags.length === 0 && r.status === 'in_stock') return null;
+    // An in-stock number gets «تصحيح» only where the stock has fewer pieces than numbers (then it may be marked lost)
+    const mayLose = r.status === 'in_stock' && driftOf.has(r.variantId);
+    if (r.flags.length === 0 && r.status === 'in_stock' && !mayLose) return null;
     if (confirming?.serial !== r.serial) {
       return (
         <Button size="sm" variant="secondary" onClick={() => setConfirming({ serial: r.serial })}>
-          تصحيح
+          {mayLose && r.flags.length === 0 ? 'ضائع؟' : 'تصحيح'}
         </Button>
+      );
+    }
+    if (mayLose && r.flags.length === 0) {
+      return (
+        <span className="flex flex-col items-start gap-2 text-sm">
+          <span>
+            المخزون فيه قطع أقل من الأرقام. إن كانت هذه القطعة ضاعت أو خرجت بلا رقمها يُسجَّل رقمها «ضائعاً»
+            ويخرج من قائمة «في المحل». لا يغيّر المخزون ولا الحسابات، ويُسجَّل باسمك.
+          </span>
+          <span className="flex w-full flex-wrap gap-2">
+            <Button size="sm" onClick={() => void fix(r, undefined, true)}>
+              نعم، ضاعت
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+              لا
+            </Button>
+          </span>
+        </span>
       );
     }
     if (twice && !confirming.keep) {
@@ -217,15 +250,21 @@ export function SerialsPage() {
     const keep = confirming.keep;
     const what = keep
       ? 'يبقى الرقم مع البيعة التي اخترتها، وتنتقل كفالته إلى تاريخها.'
-      : r.status === 'sold'
-        ? 'يعود الرقم «في المحل» ويُفكّ عن فاتورته وكفالته.'
-        : 'يُسجَّل الرقم «مباعاً» بآخر بيعة له في السجل، وتبدأ كفالته منها.';
+      : r.status === 'lost'
+        ? 'يعود الرقم «في المحل» لأن القطعة وُجدت.'
+        : r.status === 'sold'
+          ? 'يعود الرقم «في المحل» ويُفكّ عن فاتورته وكفالته.'
+          : 'يُسجَّل الرقم «مباعاً» بآخر بيعة له في السجل، وتبدأ كفالته منها.';
     return (
       <span className="flex flex-col items-start gap-2 text-sm">
         <span>{what} لا يغيّر المخزون ولا الحسابات، ويُسجَّل باسمك.</span>
         <span className="flex w-full flex-wrap gap-2">
           <Button size="sm" onClick={() => void fix(r, keep)}>
-            {keep ? 'نعم، يبقى معها' : r.status === 'sold' ? 'نعم، أرجعه للمخزون' : 'نعم، اعتبره مباعاً'}
+            {keep
+              ? 'نعم، يبقى معها'
+              : r.status === 'sold' || r.status === 'lost'
+                ? 'نعم، أرجعه للمخزون'
+                : 'نعم، اعتبره مباعاً'}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
             لا
@@ -333,14 +372,62 @@ export function SerialsPage() {
             </span>
           </Alert>
         ) : null}
+        {added ? <Alert tone="success">{added}</Alert> : null}
         {ahead.length > 0 ? (
           <Alert tone="warning">
-            <span data-testid="serials-ahead" className="flex flex-col gap-1">
+            <span data-testid="serials-ahead" className="flex flex-col gap-2">
+              <span className="font-semibold">أرقام «في المحل» أكثر من القطع في المخزون. راجعها:</span>
               {ahead.map((x) => (
-                <span key={x.name}>
-                  {x.name}: {countNoun(x.n, COUNT_NOUNS.piece)} برقم مسجّل · المخزون{' '}
-                  <bdi className="num font-semibold">{x.inStock}</bdi> — في بيعة بلا رقم.
-                  {unassigned.length > 0 ? ' اختر الرقم الذي خرج من قائمة «بيعات خرجت بلا رقم» أعلاه.' : ''}
+                <span key={x.variantId} className="flex flex-wrap items-center gap-2">
+                  <span>
+                    {x.name}: {countNoun(x.serialPieces, COUNT_NOUNS.piece)} برقم مسجّل · المخزون{' '}
+                    <bdi className="num font-semibold">{x.stockPieces}</bdi>
+                    {unassigned.length > 0 ? ' — قد يكون سببه بيعة بلا رقم (القائمة أعلاه).' : '.'}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setOnly({ variantId: x.variantId, name: x.name });
+                      setView('all');
+                    }}
+                  >
+                    اعرض أرقامه وسجّل الضائع
+                  </Button>
+                </span>
+              ))}
+            </span>
+          </Alert>
+        ) : null}
+        {behind.length > 0 ? (
+          <Alert tone="warning">
+            <span data-testid="serials-behind" className="flex flex-col gap-3">
+              <span className="font-semibold">
+                قطع في المخزون أكثر من أرقامها المسجّلة. اكتب الأرقام الناقصة:
+              </span>
+              {behind.map((x) => (
+                <span key={x.variantId} className="flex flex-col gap-2">
+                  <span>
+                    {x.name}: المخزون <bdi className="num font-semibold">{x.stockPieces}</bdi> · الأرقام{' '}
+                    <bdi className="num font-semibold">{x.serialPieces}</bdi> — تنقصه{' '}
+                    {countNoun(x.stockPieces - x.serialPieces, COUNT_NOUNS.piece)} برقمها.
+                  </span>
+                  <span className="flex flex-wrap items-end gap-2">
+                    <TextField
+                      label="الأرقام (افصل بينها بمسافة أو سطر)"
+                      dir="ltr"
+                      value={adding[x.variantId] ?? ''}
+                      onChange={(e) => setAdding((a) => ({ ...a, [x.variantId]: e.target.value }))}
+                      inputClassName="num"
+                    />
+                    <Button
+                      size="sm"
+                      disabled={!(adding[x.variantId] ?? '').trim()}
+                      onClick={() => void addNumbers(x)}
+                    >
+                      سجّل الأرقام
+                    </Button>
+                  </span>
                 </span>
               ))}
             </span>
@@ -373,7 +460,13 @@ export function SerialsPage() {
                 </label>
               ))}
             </div>
-            <span className="sx-wait">{q.trim() ? 'ما يطابق بحثك.' : 'آخر ما استُلم أولاً.'}</span>
+            {only ? (
+              <Button size="sm" variant="secondary" onClick={() => setOnly(null)}>
+                أرقام «{only.name}» · اعرض الكل
+              </Button>
+            ) : (
+              <span className="sx-wait">{q.trim() ? 'ما يطابق بحثك.' : 'آخر ما استُلم أولاً.'}</span>
+            )}
           </div>
           <ul className="sx-cards sm:hidden" aria-label="الأجهزة بأرقامها">
             {(items ?? []).map((r) => (

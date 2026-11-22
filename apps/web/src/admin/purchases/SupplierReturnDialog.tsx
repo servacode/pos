@@ -1,28 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router';
-import type { StoreResponse, SupplierReturnDetail, SupplierReturnRow } from '@serva/core';
-import {
-  Alert,
-  Button,
-  Dialog,
-  formatQuantity,
-  Money,
-  PrintIcon,
-  SkeletonText,
-  TextLink,
-  useDigits,
-} from '@serva/ui';
+import type { PurchaseDetail, StoreResponse, SupplierReturnDetail, SupplierReturnRow } from '@serva/core';
+import { Alert, Button, Dialog, formatQuantity, Money, PrintIcon, SkeletonText, useDigits } from '@serva/ui';
 import { apiFetch, errorMessage } from '../../lib/api';
+import { getPurchase } from './api';
+import { PurchaseDetailDialog } from './PurchaseDetailDialog';
+import { REFUND_NAME } from './refundWording';
+import { useQuietFocus } from './quietFocus';
 import { dayText } from '../../lib/dates';
 import { SupplierReturnA4 } from '../../lib/a4/documents';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { getStore } from '../store/api';
-
-const REFUND_TEXT: Record<SupplierReturnRow['refund'], string> = {
-  credit: 'تنقص من دينك للمورد',
-  cash: 'مبلغ نقدي مُستردّ',
-  bank: 'تحويل بنكي مُستردّ',
-};
 
 /**
  * One return to a supplier, in full: its pieces, what the supplier credits for each, the invoice it
@@ -34,6 +21,14 @@ export function SupplierReturnDialog({ row, onClose }: { row: SupplierReturnRow;
   const [detail, setDetail] = useState<SupplierReturnDetail | null>(null);
   const [store, setStore] = useState<StoreResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Round 62: the invoice the return was against opens right here (not a search of the invoices list)
+  const [invoice, setInvoice] = useState<PurchaseDetail | null>(null);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const quiet = useQuietFocus<HTMLDivElement>();
+  function openInvoice(id: string) {
+    setInvoiceError(null);
+    getPurchase(id).then(setInvoice, (e: unknown) => setInvoiceError(errorMessage(e)));
+  }
 
   useEffect(() => {
     let alive = true;
@@ -50,6 +45,10 @@ export function SupplierReturnDialog({ row, onClose }: { row: SupplierReturnRow;
     };
   }, [row.id]);
 
+  // The invoice's own window replaces this one (no dialog over a dialog); closing it comes back here
+  if (invoice) {
+    return <PurchaseDetailDialog purchase={invoice} onClose={() => setInvoice(null)} />;
+  }
   return (
     <>
       <Dialog
@@ -72,12 +71,19 @@ export function SupplierReturnDialog({ row, onClose }: { row: SupplierReturnRow;
           </>
         }
       >
+        <div ref={quiet} tabIndex={-1} className="outline-hidden" />
         {error ? <Alert tone="error">{error}</Alert> : null}
+        {invoiceError ? <Alert tone="error">{invoiceError}</Alert> : null}
         {!detail && !error ? <SkeletonText lines={4} /> : null}
         {detail ? (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-ink-muted">
-              {REFUND_TEXT[detail.refund]}
+              {REFUND_NAME[detail.refund]}
+              {detail.branchName ? (
+                <>
+                  {' · '}من فرع {detail.branchName}
+                </>
+              ) : null}
               {detail.reference ? (
                 <>
                   {' · '}إشعار المورد{' '}
@@ -90,11 +96,15 @@ export function SupplierReturnDialog({ row, onClose }: { row: SupplierReturnRow;
             {detail.purchaseId && detail.purchaseNumber ? (
               <p className="text-sm text-ink-muted">
                 بسعر الفاتورة{' '}
-                <TextLink as={Link} to={`/purchases?q=${encodeURIComponent(detail.purchaseNumber)}`}>
+                <button
+                  type="button"
+                  className="font-semibold text-brand-ink underline-offset-2 hover:underline"
+                  onClick={() => openInvoice(detail.purchaseId!)}
+                >
                   <bdi dir="ltr" className="num">
                     {detail.purchaseNumber}
                   </bdi>
-                </TextLink>
+                </button>
               </p>
             ) : null}
             <ul aria-label="أصناف المرتجع" className="flex flex-col divide-y divide-line">
@@ -115,6 +125,14 @@ export function SupplierReturnDialog({ row, onClose }: { row: SupplierReturnRow;
                       </>
                     ) : null}
                   </p>
+                  {l.serials && l.serials.length > 0 ? (
+                    <p className="text-sm text-ink-muted">
+                      الأرقام التسلسلية:{' '}
+                      <bdi dir="ltr" className="num">
+                        {l.serials.join('، ')}
+                      </bdi>
+                    </p>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -136,7 +154,7 @@ export function SupplierReturnDialog({ row, onClose }: { row: SupplierReturnRow;
             store={{
               name: store.name,
               taxNumber: store.taxNumber,
-              branchName: null,
+              branchName: detail.branchName ?? null,
               address: store.address,
               phone: store.phone,
               footer: null,

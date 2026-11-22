@@ -8,11 +8,14 @@ import type {
   ExpiryResponse,
   InventoryResponse,
   ProfitReport,
+  PurchaseAttachment,
   PurchaseCorrection,
   PurchaseCorrectionInput,
+  SupplierDueResponse,
   PurchaseDetail,
   PurchaseInput,
   PurchaseListResponse,
+  SerialDriftRow,
   StocktakeDetail,
   StocktakeListResponse,
   StocktakeInput,
@@ -27,6 +30,7 @@ import type {
   SupplierRow,
 } from '@serva/core';
 import { apiFetch } from '../../lib/api';
+import type { ResizedImage } from '../../lib/images';
 import { isoDay } from '../../lib/dates';
 
 export const listSuppliers = () => apiFetch<SupplierListResponse>('/v1/suppliers', { auth: true });
@@ -52,6 +56,18 @@ export const listPurchasePage = (filters: PurchaseFilters, cursor: string | null
 /** `PUT /v1/suppliers/{id}`: the name, the phone, the notes and the archive switch of a supplier */
 export const updateSupplier = (id: string, input: Partial<SupplierInput>) =>
   apiFetch<SupplierRow>(`/v1/suppliers/${id}`, { method: 'PUT', body: input, auth: true });
+/** Round 62: the credit invoices still owed that fall due within `days` days (or already have) */
+export const listSupplierDues = (days = 7) =>
+  apiFetch<SupplierDueResponse>(`/v1/suppliers/due?days=${days}`, { auth: true });
+/** Round 62: a photo of the supplier's paper invoice, resized in the browser */
+export const addPurchasePhoto = (id: string, image: ResizedImage) =>
+  apiFetch<PurchaseAttachment>(`/v1/purchases/${id}/attachments`, {
+    method: 'POST',
+    body: image,
+    auth: true,
+  });
+export const removePurchasePhoto = (id: string, attachmentId: string) =>
+  apiFetch<void>(`/v1/purchases/${id}/attachments/${attachmentId}`, { method: 'DELETE', auth: true });
 export const createPurchase = (input: PurchaseInput) =>
   apiFetch<PurchaseDetail>('/v1/purchases', { method: 'POST', body: input, auth: true });
 /** `POST /v1/suppliers/{id}/opening-balance` (purchases.manage): what the store owed (or had paid) a supplier before the system */
@@ -166,8 +182,14 @@ export const createSupplierReturn = (input: SupplierReturnInput) =>
   apiFetch<SupplierReturnDetail>('/v1/supplier-returns', { method: 'POST', body: input, auth: true });
 
 /** `GET /v1/inventory/serials` (inventory.adjust): the numbers in stock for one product in one branch (round 60) */
-export const stockSerialsOf = (variantId: string, branchId: string) =>
+export const stockSerialsOf = (variantId: string, branchId: string, q = '') =>
   apiFetch<{ items: string[]; truncated: boolean }>(
-    `/v1/inventory/serials?variantId=${encodeURIComponent(variantId)}&branchId=${encodeURIComponent(branchId)}`,
+    `/v1/inventory/serials?variantId=${encodeURIComponent(variantId)}&branchId=${encodeURIComponent(branchId)}${
+      q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''
+    }`,
     { auth: true },
   );
+
+/** `GET /v1/serials/drift` (catalog.manage, round 62): tracked products whose stock and in-stock numbers disagree */
+export const getSerialDrift = () =>
+  apiFetch<{ items: SerialDriftRow[] }>('/v1/serials/drift', { auth: true });

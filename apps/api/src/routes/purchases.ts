@@ -7,6 +7,7 @@ import {
   transferCancelInput,
   transferListQuery,
   profitQuery,
+  purchaseAttachmentInput,
   purchaseInput,
   purchaseCorrectionInput,
   purchaseListQuery,
@@ -17,6 +18,7 @@ import {
   purchaseOrderUpdateInput,
   recallQuery,
   stocktakeInput,
+  supplierDueQuery,
   supplierInput,
   supplierOpeningBalanceInput,
   supplierPaymentInput,
@@ -58,6 +60,7 @@ import {
   updatePurchaseOrder,
 } from '../services/purchase-orders';
 import { correctPurchase } from '../services/purchase-correction';
+import { attachPurchasePhoto, removePurchasePhoto, supplierDues } from '../services/purchase-dues';
 import { assertDatesOpen } from '../services/period-close';
 import {
   cancelTransfer,
@@ -92,6 +95,12 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/suppliers', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return listSuppliers(app.db, request.auth);
+  });
+  // Round 62: «مستحق هذا الأسبوع»: the credit invoices still owed that fall due within the days asked (7 by default)
+  app.get('/v1/suppliers/due', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const q = parseBody(supplierDueQuery, request.query);
+    return supplierDues(app.db, request.auth, q.days ?? 7, app.clock.now());
   });
   app.post('/v1/suppliers', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
@@ -149,6 +158,35 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/purchases/:id', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return readPurchase(app.db, request.auth, idOf(request.params, 'هذه الفاتورة'));
+  });
+  // Round 62: the photo of the supplier's paper invoice (it posts nothing; a new photo replaces the old one)
+  app.post(
+    '/v1/purchases/:id/attachments',
+    { ...opts, bodyLimit: 4 * 1024 * 1024 },
+    async (request, reply) => {
+      if (!request.auth) throw unauthorized();
+      const photo = await attachPurchasePhoto(
+        app.db,
+        request.auth,
+        idOf(request.params, 'هذه الفاتورة'),
+        parseBody(purchaseAttachmentInput, request.body),
+        meta(request),
+      );
+      return reply.code(201).send(photo);
+    },
+  );
+  app.delete('/v1/purchases/:id/attachments/:attachmentId', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const attachment = uuidSchema.safeParse((request.params as { attachmentId?: string }).attachmentId);
+    if (!attachment.success) throw new AppError(404, 'not_found', 'هذه الصورة غير موجودة.');
+    await removePurchasePhoto(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الفاتورة'),
+      attachment.data,
+      meta(request),
+    );
+    return reply.code(204).send();
   });
   // «صحّح الفاتورة»: a full reversal document, and the draft of the invoice to write again
   app.post('/v1/purchases/:id/correct', opts, async (request, reply) => {

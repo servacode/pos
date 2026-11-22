@@ -16,6 +16,7 @@ import {
   type PurchaseOrderStatus,
   type PurchaseOrderSuggestion,
   type PurchaseOrderUpdateInput,
+  uuidSchema,
 } from '@serva/core';
 import { branches, purchaseOrders, suppliers, withTenant, type Database, type Transaction } from '@serva/db';
 import { inScope, requirePermission } from '../auth/permissions';
@@ -326,32 +327,54 @@ export function listPurchaseOrders(
     const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const conditions = [sql`true`];
     if (!scope.all) conditions.push(inArray(purchaseOrders.branchId, [...scope.branchIds]));
-    if (query.status) conditions.push(eq(purchaseOrders.status, query.status));
     if (query.supplierId) conditions.push(eq(purchaseOrders.supplierId, query.supplierId));
+    const status = query.status;
+    if (status) conditions.push(eq(purchaseOrders.status, status));
     const zone = await zoneOf(tx);
-    // Round 60: a page continues after the rows before it (the cursor is how many came first)
     const pageSize = query.limit ?? 500;
-    const offset = query.cursor ? Number(query.cursor.slice(2)) : 0;
+    // Round 62: counts per status for the supplier asked (the status filter does not narrow them), made by the server
+    const countConditions = conditions.slice(0, status ? conditions.length - 1 : undefined);
+    const counted = await tx
+      .select({ status: purchaseOrders.status, n: sql<string>`count(*)::text` })
+      .from(purchaseOrders)
+      .where(and(...countConditions))
+      .groupBy(purchaseOrders.status);
+    // Round 62: a keyset cursor (creation time in microseconds, id): an order made while paging never shifts a page
+    const [micros, afterId, ...rest] = (query.cursor ?? '').split('~');
+    const afterMicros = Number(micros);
     if (
       query.cursor &&
-      (!query.cursor.startsWith('o:') || !Number.isSafeInteger(offset) || offset < 0 || offset > 9_999_999)
+      (rest.length > 0 || !Number.isSafeInteger(afterMicros) || !uuidSchema.safeParse(afterId).success)
     ) {
       throw invalid({ cursor: 'صفحة غير صالحة' });
     }
+    const createdMicros = sql`(extract(epoch from ${purchaseOrders.createdAt}) * 1000000)::bigint`;
+    if (query.cursor) {
+      conditions.push(
+        sql`(${createdMicros}, ${purchaseOrders.id}) < (${afterMicros}::bigint, ${afterId}::uuid)`,
+      );
+    }
     const rows = await tx
-      .select({ order: purchaseOrders, name: suppliers.name, phone: suppliers.phone })
+      .select({
+        order: purchaseOrders,
+        name: suppliers.name,
+        phone: suppliers.phone,
+        micros: sql<string>`${createdMicros}::text`,
+      })
       .from(purchaseOrders)
       .innerJoin(
         suppliers,
         and(eq(suppliers.tenantId, purchaseOrders.tenantId), eq(suppliers.id, purchaseOrders.supplierId)),
       )
       .where(and(...conditions))
-      .orderBy(desc(purchaseOrders.createdAt), desc(purchaseOrders.number))
-      .limit(pageSize + 1)
-      .offset(offset);
+      .orderBy(desc(createdMicros), desc(purchaseOrders.id))
+      .limit(pageSize + 1);
+    const page = rows.slice(0, pageSize);
+    const last = page[page.length - 1];
     return {
-      items: rows.slice(0, pageSize).map((r) => rowOf(r.order, { name: r.name, phone: r.phone }, zone)),
-      nextCursor: rows.length > pageSize ? `o:${offset + pageSize}` : null,
+      items: page.map((r) => rowOf(r.order, { name: r.name, phone: r.phone }, zone)),
+      nextCursor: rows.length > pageSize && last ? `${last.micros}~${last.order.id}` : null,
+      counts: Object.fromEntries(counted.map((c) => [c.status, Number(c.n)])),
     };
   });
 }

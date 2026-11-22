@@ -40,6 +40,13 @@ export const supplierInput = z.object({
   phone: contactPhoneSchema,
   notes: optionalText(500, 'الملاحظات طويلة'),
   archived: z.boolean().optional(),
+  /** Round 62: the days the supplier gives to pay; a credit invoice's due date starts from it. null: none */
+  termsDays: z
+    .int('أيام السداد أرقام صحيحة')
+    .min(0, 'الأيام لا تكون سالبة')
+    .max(365, 'أكثر من سنة')
+    .nullable()
+    .optional(),
 });
 export type SupplierInput = z.output<typeof supplierInput>;
 
@@ -48,6 +55,8 @@ export interface SupplierRow {
   name: string;
   phone: string | null;
   notes: string | null;
+  /** Round 62: the days the supplier gives to pay; null or absent: none */
+  termsDays?: number | null;
   /** What the store owes the supplier, base currency (a dollar debt at the rate it was booked at) */
   balanceMinor: number;
   archived: boolean;
@@ -124,6 +133,15 @@ export const purchaseInput = z
     /** The supplier's invoice number */
     reference: optionalText(64, 'الرقم طويل'),
     notes: optionalText(500, 'الملاحظات طويلة'),
+    /** Round 62: the day the invoice falls due (a credit invoice); left out, the supplier's payment days from the invoice's date, or none */
+    dueDate: isoDateSchema.nullable().optional(),
+    /**
+     * Round 62: the supplier's cash discount and extra charges (freight) on the paper, in the invoice's currency. They are spread over
+     * the lines' costs in proportion (so the stock, the books and the supplier's debt take the net, and nothing else changes); the
+     * paper's own figures are kept with the invoice to show. The lines' costs are what the paper's lines say.
+     */
+    discountMinor: nonNegativeMinorSchema.optional(),
+    chargesMinor: nonNegativeMinorSchema.optional(),
     lines: z.array(purchaseLineInput).min(1, 'أضف صنفاً واحداً على الأقل').max(500),
     /** The purchase order this receives (طلبية شراء): its received quantities grow by these lines */
     purchaseOrderId: uuidSchema.optional(),
@@ -150,6 +168,14 @@ export interface PurchaseLineRow {
   serials: string[];
 }
 
+export interface PurchaseAttachment {
+  id: string;
+  url: string;
+  thumbUrl: string;
+}
+
+export const MAX_PURCHASE_ATTACHMENTS = 6;
+
 export interface PurchaseRow {
   id: string;
   number: string;
@@ -166,6 +192,13 @@ export interface PurchaseRow {
   rate?: string | null;
   /** Round 36 (decision 12): the document that corrected this invoice, once it has been; absent otherwise */
   correctedBy?: { id: string; number: string; date: string } | null;
+  /** Round 62: the day the invoice falls due; null or absent: none */
+  dueDate?: string | null;
+  /** Round 62: the paper's discount and extra charges in the invoice's currency (already inside the lines' costs and the total); absent when none */
+  discountMinor?: number | null;
+  chargesMinor?: number | null;
+  /** Round 62: the photos of the paper invoice (the detail only) */
+  attachments?: PurchaseAttachment[];
 }
 
 export interface PurchaseDetail extends PurchaseRow {
@@ -203,6 +236,8 @@ export interface PurchaseDraft {
   currency: PurchaseCurrencyCode;
   rate: string | null;
   purchaseOrderId: string | null;
+  /** Round 62: the corrected invoice's due date, to keep on the new one */
+  dueDate?: string | null;
   /** costMinor is in the draft's currency, the way the form takes it */
   lines: (PurchaseInput['lines'][number] & { name: string; productId: string })[];
 }
@@ -220,6 +255,46 @@ export interface PurchaseListResponse {
   /** Round 44: what the filters match in all (corrected invoices left out): how many and their total. Absent from older servers */
   summary?: { count: number; totalMinor: number };
 }
+
+/**
+ *   GET  /v1/suppliers/due?days=7       SupplierDueResponse   (purchases.manage, round 62)
+ *   POST /v1/purchases/{id}/attachments           purchaseAttachmentInput → PurchaseAttachment (201, purchases.manage)
+ *   DELETE /v1/purchases/{id}/attachments/{attachmentId}   → 204
+ *
+ * «مستحق هذا الأسبوع»: the credit invoices still owed whose due date falls within `days` days (or has passed). What is still
+ * owed of an invoice is worked out the way a shop thinks of it: payments settle the oldest invoices first, so the supplier's
+ * balance is what the newest invoices leave open.
+ */
+export const supplierDueQuery = z.object({ days: z.coerce.number().int().min(0).max(90).optional() });
+
+export interface SupplierDueRow {
+  purchaseId: string;
+  number: string;
+  reference: string | null;
+  supplierId: string;
+  supplierName: string;
+  dueDate: string;
+  /** What is still owed of the invoice, base currency */
+  openMinor: number;
+  /** Days past the due date (0 when not yet due) */
+  overdueDays: number;
+}
+
+export interface SupplierDueResponse {
+  items: SupplierDueRow[];
+  totalMinor: number;
+  overdueMinor: number;
+  baseCurrency: CurrencyCode;
+}
+
+/** A photo of the supplier's paper invoice: resized in the browser like a product picture (full at most 1600 px, thumbnail 400) */
+export const purchaseAttachmentInput = z.object({
+  contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+  data: z.base64().max(Math.ceil(2_500_000 / 3) * 4, 'الصورة أكبر من المسموح'),
+  thumb: z.base64().max(Math.ceil(250_000 / 3) * 4, 'الصورة المصغّرة أكبر من المسموح'),
+  width: z.int().min(1).max(4000),
+  height: z.int().min(1).max(4000),
+});
 
 export const purchaseListQuery = z.object({
   from: isoDateSchema.optional(),
@@ -502,6 +577,8 @@ export interface ExpiryRow {
   /** Blocked by hand (a recall): no till sells it */
   blocked: boolean;
   blockReason: string | null;
+  /** The product tracks serial numbers (a write-off may name which ones); absent from older servers and when it does not */
+  tracksSerial?: boolean;
 }
 
 export interface ExpiryResponse {
@@ -572,10 +649,27 @@ export const serialQuery = z.object({
   customerId: uuidSchema.optional(),
   /** Only the numbers the owner has to look at (sold unknown, twice, or out of stock under another product) */
   flagged: z.enum(['1']).optional(),
+  /** Round 62: one product's numbers (from the «stock and numbers disagree» note) */
+  variantId: uuidSchema.optional(),
 });
 
 /** GET /v1/inventory/serials (inventory.adjust, round 60): the numbers in stock for one product in one branch */
-export const stockSerialsQuery = z.object({ variantId: uuidSchema, branchId: uuidSchema });
+export const stockSerialsQuery = z.object({
+  variantId: uuidSchema,
+  branchId: uuidSchema,
+  /** Round 62: part of a number, to find one among hundreds (the list stops at 1000) */
+  q: z.string().trim().max(40).optional(),
+});
+
+/** One tracked product whose stock and in-stock serial numbers disagree (computed on read, round 62) */
+export interface SerialDriftRow {
+  variantId: string;
+  name: string;
+  /** Pieces the stock says are in the store (all branches) */
+  stockPieces: number;
+  /** Numbers marked «في المحل» for it */
+  serialPieces: number;
+}
 
 /** Why a serial needs the owner's look: never received, sold more than once, or another product's number */
 export const SERIAL_FLAG_LABELS = {
@@ -598,12 +692,17 @@ export interface SerialSaleRow {
 /** `POST /v1/serials/fix` (inventory.adjust): put a drifted row right, with the reason */
 export const serialFixInput = z.object({
   serial: z.string().trim().min(3).max(40),
-  /** in_stock: back in the branch's stock; sold: sold by its latest sale in the history */
-  status: z.enum(['in_stock', 'sold']),
+  /**
+   * in_stock: back in the branch's stock; sold: sold by its latest sale in the history; lost (round 62): the piece
+   * is gone (a write-off that did not name it), so the number leaves the stock list
+   */
+  status: z.enum(['in_stock', 'sold', 'lost']),
   /** With status sold: the sale that went out without this piece's number (picked from «بيعات بلا رقم») */
   saleId: uuidSchema.optional(),
   /** A number sold by two sales: the sale that keeps it (the other stays in the history, flagged) */
   keepSaleId: uuidSchema.optional(),
+  /** Round 62: with status in_stock and a number the store does not know: adds it to this tracked product's stock */
+  variantId: uuidSchema.optional(),
 });
 export type SerialFixInput = z.input<typeof serialFixInput>;
 
@@ -943,7 +1042,11 @@ export interface SupplierReturnDetail {
     /** The batch the line took back, when it named one (so a later return against the invoice can count it) */
     batchNo?: string | null;
     expiryDate?: string | null;
+    /** Round 62: the serial numbers that went back, for a product that tracks them */
+    serials?: string[] | null;
   }[];
+  /** Round 62: the branch the pieces left from, by name */
+  branchName?: string | null;
   /** What the supplier credits, base currency */
   amountMinor: number;
   /** Round 36: the invoice named, and on a dollar invoice the dollars credited at its rate */
@@ -960,7 +1063,12 @@ export interface SupplierReturnDetail {
 /** Round 60: `GET /v1/supplier-returns?limit&cursor`; without `limit` the newest 200, `nextCursor` says if more wait */
 export const supplierReturnListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
-  cursor: z.string().max(20).optional(),
+  /** Round 62: a keyset cursor (date~time~id): a return made while paging never shifts a page */
+  cursor: z.string().max(80).optional(),
+  /** Round 62: one supplier's returns */
+  supplierId: uuidSchema.optional(),
+  /** Round 62: a return's number, the supplier's name or the credit note's number */
+  q: z.string().trim().max(80).optional(),
 });
 
 export interface SupplierReturnRow {

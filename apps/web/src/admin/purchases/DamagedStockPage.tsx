@@ -12,6 +12,7 @@ import {
   useDigits,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { SerialPick } from './SerialPick';
 import { errorMessage } from '../../lib/api';
 import { ReportScreen } from '../reports/parts';
 import { Amt, PageTop, Panel, SalesPage } from '../sales/ui';
@@ -204,6 +205,8 @@ function ActDialog({
   const [error, setError] = useState<string | null>(null);
   // One id per opening of the dialog: a second press (or a retry) answers the document already made
   const [docId] = useState(newDocumentId);
+  // A product that tracks serial numbers: which numbers leave (round 62). A write-off may leave them for later
+  const [serials, setSerials] = useState<string[]>([]);
 
   useEffect(() => {
     if (way !== 'send_back') return;
@@ -216,9 +219,19 @@ function ActDialog({
   }, [way]);
 
   const amount = pieces(qty, item);
+  const tracked = item.tracksSerial === true && amount !== null;
+  const wholePieces = amount === null ? 0 : Math.ceil(amount / 1000);
   async function save() {
     if (amount === null) {
       setError(`اكتب عدداً من 1 إلى ${formatQuantity(item.qty, digits)}.`);
+      return;
+    }
+    if (tracked && way === 'send_back' && serials.length !== wholePieces) {
+      setError(`اختر ${wholePieces} رقماً تسلسلياً، واحداً لكل قطعة.`);
+      return;
+    }
+    if (tracked && way === 'write_off' && serials.length > 0 && serials.length !== wholePieces) {
+      setError(`اختر ${wholePieces} رقماً تسلسلياً، أو اترك الاختيار كله وصحّحها لاحقاً.`);
       return;
     }
     if (way === 'send_back' && !supplierId) {
@@ -235,20 +248,32 @@ function ActDialog({
           date: storeToday(me.tenant.timezone),
           refund,
           note: 'بضاعة تالفة',
-          lines: [{ variantId: item.variantId, qty: amount }],
+          lines: [{ variantId: item.variantId, qty: amount, ...(tracked ? { serials } : {}) }],
         });
         onDone(`سُجّل المرتجع ${made.number} إلى المورد، وخرجت «${item.name}» من البضاعة التالفة.`);
       } else {
         await createStocktake({
           id: docId,
-          serialsLater: true,
+          ...(tracked && serials.length === 0 ? { serialsLater: true as const } : {}),
           branchId: location.branchId,
           date: storeToday(me.tenant.timezone),
           ...(asOf ? { countedAt: asOf } : {}),
           note: 'شطب بضاعة تالفة',
-          lines: [{ variantId: item.variantId, countedQty: item.qty - amount }],
+          lines: [
+            {
+              variantId: item.variantId,
+              countedQty: item.qty - amount,
+              ...(tracked && serials.length > 0 ? { serials } : {}),
+            },
+          ],
         });
-        onDone(`شُطبت «${item.name}» من البضاعة التالفة، وسُجّلت كلفتها خسارة.`);
+        onDone(
+          `شُطبت «${item.name}» من البضاعة التالفة، وسُجّلت كلفتها خسارة.${
+            tracked && serials.length === 0
+              ? ' لم تُحدَّد أرقامها التسلسلية: صحّحها من صفحة «الأرقام التسلسلية».'
+              : ''
+          }`,
+        );
       }
     } catch (e) {
       setError(errorMessage(e));
@@ -283,6 +308,19 @@ function ActDialog({
           inputClassName="num"
           hint={`الموجود ${formatQuantity(item.qty, digits)}`}
         />
+        {tracked ? (
+          <div className="sx">
+            <SerialPick
+              name={item.name}
+              variantId={item.variantId}
+              branchId={location.branchId}
+              pieces={wholePieces}
+              picked={serials}
+              onChange={setSerials}
+              optional={way === 'write_off'}
+            />
+          </div>
+        ) : null}
         {way === 'send_back' ? (
           <>
             <Select label="المورد" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>

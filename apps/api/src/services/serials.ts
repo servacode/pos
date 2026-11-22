@@ -1,6 +1,13 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import type { SaleLine, SerialFixInput, SerialFlag, SerialRow, UnassignedSerialSale } from '@serva/core';
-import { addMonthsIso } from '@serva/core';
+import type {
+  SaleLine,
+  SerialDriftRow,
+  SerialFixInput,
+  SerialFlag,
+  SerialRow,
+  UnassignedSerialSale,
+} from '@serva/core';
+import { addMonthsIso, toLatinDigits } from '@serva/core';
 import type { SyncFlag } from '@serva/sync';
 import {
   products,
@@ -213,7 +220,7 @@ export async function sellSerials(
   return [...flags];
 }
 
-const normalized = (serial: string) => serial.replace(/\s+/g, '').toUpperCase();
+const normalized = (serial: string) => toLatinDigits(serial).replace(/\s+/g, '').toUpperCase();
 
 /** Pieces a return brought back whole are in stock again (a part of a line keeps its numbers). */
 export async function returnSerials(
@@ -243,6 +250,7 @@ export function lookupSerials(
     saleId?: string | undefined;
     customerId?: string | undefined;
     flagged?: string | undefined;
+    variantId?: string | undefined;
   },
 ): Promise<{ items: SerialRow[] }> {
   return withTenant(db, auth.tenantId, async (tx) => {
@@ -274,6 +282,7 @@ export function lookupSerials(
       where ${typed ? sql`s.serial like ${`%${typed.replace(/[\\%_]/g, (c) => `\\${c}`)}%`}` : sql`true`}
         and ${query.saleId ? sql`exists (select 1 from serial_sales ss where ss.tenant_id = s.tenant_id and ss.serial = s.serial and ss.sale_id = ${query.saleId})` : sql`true`}
         and ${query.customerId ? sql`i.customer_id = ${query.customerId}` : sql`true`}
+        and ${query.variantId ? sql`s.variant_id = ${query.variantId}` : sql`true`}
         and ${query.flagged ? sql`exists (select 1 from serial_sales ss where ss.tenant_id = s.tenant_id and ss.serial = s.serial and ss.flag is not null)` : sql`true`}
       order by s.created_at desc, s.serial
       limit 100`);
@@ -416,8 +425,9 @@ async function assignToSale(
 }
 
 /**
- * «تصحيح»: puts a drifted row right. Back in stock (a number sold by mistake, or a return that did
- * not bring it back), or sold again by the latest sale of its history. Moves no stock and posts
+ * «تصحيح»: puts a drifted row right. Back in stock (a number sold by mistake, a return that did
+ * not bring it back, or a lost piece found again), «ضائع» (a piece that left without its number), or sold
+ * again by the latest sale of its history. Moves no stock and posts
  * nothing; the audit trail keeps who did it.
  */
 export function fixSerial(
@@ -425,12 +435,49 @@ export function fixSerial(
   auth: AccessClaims,
   input: SerialFixInput,
   meta: RequestMeta,
-): Promise<{ serial: string; status: 'in_stock' | 'sold' }> {
+): Promise<{ serial: string; status: 'in_stock' | 'sold' | 'lost' }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'inventory.adjust');
     const serial = normalized(input.serial);
     const [row] = await tx.select().from(serials).where(eq(serials.serial, serial));
-    if (!row) throw new AppError(404, 'not_found', 'هذا الرقم التسلسلي غير موجود في المحل.');
+    if (!row) {
+      // Round 62: stock that came in with no number named (a surplus counted before, a purchase entered by hand):
+      // the owner adds the number to the product; no stock moves, nothing is posted
+      if (input.status === 'in_stock' && input.variantId) {
+        const prod = (await tracking(tx, [input.variantId])).get(input.variantId);
+        if (!prod?.tracks) throw invalid({ serial: 'هذا الصنف لا يُباع بأرقام تسلسلية' });
+        const [home] = await tx.execute<{ branch_id: string }>(sql`
+          select branch_id from (
+            select branch_id, qty, 0 as rank from stock_levels where variant_id = ${input.variantId} and qty > 0
+            union all
+            select id, 0, 1 from branches where kind = 'store') x
+          order by rank, qty desc limit 1`);
+        const [made] = await tx
+          .insert(serials)
+          .values({
+            tenantId: auth.tenantId,
+            variantId: input.variantId,
+            serial,
+            status: 'in_stock',
+            branchId: home?.branch_id ?? null,
+          })
+          .returning({ id: serials.id });
+        await audit(
+          tx,
+          {
+            tenantId: auth.tenantId,
+            userId: auth.userId,
+            action: 'serial.fix',
+            entity: 'serial',
+            entityId: made!.id,
+            changes: { status: [null, 'in_stock'] },
+          },
+          meta,
+        );
+        return { serial, status: 'in_stock' };
+      }
+      throw new AppError(404, 'not_found', 'هذا الرقم التسلسلي غير موجود في المحل.');
+    }
     if (input.keepSaleId) {
       // A number two sales took: it stays with the one the owner picks; the other keeps its flagged line in the history
       if (row.status !== 'sold' || input.status !== 'sold') {
@@ -448,6 +495,12 @@ export function fixSerial(
         where id = ${row.id}`);
     } else if (row.status === input.status) {
       throw invalid({ status: 'الرقم في هذه الحالة أصلاً' });
+    } else if (input.status === 'lost') {
+      // A piece that is gone (a write-off that did not name it): it leaves the stock list, nothing else moves
+      if (row.status !== 'in_stock') throw invalid({ status: 'الرقم ليس في المحل' });
+      await tx.execute(sql`update serials set status = 'lost' where id = ${row.id}`);
+    } else if (row.status === 'lost' && input.status !== 'in_stock') {
+      throw invalid({ status: 'الرقم ضائع: يعود إلى المحل أولاً' });
     } else if (input.status === 'in_stock') {
       await tx.execute(sql`
         update serials set status = 'in_stock', sale_id = null, sold_on = null, warranty_until = null
@@ -609,9 +662,15 @@ export async function countSerials(
         throw invalid({ [field]: `اختر ${pieces} رقماً تسلسلياً للقطع الناقصة (اخترت ${given.length})` });
       }
       leaving.push({ variantId: line.variantId, qty: pieces * 1000, serials: given });
-    } else if (line.diffQty > 0 && given.length > 0) {
-      if (given.length * 1000 !== Math.ceil(line.diffQty / 1000) * 1000) {
-        throw invalid({ [field]: `اكتب ${Math.ceil(line.diffQty / 1000)} رقماً للقطع الزائدة` });
+    } else if (line.diffQty > 0) {
+      const extra = Math.ceil(line.diffQty / 1000);
+      // Round 62: a surplus of a tracked product adds stock, so it needs its numbers too (the lenient paths stay as they were)
+      if (given.length === 0 && !lenient) {
+        throw invalid({ [field]: `هذا الصنف له أرقام تسلسلية: اكتب ${extra} رقماً للقطع الزائدة` });
+      }
+      if (given.length === 0) continue;
+      if (given.length !== extra) {
+        throw invalid({ [field]: `اكتب ${extra} رقماً للقطع الزائدة (كُتب ${given.length})` });
       }
       for (const serial of given) arriving.push({ variantId: line.variantId, serial });
     }
@@ -625,7 +684,12 @@ export async function countSerials(
   }
   if (arriving.length > 0) {
     const known = await tx
-      .select({ serial: serials.serial })
+      .select({
+        id: serials.id,
+        serial: serials.serial,
+        status: serials.status,
+        variantId: serials.variantId,
+      })
       .from(serials)
       .where(
         inArray(
@@ -633,16 +697,30 @@ export async function countSerials(
           arriving.map((a) => a.serial),
         ),
       );
-    if (known.length > 0) throw invalid({ lines: `الرقم ${known[0]!.serial} موجود في المحل من قبل` });
-    await tx.insert(serials).values(
-      arriving.map((a) => ({
-        tenantId,
-        variantId: a.variantId,
-        serial: a.serial,
-        status: 'in_stock',
-        branchId,
-      })),
-    );
+    // A number marked «ضائع» that is found again comes back by the count; any other known number is refused
+    const wanted = new Map(arriving.map((a) => [a.serial, a.variantId]));
+    const found: string[] = [];
+    for (const k of known) {
+      if (k.status === 'lost' && k.variantId === wanted.get(k.serial)) found.push(k.id);
+      else throw invalid({ lines: `الرقم ${k.serial} موجود في المحل من قبل` });
+    }
+    if (found.length > 0)
+      await tx
+        .update(serials)
+        .set({ status: 'in_stock', branchId, saleId: null, soldOn: null, warrantyUntil: null })
+        .where(inArray(serials.id, found));
+    const back = new Set(known.map((k) => k.serial));
+    const fresh = arriving.filter((a) => !back.has(a.serial));
+    if (fresh.length > 0)
+      await tx.insert(serials).values(
+        fresh.map((a) => ({
+          tenantId,
+          variantId: a.variantId,
+          serial: a.serial,
+          status: 'in_stock',
+          branchId,
+        })),
+      );
   }
 }
 
@@ -650,7 +728,7 @@ export async function countSerials(
 export function stockSerials(
   db: Database,
   auth: AccessClaims,
-  query: { variantId: string; branchId: string },
+  query: { variantId: string; branchId: string; q?: string | undefined },
 ): Promise<{ items: string[]; truncated: boolean }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'inventory.adjust', query.branchId);
@@ -659,6 +737,16 @@ export function stockSerials(
       .from(variants)
       .where(eq(variants.id, query.variantId));
     if (!known) throw new AppError(404, 'not_found', 'هذا الصنف غير موجود.');
+    // Part of a number (a like pattern with its wildcards escaped by splitting, no pattern is built from the text)
+    const typed = normalized(query.q ?? '');
+    const bs = String.fromCharCode(92);
+    const piece = typed
+      .split(bs)
+      .join(bs + bs)
+      .split('%')
+      .join(bs + '%')
+      .split('_')
+      .join(bs + '_');
     const rows = await tx
       .select({ serial: serials.serial })
       .from(serials)
@@ -667,10 +755,45 @@ export function stockSerials(
           eq(serials.variantId, query.variantId),
           eq(serials.status, 'in_stock'),
           sql`(${serials.branchId} is null or ${serials.branchId} = ${query.branchId})`,
+          typed ? sql`${serials.serial} like ${`%${piece}%`}` : undefined,
         ),
       )
       .orderBy(serials.serial)
       .limit(1001);
     return { items: rows.slice(0, 1000).map((r) => r.serial), truncated: rows.length > 1000 };
+  });
+}
+
+/**
+ * Round 62: the products that track serial numbers whose stock and «في المحل» numbers disagree (a phone written off
+ * with no number named, a surplus counted without numbers, a sale that left without one). Computed on read, nothing
+ * is stored; the serial page shows it and puts the numbers right with «تصحيح».
+ */
+export function serialDrift(db: Database, auth: AccessClaims): Promise<{ items: SerialDriftRow[] }> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'catalog.manage');
+    const rows = await tx.execute<{ variant_id: string; name: string; stock: string; n: string }>(sql`
+      select v.id as variant_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
+             coalesce(st.qty, 0)::text as stock, coalesce(sr.n, 0)::text as n
+      from variants v
+      join products p on p.tenant_id = v.tenant_id and p.id = v.product_id and p.tracks_serial
+      left join (
+        select l.variant_id, sum(l.qty) as qty from stock_levels l
+        join branches b on b.tenant_id = l.tenant_id and b.id = l.branch_id and b.kind <> 'damaged'
+        group by l.variant_id) st on st.variant_id = v.id
+      left join (
+        select variant_id, count(*) as n from serials where status = 'in_stock' group by variant_id) sr
+        on sr.variant_id = v.id
+      where round(coalesce(st.qty, 0) / 1000.0) <> coalesce(sr.n, 0)
+      order by name
+      limit 100`);
+    return {
+      items: rows.map((r) => ({
+        variantId: r.variant_id,
+        name: r.name,
+        stockPieces: Math.round(Number(r.stock) / 1000),
+        serialPieces: Number(r.n),
+      })),
+    };
   });
 }

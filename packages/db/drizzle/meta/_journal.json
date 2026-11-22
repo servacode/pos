@@ -694,6 +694,13 @@
       "when": 1795165973887,
       "tag": "0099_customers_balance_covering",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1795314748111,
+      "tag": "0100_purchases_round62",
+      "breakpoints": true
     }
   ]
 }

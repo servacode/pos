@@ -338,7 +338,13 @@ export function TransfersPage() {
             <p>التحويل يظهر حين يكون لك فرعان أو أكثر.</p>
           </section>
         ) : null}
-        {branches.length >= 2 && items ? (
+        {branches.length >= 2 && items && onTheWay === 0 && phone ? (
+          // Round 62: nothing on the way, on a phone: one line instead of three empty tiles
+          <p className="sx-card ix-oneline" aria-label="ما ينتظر الاستلام" role="note">
+            لا شيء في الطريق: كل ما خرج من فرع دخل الفرع الآخر.
+          </p>
+        ) : null}
+        {branches.length >= 2 && items && !(onTheWay === 0 && phone) ? (
           <section aria-label="ما ينتظر الاستلام" className="sx-card sx-strip ix-hero">
             <div>
               <span className="sx-eyebrow">تنتظر الاستلام</span>

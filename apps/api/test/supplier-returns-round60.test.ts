@@ -99,7 +99,7 @@ describe('returns to the supplier, round 60', () => {
       await app.inject({ method: 'GET', url: '/v1/supplier-returns?limit=2', headers: as(store) })
     ).json<{ items: SupplierReturnRow[]; nextCursor: string | null }>();
     expect(first.items).toHaveLength(2);
-    expect(first.nextCursor).toBe('o:2');
+    expect(first.nextCursor).toEqual(expect.any(String));
     const second = (
       await app.inject({
         method: 'GET',
@@ -156,7 +156,7 @@ describe('returns to the supplier, round 60', () => {
       await app.inject({ method: 'GET', url: '/v1/purchase-orders?limit=2', headers: as(store) })
     ).json<PurchaseOrderListResponse>();
     expect(first.items).toHaveLength(2);
-    expect(first.nextCursor).toBe('o:2');
+    expect(first.nextCursor).toEqual(expect.any(String));
     const rest = (
       await app.inject({
         method: 'GET',

@@ -95,7 +95,7 @@ export const purchaseOrderListQuery = z.object({
   supplierId: uuidSchema.optional(),
   /** Round 60: pages. Without `limit` the list is the newest 500 and `nextCursor` says if more wait */
   limit: z.coerce.number().int().min(1).max(500).optional(),
-  cursor: z.string().max(20).optional(),
+  cursor: z.string().max(80).optional(),
 });
 
 export const purchaseOrderSuggestQuery = z.object({
@@ -151,8 +151,10 @@ export interface PurchaseOrderDetail extends PurchaseOrderRow {
 
 export interface PurchaseOrderListResponse {
   items: PurchaseOrderRow[];
-  /** Round 60: where the next page starts; null when this is the last */
+  /** Round 60: where the next page starts; null when this is the last (round 62: a keyset cursor, so a new order never shifts a page) */
   nextCursor?: string | null;
+  /** Round 62: how many orders each status holds (the supplier filter applies, the status filter does not); absent from older servers */
+  counts?: Partial<Record<PurchaseOrderStatus, number>>;
 }
 
 /** `requested`: a customer asked for it and the shelf lacked it (round 38, «النواقص») */

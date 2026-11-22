@@ -54,6 +54,7 @@ import { ApiError, errorMessage } from '../../lib/api';
 import { DateField } from '../../lib/DateField';
 import { EXPIRY_SECTORS, serialWord, storeSells } from '../../lib/sectors';
 import {
+  addPurchasePhoto,
   createPurchase,
   createSupplier,
   getInventory,
@@ -78,6 +79,8 @@ import { PackQty } from './PackQty';
 import { SanityDialog } from './SanityDialog';
 import { PurchaseDetailDialog } from './PurchaseDetailDialog';
 import { SafeWarning } from './SafeWarning';
+import { DuePanel } from './DuePanel';
+import { resizeImage } from '../../lib/images';
 import { baseQtyOf, moneyText, packSummary, withPackChange } from './packLines';
 import { purchaseWarnings, referenceCosts, usualUnitOf, type CostReference } from './purchaseSanity';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
@@ -310,6 +313,49 @@ export function PurchasesPage() {
     }
   }
 
+  const moreFilters = (
+    <>
+      <Select label="المورد" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+        <option value="">كل الموردين</option>
+        {(suppliers?.items ?? []).map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </Select>
+      <Select label="طريقة الدفع" value={payment} onChange={(e) => setPayment(e.target.value)}>
+        <option value="">الكل</option>
+        {(Object.keys(PAYMENT_TEXT) as PurchasePayment[]).map((k) => (
+          <option key={k} value={k}>
+            {PAYMENT_TEXT[k]}
+          </option>
+        ))}
+      </Select>
+      <div role="radiogroup" aria-label="المدة" className="sx-chips scroll">
+        {SPANS.map((x) => (
+          <label key={x.key} className="sx-chip">
+            <input
+              type="radio"
+              name="purchase-span"
+              checked={span === x.key}
+              onChange={() => setSpan(x.key)}
+            />
+            {x.label}
+          </label>
+        ))}
+      </div>
+      <Button
+        variant="ghost"
+        icon={<DownloadGlyph size={20} />}
+        loading={exporting}
+        disabled={loading || items.length === 0}
+        onClick={() => void exportAll()}
+      >
+        صدّر إلى إكسل
+      </Button>
+    </>
+  );
+
   const columns: SxColumn<PurchaseRow>[] = [
     {
       key: 'number',
@@ -483,7 +529,11 @@ export function PurchasesPage() {
             suppliers={suppliers.items}
             order={order}
             correction={correction}
-            onSaved={(n) => done(`سُجّلت الفاتورة ${n} ودخلت البضاعة المخزون.`)}
+            onSaved={(n, photoFailed) =>
+              done(
+                `سُجّلت الفاتورة ${n} ودخلت البضاعة المخزون.${photoFailed ? ' تعذّر رفع الصورة: أضفها من تفاصيل الفاتورة.' : ''}`,
+              )
+            }
             onCancel={() => {
               setOrder(null);
               setCorrection(null);
@@ -558,7 +608,8 @@ export function PurchasesPage() {
                 </span>
               </div>
             </section>
-            {owing.length > 0 ? (
+            <DuePanel tick={monthTick} />
+            {owing.length > 0 && !phone ? (
               <Panel
                 title="أكبر المستحقات للموردين"
                 aside={
@@ -603,44 +654,14 @@ export function PurchasesPage() {
                   onValueChange={setTyped}
                 />
               </div>
-              <Select label="المورد" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                <option value="">كل الموردين</option>
-                {(suppliers?.items ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-              <Select label="طريقة الدفع" value={payment} onChange={(e) => setPayment(e.target.value)}>
-                <option value="">الكل</option>
-                {(Object.keys(PAYMENT_TEXT) as PurchasePayment[]).map((k) => (
-                  <option key={k} value={k}>
-                    {PAYMENT_TEXT[k]}
-                  </option>
-                ))}
-              </Select>
-              <div role="radiogroup" aria-label="المدة" className="sx-chips scroll">
-                {SPANS.map((x) => (
-                  <label key={x.key} className="sx-chip">
-                    <input
-                      type="radio"
-                      name="purchase-span"
-                      checked={span === x.key}
-                      onChange={() => setSpan(x.key)}
-                    />
-                    {x.label}
-                  </label>
-                ))}
-              </div>
-              <Button
-                variant="ghost"
-                icon={<DownloadGlyph size={20} />}
-                loading={exporting}
-                disabled={loading || items.length === 0}
-                onClick={() => void exportAll()}
-              >
-                صدّر إلى إكسل
-              </Button>
+              {phone ? (
+                <details className="px-more" open={active > (q ? 1 : 0)}>
+                  <summary>تصفية أخرى</summary>
+                  {moreFilters}
+                </details>
+              ) : (
+                moreFilters
+              )}
             </div>
             <div ref={topRef}>
               {phone && items.length > 0 && !loading ? (
@@ -769,6 +790,14 @@ function useSaving() {
   return { saving, error, fields, run, setFields };
 }
 
+/** The payment days typed (Arabic digits too): a whole number up to 365, or null when empty or wrong */
+export function termsDaysOf(text: string): number | null {
+  const clean = text.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).trim();
+  if (clean === '' || clean.length > 3) return null;
+  const n = Number(clean);
+  return Number.isInteger(n) && n >= 0 && n <= 365 ? n : null;
+}
+
 /** «مورد جديد»: the window to add a supplier (shared with «الموردون») */
 export function SupplierForm({
   suppliers,
@@ -782,6 +811,7 @@ export function SupplierForm({
   const me = useMe();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [terms, setTerms] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const s = useSaving();
   const duplicate = findSupplierDuplicate(suppliers, name, phone);
@@ -820,7 +850,10 @@ export function SupplierForm({
           void s
             .run(async () => {
               // The supplier is saved once; when the balance then fails, only the balance is tried again
-              const id = createdId ?? (await createSupplier({ name, phone })).id;
+              const days = termsDaysOf(terms);
+              const id =
+                createdId ??
+                (await createSupplier({ name, phone, ...(days !== null ? { termsDays: days } : {}) })).id;
               setCreatedId(id);
               const input = openingInput(opening, openingId);
               if (input) await openSupplierBalance(id, input);
@@ -858,6 +891,14 @@ export function SupplierForm({
             if (s.fields.phone) s.setFields({});
           }}
           error={s.fields.phone}
+        />
+        <NumberField
+          label="أيام السداد"
+          hint="اختياري: كم يوماً يمهلك هذا المورد. تبدأ منها مواعيد استحقاق فواتيره"
+          decimals={0}
+          value={terms}
+          onValueChange={setTerms}
+          error={s.fields.termsDays}
         />
         <OpeningBalanceFields
           value={opening}
@@ -933,7 +974,7 @@ function PurchaseForm({
   order?: PurchaseOrderDetail | null;
   /** «صحّح الفاتورة»: the invoice just turned back, as a draft to fix and save */
   correction?: { draft: PurchaseDraft; original: string; reversal: string } | null;
-  onSaved: (number: string) => void;
+  onSaved: (number: string, photoFailed?: boolean) => void;
   onCancel: () => void;
 }) {
   const me = useMe();
@@ -951,6 +992,13 @@ function PurchaseForm({
   const [date, setDate] = useState(draft?.date ?? todayDay);
   const [payment, setPayment] = useState<PurchasePayment>(draft?.payment ?? 'credit');
   const [reference, setReference] = useState(draft?.reference ?? '');
+  // Round 62: the due date (a credit invoice): typed, else the supplier's payment days from the invoice's date
+  const [dueTyped, setDueTyped] = useState<string | null>(draft?.dueDate ?? null);
+  // …the paper's discount and extra charges, and a photo of the paper (sent once the invoice is saved)
+  const [discount, setDiscount] = useState('');
+  const [charges, setCharges] = useState('');
+  const [photo, setPhoto] = useState<File | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
   const [lines, setLines] = useState<Line[]>(() =>
     draft ? linesOfDraft(draft) : order ? linesOfOrder(order) : [],
   );
@@ -1031,18 +1079,39 @@ function PurchaseForm({
   // A line with the quantity 0 is left out of the invoice, not a reason to stop: what did not arrive stays on the order
   const used = lines.flatMap((_, i) => (parsed[i]!.qty === 0 ? [] : [i]));
   const skipped = lines.length - used.length;
+  const gross = used.reduce((sum, i) => sum + (parsed[i]!.cost ?? 0), 0);
+  const discountN = discount.trim() ? moneyOf(discount) : 0;
+  const chargesN = charges.trim() ? moneyOf(charges) : 0;
+  const adjustWrong =
+    discountN === null ||
+    chargesN === null ||
+    (discountN ?? 0) > gross ||
+    ((chargesN ?? 0) > 0 && gross === 0);
+  const adjusted = (discountN ?? 0) > 0 || (chargesN ?? 0) > 0;
+  // What the books take: the paper's total less the discount plus the charges (spread over the lines by the server)
+  const total = gross - (discountN ?? 0) + (chargesN ?? 0);
+  // In dollars: what the stock takes in pounds, line by line at the rate, as the server works it out
+  const totalBase = usd
+    ? adjusted
+      ? (usdToBase(total, base, rateText(rate)) ?? 0)
+      : used.reduce((sum, i) => sum + (usdToBase(parsed[i]!.cost ?? 0, base, rateText(rate)) ?? 0), 0)
+    : total;
+  const termsDays = suppliers.find((x) => x.id === supplierId)?.termsDays ?? null;
+  const dueDate =
+    payment !== 'credit'
+      ? null
+      : (dueTyped ?? (termsDays !== null && date ? addDays(date, termsDays) : null));
+
   const ready =
     Boolean(supplierId) &&
     used.length > 0 &&
     rateOk &&
+    !adjustWrong &&
+    (dueDate === null || dueDate >= date) &&
     used.every((i) => parsed[i]!.qty && parsed[i]!.qty! > 0 && parsed[i]!.cost !== null) &&
     used.every((i) => !lines[i]!.requiresExpiry || Boolean(lines[i]!.expiry)) &&
     (pastLines.length === 0 || pastOk);
-  const total = used.reduce((sum, i) => sum + (parsed[i]!.cost ?? 0), 0);
-  // In dollars: what the stock takes in pounds, line by line at the rate, as the server works it out
-  const totalBase = usd
-    ? used.reduce((sum, i) => sum + (usdToBase(parsed[i]!.cost ?? 0, base, rateText(rate)) ?? 0), 0)
-    : total;
+
   /** Why «سجّل الفاتورة» waits, in words: the buttons never go grey without a reason */
   const missingExpiry = used.map((i) => lines[i]!).filter((l) => l.requiresExpiry && !l.expiry);
   const notReadyWhy =
@@ -1054,9 +1123,13 @@ function PurchaseForm({
           ? 'كل الأسطر بكمية صفر. اكتب كمية لسطر واحد على الأقل.'
           : used.some((i) => !(parsed[i]!.qty && parsed[i]!.qty! > 0) || parsed[i]!.cost === null)
             ? 'اكتب الكمية والكلفة لكل صنف ليُسجَّل.'
-            : missingExpiry.length > 0
-              ? `اكتب تاريخ الانتهاء لـ ${missingExpiry.map((l) => l.name).join('، ')} ليُسجَّل.`
-              : 'أكّد أن تاريخ الانتهاء الماضي صحيح ليُسجَّل.';
+            : adjustWrong
+              ? 'الخصم أكبر من مجموع الفاتورة، أو الرسوم والخصم غير صالحين.'
+              : dueDate !== null && dueDate < date
+                ? 'تاريخ الاستحقاق قبل تاريخ الفاتورة.'
+                : missingExpiry.length > 0
+                  ? `اكتب تاريخ الانتهاء لـ ${missingExpiry.map((l) => l.name).join('، ')} ليُسجَّل.`
+                  : 'أكّد أن تاريخ الانتهاء الماضي صحيح ليُسجَّل.';
 
   const withDates = storeSells(me.tenant.sectors, EXPIRY_SECTORS);
   const supplier = suppliers.find((x) => x.id === supplierId);
@@ -1066,14 +1139,17 @@ function PurchaseForm({
     // The zero-quantity lines go first, so the lines the server names are the ones still on the screen
     if (skipped > 0) setLines(used.map((i) => lines[i]!));
     void s
-      .run(() =>
-        createPurchase({
+      .run(async () => {
+        const made = await createPurchase({
           id: docId,
           supplierId,
           date,
           payment,
           reference: reference || null,
           notes: null,
+          ...(dueDate ? { dueDate } : {}),
+          ...((discountN ?? 0) > 0 ? { discountMinor: discountN! } : {}),
+          ...((chargesN ?? 0) > 0 ? { chargesMinor: chargesN! } : {}),
           ...(usd ? { currency: 'USD' as const, rate: rateText(rate) } : {}),
           ...(order
             ? { purchaseOrderId: order.id }
@@ -1098,9 +1174,19 @@ function PurchaseForm({
                 : {}),
             };
           }),
-        }),
-      )
-      .then((r) => r && onSaved(r.number));
+        });
+        // The invoice is posted; the photo of its paper goes up after it, and a failure there never undoes it
+        let photoFailed = false;
+        if (photo) {
+          try {
+            await addPurchasePhoto(made.id, await resizeImage(photo));
+          } catch {
+            photoFailed = true;
+          }
+        }
+        return { number: made.number, photoFailed };
+      })
+      .then((r) => r && onSaved(r.number, r.photoFailed));
   }
 
   /** The message about one line's serial numbers: its own, or the invoice-wide one that names a number typed on it */
@@ -1197,6 +1283,21 @@ function PurchaseForm({
               onChange={(e) => setReference(e.target.value)}
             />
           </div>
+          {payment === 'credit' ? (
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+              <DateField
+                label="تاريخ الاستحقاق"
+                value={dueDate ?? ''}
+                onChange={(iso) => setDueTyped(iso || '')}
+                error={s.fields.dueDate}
+              />
+              <p className="self-end text-sm text-ink-muted md:col-span-2">
+                {termsDays !== null && dueTyped === null
+                  ? `من أيام سداد المورد (${termsDays}). غيّره إن اتفقتما على موعد آخر.`
+                  : 'اختياري: متى تدفع هذه الفاتورة. تظهر في «مستحق هذا الأسبوع».'}
+              </p>
+            </div>
+          ) : null}
           <CurrencyTerms
             label="عملة الفاتورة"
             currency={currency}
@@ -1214,8 +1315,8 @@ function PurchaseForm({
             title="الأصناف"
             description={
               usd
-                ? 'ابحث بالاسم أو امسح الباركود. كلفة كل سطر هي مجموعه بالدولار.'
-                : 'ابحث بالاسم أو امسح الباركود. كلفة كل سطر هي مجموعه بالليرة.'
+                ? 'ابحث بالاسم أو امسح الباركود. اكتب كلفة الوحدة أو مجموع السطر بالدولار، والآخر يتبعه.'
+                : 'ابحث بالاسم أو امسح الباركود. اكتب كلفة الوحدة أو مجموع السطر بالليرة، والآخر يتبعه.'
             }
           />
           <div className="flex flex-col gap-4">
@@ -1449,6 +1550,62 @@ function PurchaseForm({
           </div>
         </Card>
         <Card>
+          <CardHeader
+            icon={<BookIcon />}
+            title="الخصم والرسوم والورقة"
+            description="ما كتبه المورد على ورقته: خصم نقدي، أو أجور شحن. تتوزّع على كلفة الأصناف، فيبقى سعر البيع والمخزون صحيحين."
+          />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <NumberField
+              label={`خصم المورد (${usd ? 'دولار' : 'ليرة'})`}
+              hint="اختياري"
+              decimals={2}
+              value={discount}
+              onValueChange={setDiscount}
+              error={
+                s.fields.discountMinor ??
+                (discountN === null
+                  ? 'اكتب مبلغاً صحيحاً'
+                  : (discountN ?? 0) > gross
+                    ? 'أكبر من مجموع الفاتورة'
+                    : undefined)
+              }
+            />
+            <NumberField
+              label={`رسوم إضافية: شحن وغيره (${usd ? 'دولار' : 'ليرة'})`}
+              hint="اختياري"
+              decimals={2}
+              value={charges}
+              onValueChange={setCharges}
+              error={s.fields.chargesMinor ?? (chargesN === null ? 'اكتب مبلغاً صحيحاً' : undefined)}
+            />
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-semibold text-ink">صورة الورقة</span>
+              <input
+                ref={photoInput}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                aria-label="صورة فاتورة المورد الورقية"
+                tabIndex={-1}
+                onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+              />
+              <span className="flex flex-wrap items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => photoInput.current?.click()}>
+                  {photo ? 'غيّر الصورة' : 'أرفق صورة'}
+                </Button>
+                {photo ? (
+                  <span className="min-w-0 truncate text-sm text-ink-muted" dir="ltr">
+                    {photo.name}
+                  </span>
+                ) : (
+                  <span className="text-sm text-ink-subtle">اختياري</span>
+                )}
+              </span>
+            </div>
+          </div>
+        </Card>
+        <Card>
           <CardHeader icon={<CashIcon />} title="الدفع" description="كيف دُفع ثمن البضاعة." />
           <RadioGroup legend="الدفع" hideLegend>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1492,6 +1649,22 @@ function PurchaseForm({
               <SummaryRow term="سعر الدولار">{rate ? <span className="num">{rate}</span> : '—'}</SummaryRow>
             ) : null}
             <SummaryRow term="الدفع">{PAYMENT_TEXT[payment]}</SummaryRow>
+            {dueDate ? <SummaryRow term="تستحق في">{dayText(dueDate, digits)}</SummaryRow> : null}
+            {adjusted ? (
+              <SummaryRow term="مجموع الورقة">
+                <Money minor={gross} currency={invoiceCurrency} />
+              </SummaryRow>
+            ) : null}
+            {(discountN ?? 0) > 0 ? (
+              <SummaryRow term="خصم المورد">
+                −<Money minor={discountN ?? 0} currency={invoiceCurrency} />
+              </SummaryRow>
+            ) : null}
+            {(chargesN ?? 0) > 0 ? (
+              <SummaryRow term="رسوم إضافية">
+                +<Money minor={chargesN ?? 0} currency={invoiceCurrency} />
+              </SummaryRow>
+            ) : null}
             <SummaryRow term="الأصناف">
               <span className="num">{used.length}</span>
             </SummaryRow>

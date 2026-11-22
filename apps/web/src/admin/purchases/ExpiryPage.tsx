@@ -21,6 +21,7 @@ import { errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { ReportScreen } from '../reports/parts';
+import { SerialPick } from './SerialPick';
 import { recallAnswer, rememberAnswer } from '../reports/useReport';
 import { PageTop, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
 import {
@@ -54,6 +55,16 @@ const isUnbatched = (r: ExpiryRow) => !r.batchNo && !r.expiryDate;
 
 const rowKey = (r: ExpiryRow) => `${r.variantId}|${r.branchId}|${r.batchNo ?? ''}|${r.expiryDate ?? ''}`;
 
+/** How many serial numbers an action takes out: the whole batch, the shortage a count finds, or the pieces sent back */
+function pickPieces(action: Action, qtyText: string): number {
+  if (!action.row.tracksSerial) return 0;
+  const typed = qtyOf(qtyText);
+  if (action.kind === 'writeoff') return Math.ceil(action.row.qty / 1000);
+  if (typed === null) return 0;
+  if (action.kind === 'count') return typed < action.row.qty ? Math.ceil((action.row.qty - typed) / 1000) : 0;
+  return typed > 0 ? Math.ceil(typed / 1000) : 0;
+}
+
 const ACTION_TITLE: Record<Action['kind'], string> = {
   writeoff: 'أتلف الدفعة',
   count: 'عدّ الدفعة',
@@ -84,6 +95,8 @@ export function ExpiryPage() {
   const [blocking, setBlocking] = useState<ExpiryRow | null>(null);
   // One id for each opening of the action dialog: a second press posts nothing again
   const [docId, setDocId] = useState(newDocumentId);
+  // A batch of a product that tracks serial numbers: which numbers leave (round 62); a write-off may leave them for later
+  const [serials, setSerials] = useState<string[]>([]);
 
   const load = useCallback(() => {
     setError(null);
@@ -113,6 +126,7 @@ export function ExpiryPage() {
     setAction({ kind, row });
     setDocId(newDocumentId());
     setQty(kind === 'writeoff' ? '' : String(row.qty / 1000));
+    setSerials([]);
     setError(null);
     setDone(null);
   }
@@ -122,6 +136,21 @@ export function ExpiryPage() {
     const { kind, row } = action;
     const typed = qtyOf(qty);
     const label = `${row.batchNo ?? ''} من «${row.name}»`;
+    // How many numbers leave: the whole batch, the shortage a count finds, or the pieces sent back
+    const leaving = pickPieces(action, qty);
+    const later = leaving > 0 && serials.length === 0 && kind !== 'return';
+    if (leaving > 0 && serials.length > 0 && serials.length !== leaving) {
+      setError(
+        `اختر ${leaving} رقماً تسلسلياً${kind === 'return' ? '' : '، أو اترك الاختيار كله وصحّحها لاحقاً'}.`,
+      );
+      return;
+    }
+    if (leaving > 0 && kind === 'return' && serials.length !== leaving) {
+      setError(`اختر ${leaving} رقماً تسلسلياً، واحداً لكل قطعة.`);
+      return;
+    }
+    const named = leaving > 0 && serials.length > 0 ? { serials } : {};
+    const laterNote = later ? ' لم تُحدَّد أرقامها التسلسلية: صحّحها من صفحة «الأرقام التسلسلية».' : '';
     setSaving(true);
     setError(null);
     try {
@@ -129,27 +158,41 @@ export function ExpiryPage() {
         // The existing write-off path: a count of this batch alone, down to nothing, noted «هدر»
         await createStocktake({
           id: docId,
-          serialsLater: true,
+          ...(row.tracksSerial && serials.length === 0 ? { serialsLater: true as const } : {}),
           branchId: row.branchId,
           date: storeToday(me.tenant.timezone),
           note: 'هدر',
           lines: [
-            { variantId: row.variantId, countedQty: 0, batchNo: row.batchNo, expiryDate: row.expiryDate },
+            {
+              variantId: row.variantId,
+              countedQty: 0,
+              batchNo: row.batchNo,
+              expiryDate: row.expiryDate,
+              ...named,
+            },
           ],
         });
-        setDone(`أُتلفت الدفعة ${label} وخرجت من المخزون.`);
+        setDone(`أُتلفت الدفعة ${label} وخرجت من المخزون.${laterNote}`);
       } else if (kind === 'count') {
         if (typed === null) throw new Refused('اكتب الكمية التي عددتها.');
         await createStocktake({
           id: docId,
-          serialsLater: true,
+          ...(row.tracksSerial && (serials.length === 0 || leaving === 0)
+            ? { serialsLater: true as const }
+            : {}),
           branchId: row.branchId,
           date: storeToday(me.tenant.timezone),
           lines: [
-            { variantId: row.variantId, countedQty: typed, batchNo: row.batchNo, expiryDate: row.expiryDate },
+            {
+              variantId: row.variantId,
+              countedQty: typed,
+              batchNo: row.batchNo,
+              expiryDate: row.expiryDate,
+              ...named,
+            },
           ],
         });
-        setDone(`سُجّل عدّ الدفعة ${label}.`);
+        setDone(`سُجّل عدّ الدفعة ${label}.${laterNote}`);
       } else {
         if (!row.supplierId) {
           throw new Refused('لا مورد معروف لهذه الدفعة. سجّل المرتجع من صفحة «مرتجع إلى المورد».');
@@ -162,7 +205,15 @@ export function ExpiryPage() {
           date: storeToday(me.tenant.timezone),
           refund: 'credit',
           note: `دفعة ${row.batchNo ?? ''}`,
-          lines: [{ variantId: row.variantId, qty: typed, batchNo: row.batchNo, expiryDate: row.expiryDate }],
+          lines: [
+            {
+              variantId: row.variantId,
+              qty: typed,
+              batchNo: row.batchNo,
+              expiryDate: row.expiryDate,
+              ...named,
+            },
+          ],
         });
         setDone(`أُرجعت الدفعة ${label} إلى ${row.supplierName ?? 'المورد'}.`);
       }
@@ -543,6 +594,19 @@ export function ExpiryPage() {
             onChange={(e) => setQty(e.target.value)}
             inputClassName="num"
           />
+        ) : null}
+        {action?.row.tracksSerial && pickPieces(action, qty) > 0 ? (
+          <div className="sx">
+            <SerialPick
+              name={action.row.name}
+              variantId={action.row.variantId}
+              branchId={action.row.branchId}
+              pieces={pickPieces(action, qty)}
+              picked={serials}
+              onChange={setSerials}
+              optional={action.kind !== 'return'}
+            />
+          </div>
         ) : null}
         {error && action ? <Alert tone="error">{error}</Alert> : null}
       </Dialog>

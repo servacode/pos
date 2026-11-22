@@ -1,6 +1,9 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   businessDateOf,
+  isoDateSchema,
+  toLatinDigits,
+  uuidSchema,
   roundDiv,
   stockIn,
   stockBack,
@@ -39,6 +42,7 @@ import {
 import {
   branches,
   documentSequences,
+  purchaseAttachments,
   purchaseLines,
   purchases,
   serials,
@@ -82,6 +86,7 @@ import {
   trackedVariants,
 } from './batches';
 import { applyReceipt } from './purchase-order-receipt';
+
 import { bookValueOfPayment, usdTerms, usdToBase, type UsdTerms } from './purchase-usd';
 import {
   countSerials,
@@ -106,6 +111,37 @@ const newId = createUuidV7();
 const notFound = (what: string) => new AppError(404, 'not_found', `${what} غير موجود.`);
 export const invalid = (fields: Record<string, string>) =>
   new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', fields);
+
+/**
+ * Round 62: a supplier's invoice with a cash discount and extra charges (freight). The posting stays the plain
+ * purchase: the delta (charges less discount) is spread over the lines' costs in proportion to what each cost, in
+ * the invoice's currency, with the remainder going to the largest lines first so the lines add up to the net exactly.
+ * Returns the net cost of every line (never below zero), or an error text for the field.
+ */
+export function spreadAdjustment(
+  costs: readonly number[],
+  discountMinor: number,
+  chargesMinor: number,
+): { costs: number[] } | { error: string; field: 'discountMinor' | 'chargesMinor' } {
+  const gross = costs.reduce((sum, c) => sum + c, 0);
+  if (discountMinor > gross) return { error: 'الخصم أكبر من مجموع الفاتورة', field: 'discountMinor' };
+  const delta = chargesMinor - discountMinor;
+  if (delta === 0) return { costs: [...costs] };
+  if (gross === 0) return { error: 'اكتب كلفة الأصناف أولاً ثم أضف الرسوم', field: 'chargesMinor' };
+  const shares = costs.map((c) => roundDiv(BigInt(c) * BigInt(Math.abs(delta)), BigInt(gross)));
+  let left = BigInt(Math.abs(delta)) - shares.reduce((sum, s) => sum + s, 0n);
+  // The remainder (a few units either way) goes one unit at a time to the dearest lines
+  const order = costs.map((_, i) => i).sort((a, b) => costs[b]! - costs[a]! || a - b);
+  const step = left >= 0n ? 1n : -1n;
+  for (let k = 0; left !== 0n; k = (k + 1) % order.length) {
+    shares[order[k]!] = shares[order[k]!]! + step;
+    left -= step;
+  }
+  const sign = delta > 0 ? 1 : -1;
+  const net = costs.map((c, i) => c + sign * Number(shares[i]!));
+  if (net.some((c) => c < 0)) return { error: 'الخصم أكبر من كلفة بعض الأصناف', field: 'discountMinor' };
+  return { costs: net };
+}
 
 /** Round 44: one writer at a time per client-made document id (the retry of a dropped request waits for the first) */
 export async function documentLock(tx: Transaction, kind: string, id: string): Promise<void> {
@@ -160,7 +196,7 @@ async function stockedVariants(tx: Transaction, ids: string[]): Promise<Map<stri
 
 // A supplier's balance is the sum of its 2100 lines in the base currency. The lines kept in dollars (round 36,
 // decision 11) also give the dollars owed (the amounts, signed like the lines) and what the books value them at.
-const supplierBalances = sql`
+export const supplierBalances = sql`
   select l.party_id as supplier_id, sum(l.credit_minor - l.debit_minor) as balance,
          coalesce(sum(-l.amount_minor) filter (where l.currency = 'USD' and l.currency <> st.base_currency), 0) as usd_balance,
          coalesce(sum(l.credit_minor - l.debit_minor) filter (where l.currency = 'USD' and l.currency <> st.base_currency), 0) as usd_book
@@ -177,6 +213,7 @@ async function supplierRows(tx: Transaction, id?: string): Promise<SupplierRow[]
     name: string;
     phone: string | null;
     notes: string | null;
+    terms_days: number | null;
     archived_at: string | null;
     balance: string;
     usd_balance: string;
@@ -184,7 +221,7 @@ async function supplierRows(tx: Transaction, id?: string): Promise<SupplierRow[]
     last_purchase: string | null;
     purchases_total: string;
   }>(sql`
-    select s.id, s.name, s.phone, s.notes, s.archived_at, coalesce(b.balance, 0)::text as balance,
+    select s.id, s.name, s.phone, s.notes, s.terms_days, s.archived_at, coalesce(b.balance, 0)::text as balance,
            coalesce(b.usd_balance, 0)::text as usd_balance, coalesce(b.usd_book, 0)::text as usd_book,
            pu.last_purchase::text as last_purchase, coalesce(pu.total, 0)::text as purchases_total
     from suppliers s left join (${supplierBalances}) b on b.supplier_id = s.id
@@ -201,6 +238,7 @@ async function supplierRows(tx: Transaction, id?: string): Promise<SupplierRow[]
     name: r.name,
     phone: r.phone,
     notes: r.notes,
+    termsDays: r.terms_days,
     balanceMinor: Number(r.balance),
     usdBalanceMinor: Number(r.usd_balance),
     usdBookMinor: Number(r.usd_book),
@@ -249,6 +287,7 @@ export async function saveSupplierTx(
     name: input.name,
     ...(input.phone !== undefined ? { phone: input.phone } : {}),
     ...(input.notes !== undefined ? { notes: input.notes } : {}),
+    ...(input.termsDays !== undefined ? { termsDays: input.termsDays } : {}),
     ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
   };
   const supplierId = id ?? newId();
@@ -301,9 +340,14 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
     reversal_number: string | null;
     reversal_date: string | null;
     order_id: string | null;
+    due_date: string | null;
+    discount_minor: string | null;
+    charges_minor: string | null;
+    tenant_id: string;
   }>(sql`
     select p.id, p.number, p.business_date::text, p.supplier_id, s.name as supplier_name, p.payment,
            p.reference, p.total_minor::text, p.branch_id, p.notes, p.currency, p.rate,
+           p.due_date::text, p.discount_minor::text, p.charges_minor::text, p.tenant_id,
            p.foreign_total_minor::text, r.id as reversal_id, r.number as reversal_number,
            r.business_date::text as reversal_date,
            (select o.id from purchase_orders o where o.tenant_id = p.tenant_id
@@ -354,6 +398,20 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
           foreignTotalMinor: Number(row.foreign_total_minor),
         }
       : {}),
+    dueDate: row.due_date,
+    ...(row.discount_minor !== null ? { discountMinor: Number(row.discount_minor) } : {}),
+    ...(row.charges_minor !== null ? { chargesMinor: Number(row.charges_minor) } : {}),
+    attachments: (
+      await tx
+        .select({ id: purchaseAttachments.id, uploadId: purchaseAttachments.uploadId })
+        .from(purchaseAttachments)
+        .where(eq(purchaseAttachments.purchaseId, id))
+        .orderBy(asc(purchaseAttachments.createdAt), asc(purchaseAttachments.id))
+    ).map((a) => ({
+      id: a.id,
+      url: `/v1/images/${row.tenant_id}/${a.uploadId}`,
+      thumbUrl: `/v1/images/${row.tenant_id}/${a.uploadId}?size=thumb`,
+    })),
     correctedBy: row.reversal_id
       ? { id: row.reversal_id, number: row.reversal_number!, date: row.reversal_date! }
       : null,
@@ -445,8 +503,30 @@ export async function createPurchase(
     // base currency at the rate of the day, line by line, so the stock's value and the entry agree to the qirsh
     const currency = await baseCurrency(tx);
     const usd = await usdTerms(tx, currency, input);
-    const baseCosts = input.lines.map((l) => (usd ? usdToBase(l.costMinor, usd, currency) : l.costMinor));
-    const foreignTotal = usd ? input.lines.reduce((sum, l) => sum + l.costMinor, 0) : null;
+    // Round 62: the paper's discount and extra charges are spread over the lines' costs (in the invoice's own currency), so
+    // the stock, the entry and the debt take the net and the posting is the plain purchase's
+    const spread = spreadAdjustment(
+      input.lines.map((l) => l.costMinor),
+      input.discountMinor ?? 0,
+      input.chargesMinor ?? 0,
+    );
+    if ('error' in spread) throw invalid({ [spread.field]: spread.error });
+    const netCosts = spread.costs;
+    const baseCosts = netCosts.map((c) => (usd ? usdToBase(c, usd, currency) : c));
+    const foreignTotal = usd ? netCosts.reduce((sum, c) => sum + c, 0) : null;
+    // Round 62: the due date typed, else the supplier's payment days from the invoice's date (credit invoices only)
+    if (input.dueDate && input.dueDate < input.date) {
+      throw invalid({ dueDate: 'تاريخ الاستحقاق قبل تاريخ الفاتورة' });
+    }
+    const dueDate =
+      input.payment !== 'credit'
+        ? null
+        : (input.dueDate ??
+          (supplier.termsDays !== null
+            ? new Date(Date.parse(`${input.date}T00:00:00Z`) + supplier.termsDays * 86_400_000)
+                .toISOString()
+                .slice(0, 10)
+            : null));
 
     // What was sold until now is costed at the old average first
     await costPending(tx, auth.tenantId);
@@ -465,6 +545,9 @@ export async function createPurchase(
       notes: input.notes ?? null,
       totalMinor: total,
       ...(usd ? { currency: 'USD', rate: usd.rate.rate, foreignTotalMinor: foreignTotal } : {}),
+      dueDate,
+      discountMinor: input.discountMinor ? input.discountMinor : null,
+      chargesMinor: input.chargesMinor ? input.chargesMinor : null,
       createdBy: auth.userId,
     });
     const lines = input.lines.map((l, i) => ({
@@ -482,7 +565,7 @@ export async function createPurchase(
         name: l.name,
         qty: l.qty,
         costMinor: l.costMinor,
-        foreignCostMinor: usd ? input.lines[i]!.costMinor : null,
+        foreignCostMinor: usd ? netCosts[i]! : null,
         batchNo: l.batchNo ?? null,
         expiryDate: l.expiryDate ?? null,
       })),
@@ -656,12 +739,13 @@ export async function listPurchases(
       currency: string | null;
       rate: string | null;
       foreign_total_minor: string | null;
+      due_date: string | null;
       reversal_id: string | null;
       reversal_number: string | null;
       reversal_date: string | null;
     }>(sql`
       select p.id, p.number, p.business_date::text, p.supplier_id, s.name as supplier_name, p.payment,
-             p.reference, p.total_minor::text, p.currency, p.rate, p.foreign_total_minor::text,
+             p.reference, p.total_minor::text, p.currency, p.rate, p.foreign_total_minor::text, p.due_date::text,
              r.id as reversal_id, r.number as reversal_number, r.business_date::text as reversal_date
       from purchases p join suppliers s on s.tenant_id = p.tenant_id and s.id = p.supplier_id
       left join purchase_reversals r on r.tenant_id = p.tenant_id and r.purchase_id = p.id
@@ -683,6 +767,7 @@ export async function listPurchases(
         payment: r.payment,
         reference: r.reference,
         totalMinor: Number(r.total_minor),
+        dueDate: r.due_date,
         ...(r.currency
           ? {
               currency: r.currency as PurchaseCurrencyCode,
@@ -1782,18 +1867,18 @@ export async function createSupplierReturn(
     const invoice = input.purchaseId
       ? await invoiceForReturn(tx, input.purchaseId, supplier.id, input.lines, currency)
       : null;
-    // Round 60: with no invoice, a typed credit cannot pass the dearest price the item was ever bought at (nor its average cost)
+    // Round 62: with no invoice, a typed credit cannot pass what THIS supplier last charged for the item (nor the pieces' average cost)
     const typed = input.lines
       .filter((l) => !invoice && l.amountMinor !== null && l.amountMinor !== undefined)
       .map((l) => l.variantId);
     const dearest = new Map<string, number>();
     if (typed.length > 0) {
       const peak = await tx.execute<{ variant_id: string; unit: string }>(sql`
-        select pl.variant_id, max(pl.cost_minor::numeric * 1000 / nullif(pl.qty, 0))::text as unit
-        from purchase_lines pl
-        where pl.variant_id = any(${uuidArray(typed)})
+        select distinct on (pl.variant_id) pl.variant_id, (pl.cost_minor::numeric * 1000 / nullif(pl.qty, 0))::text as unit
+        from purchase_lines pl join purchases p on p.tenant_id = pl.tenant_id and p.id = pl.purchase_id
+        where pl.variant_id = any(${uuidArray(typed)}) and p.supplier_id = ${supplier.id}
           and not exists (select 1 from purchase_reversals rv where rv.tenant_id = pl.tenant_id and rv.purchase_id = pl.purchase_id)
-        group by pl.variant_id`);
+        order by pl.variant_id, p.business_date desc, p.created_at desc, pl.line_no desc`);
       for (const r of peak) dearest.set(r.variant_id, Number(r.unit));
     }
     const lines: SupplierReturnDetail['lines'] = [];
@@ -1812,7 +1897,8 @@ export async function createSupplierReturn(
         const cap = Math.max(costMinor, unit === undefined ? 0 : Math.ceil((unit * l.qty) / 1000));
         if (l.amountMinor > cap) {
           throw invalid({
-            [`lines.${index}.amountMinor`]: 'المبلغ أكبر من كلفة هذه القطع. اختر الفاتورة لتُرجَع بسعرها',
+            [`lines.${index}.amountMinor`]:
+              'المبلغ أكبر مما حاسبك به هذا المورد على هذه القطع. اختر الفاتورة لتُرجَع بسعرها',
           });
         }
       }
@@ -1826,6 +1912,7 @@ export async function createSupplierReturn(
         ...(credit?.foreignMinor !== undefined ? { foreignAmountMinor: credit.foreignMinor } : {}),
         ...(l.batchNo ? { batchNo: l.batchNo } : {}),
         ...(l.expiryDate ? { expiryDate: l.expiryDate } : {}),
+        ...(l.serials && l.serials.length > 0 ? { serials: l.serials } : {}),
       });
     }
     // A tracked product goes back with its serial numbers: they leave the store's stock
@@ -1932,6 +2019,9 @@ export async function createSupplierReturn(
       supplierId: supplier.id,
       supplierName: supplier.name,
       branchId,
+      branchName:
+        (await tx.select({ name: branches.name }).from(branches).where(eq(branches.id, branchId)))[0]?.name ??
+        null,
       refund: input.refund,
       reference: input.reference ?? null,
       lines,
@@ -1966,6 +2056,7 @@ async function supplierReturnById(tx: Transaction, id: string): Promise<Supplier
   const [invoice] = r.purchaseId
     ? await tx.select({ number: purchases.number }).from(purchases).where(eq(purchases.id, r.purchaseId))
     : [];
+  const [branch] = await tx.select({ name: branches.name }).from(branches).where(eq(branches.id, r.branchId));
   return {
     id: r.id,
     number: r.number,
@@ -1973,6 +2064,7 @@ async function supplierReturnById(tx: Transaction, id: string): Promise<Supplier
     supplierId: r.supplierId,
     supplierName: supplier?.name ?? '',
     branchId: r.branchId,
+    branchName: branch?.name ?? null,
     refund: r.refund as SupplierReturnDetail['refund'],
     reference: r.reference,
     lines: r.lines as SupplierReturnDetail['lines'],
@@ -2114,21 +2206,57 @@ export function readSupplierReturn(
   });
 }
 
+/** Round 62: the keyset cursor of the returns list and of the orders list: the day, the creation time (microseconds) and the id of the last row */
+export function readKeyset(cursor: string | undefined): { date: string; micros: number; id: string } | null {
+  if (!cursor) return null;
+  const [date, micros, id, ...rest] = cursor.split('~');
+  const parsed = {
+    date: isoDateSchema.safeParse(date),
+    id: uuidSchema.safeParse(id),
+    micros: Number(micros),
+  };
+  if (
+    rest.length > 0 ||
+    !parsed.date.success ||
+    !parsed.id.success ||
+    !Number.isSafeInteger(parsed.micros) ||
+    parsed.micros < 0
+  ) {
+    throw invalid({ cursor: 'صفحة غير صالحة' });
+  }
+  return { date: parsed.date.data, micros: parsed.micros, id: parsed.id.data };
+}
+
 export function listSupplierReturns(
   db: Database,
   auth: AccessClaims,
-  query: { limit?: number | undefined; cursor?: string | undefined } = {},
+  query: {
+    limit?: number | undefined;
+    cursor?: string | undefined;
+    supplierId?: string | undefined;
+    q?: string | undefined;
+  } = {},
 ): Promise<{ items: SupplierReturnRow[]; nextCursor: string | null }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
-    // Round 60: pages; a page continues after the rows before it (the cursor is how many came first)
+    // Round 62: pages by a keyset cursor (day, creation time, id), so a return made while paging never shifts a page
     const pageSize = query.limit ?? 200;
-    const offset = query.cursor ? Number(query.cursor.slice(2)) : 0;
-    if (
-      query.cursor &&
-      (!query.cursor.startsWith('o:') || !Number.isSafeInteger(offset) || offset < 0 || offset > 9_999_999)
-    ) {
-      throw invalid({ cursor: 'صفحة غير صالحة' });
+    const after = readKeyset(query.cursor);
+    const micros = sql`(extract(epoch from r.created_at) * 1000000)::bigint`;
+    const conditions = [sql`true`];
+    if (!scope.all) conditions.push(sql`r.branch_id = any(${uuidArray([...scope.branchIds])})`);
+    if (query.supplierId) conditions.push(sql`r.supplier_id = ${query.supplierId}`);
+    if (query.q) {
+      // position() finds the text as typed: «%» and «_» need no escaping
+      const needle = toLatinDigits(query.q).toLowerCase();
+      conditions.push(
+        sql`(position(${needle} in lower(r.number)) > 0 or position(${needle} in lower(s.name)) > 0 or position(${needle} in lower(coalesce(r.reference, ''))) > 0)`,
+      );
+    }
+    if (after) {
+      conditions.push(
+        sql`(r.business_date, ${micros}, r.id) < (${after.date}::date, ${after.micros}::bigint, ${after.id}::uuid)`,
+      );
     }
     const rows = await tx.execute<{
       id: string;
@@ -2138,18 +2266,21 @@ export function listSupplierReturns(
       refund: SupplierReturnRow['refund'];
       pieces: string;
       amount: string;
+      micros: string;
     }>(sql`
       select r.id, r.number, r.business_date::text as date, s.name as supplier_name, r.refund,
              coalesce((select sum((l ->> 'qty')::bigint) from jsonb_array_elements(r.lines) l), 0)::text as pieces,
-             r.amount_minor::text as amount
+             r.amount_minor::text as amount, ${micros}::text as micros
       from supplier_returns r
       join suppliers s on s.tenant_id = r.tenant_id and s.id = r.supplier_id
-      ${scope.all ? sql`` : sql`where r.branch_id = any(${uuidArray([...scope.branchIds])})`}
-      order by r.business_date desc, r.created_at desc, r.id desc
-      limit ${pageSize + 1} offset ${offset}`);
+      where ${sql.join(conditions, sql` and `)}
+      order by r.business_date desc, ${micros} desc, r.id desc
+      limit ${pageSize + 1}`);
+    const page = rows.slice(0, pageSize);
+    const last = page[page.length - 1];
     return {
-      nextCursor: rows.length > pageSize ? `o:${offset + pageSize}` : null,
-      items: rows.slice(0, pageSize).map((r) => ({
+      nextCursor: rows.length > pageSize && last ? `${last.date}~${last.micros}~${last.id}` : null,
+      items: page.map((r) => ({
         id: r.id,
         number: r.number,
         date: r.date,

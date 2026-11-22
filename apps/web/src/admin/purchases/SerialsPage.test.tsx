@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import type { InventoryResponse, SerialRow } from '@serva/core';
+import type { SerialRow } from '@serva/core';
 import { mockFetch } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
@@ -34,20 +34,6 @@ const row = (serial: string, status: SerialRow['status']): SerialRow => ({
 
 describe('«الأرقام التسلسلية»: numbers ahead of the stock', () => {
   it('warns when more numbers are in the shop than pieces in stock', async () => {
-    const stock: InventoryResponse = {
-      items: [
-        {
-          variantId: 'v-1',
-          name: 'كرسي متحرك',
-          branchId: 'b-1',
-          qty: 2_000,
-          valueMinor: 0,
-          unitCostMinor: 0,
-        },
-      ],
-      totalValueMinor: 0,
-      baseCurrency: 'SYP',
-    };
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({
@@ -58,7 +44,26 @@ describe('«الأرقام التسلسلية»: numbers ahead of the stock', ()
         status: 200,
         body: { items: [row('A1', 'in_stock'), row('A2', 'in_stock'), row('A3', 'in_stock')] },
       }),
-      'GET /v1/inventory': () => ({ status: 200, body: stock }),
+      'GET /v1/serials/drift': () => ({
+        status: 200,
+        body: { items: [{ variantId: 'v-1', name: 'كرسي متحرك', stockPieces: 2, serialPieces: 3 }] },
+      }),
+      'GET /v1/serials/unassigned': () => ({
+        status: 200,
+        body: {
+          items: [
+            {
+              saleId: 's-1',
+              saleNumber: 'INV-1',
+              soldOn: '2026-10-01',
+              variantId: 'v-1',
+              name: 'كرسي متحرك',
+              missing: 1,
+              candidates: ['A1'],
+            },
+          ],
+        },
+      }),
     });
     renderApp('/serials');
     const warning = await screen.findByTestId('serials-ahead');
@@ -78,15 +83,9 @@ describe('«الأرقام التسلسلية»: numbers ahead of the stock', ()
         status: 200,
         body: { items: [row('A1', 'in_stock'), row('A2', 'in_stock'), row('A3', 'in_stock')] },
       }),
-      'GET /v1/inventory': () => ({
+      'GET /v1/serials/drift': () => ({
         status: 200,
-        body: {
-          items: [
-            { variantId: 'v-1', name: 'x', branchId: 'b-1', qty: 2_000, valueMinor: 0, unitCostMinor: 0 },
-          ],
-          totalValueMinor: 0,
-          baseCurrency: 'SYP',
-        },
+        body: { items: [{ variantId: 'v-1', name: 'x', stockPieces: 2, serialPieces: 3 }] },
       }),
     });
     renderApp('/serials');

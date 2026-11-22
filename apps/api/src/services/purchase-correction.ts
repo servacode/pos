@@ -320,6 +320,7 @@ export async function correctPurchase(
       currency: (purchase.currency ?? currency) as PurchaseCurrencyCode,
       rate: purchase.rate,
       purchaseOrderId: orderId,
+      dueDate: purchase.dueDate,
       lines: lines.map((l) => ({
         variantId: l.variantId,
         productId: owners.get(l.variantId) ?? '',

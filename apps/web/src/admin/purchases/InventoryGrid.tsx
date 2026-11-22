@@ -27,7 +27,7 @@ export function InventoryGrid({
 }) {
   // Which models show: all, those with a piece below zero or out, those running low (2 or fewer)
   const [filter, setFilter] = useState<'all' | 'out' | 'low'>('all');
-  // A model the person opened or closed by hand; the others follow the default (the thinnest few open)
+  // A model the person opened or closed by hand; the others follow the default (the first one open, the rest folded: the page stays short)
   // A long list shows its first ten models (the thinnest sizes); the rest open from «اعرض الكل»
   const [showAll, setShowAll] = useState(false);
   const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
@@ -54,7 +54,7 @@ export function InventoryGrid({
   if (matching.length === 0) {
     return <p className="text-sm text-ink-muted">لا أصناف بمقاسات وألوان لتُعرض شبكة.</p>;
   }
-  const isOpen = (id: string, index: number) => toggled.get(id) ?? index < 4;
+  const isOpen = (id: string, index: number) => toggled.get(id) ?? index < 1;
   const flip = (id: string, index: number) => setToggled((now) => new Map(now).set(id, !isOpen(id, index)));
   return (
     <div className="flex flex-col gap-4">

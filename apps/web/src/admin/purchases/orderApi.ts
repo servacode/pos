@@ -9,10 +9,17 @@ import type {
 import { apiFetch } from '../../lib/api';
 
 /** `GET /v1/purchase-orders?status=` (purchases.manage): the store's orders to suppliers, newest first */
-export async function listOrders(status?: PurchaseOrderStatus): Promise<PurchaseOrderListResponse> {
-  // Round 60: the list comes in pages of 500 that are joined here; `nextCursor` stays set only if the safety stop of 8 pages was reached
+export async function listOrders(
+  status?: PurchaseOrderStatus,
+  from: string | null = null,
+): Promise<PurchaseOrderListResponse> {
+  // Round 60: the list comes in pages of 500 that are joined here; `nextCursor` stays set only if the safety stop of 8 pages was reached.
+  // Round 62: the pages are keyset pages (an order made meanwhile shifts none), a row seen twice is kept once, the counts per status
+  // come from the server's first page, and `from` continues after the cursor a safety stop left («حمّل الأقدم»)
   const items: PurchaseOrderListResponse['items'] = [];
-  let cursor: string | null = null;
+  const seen = new Set<string>();
+  let counts: PurchaseOrderListResponse['counts'];
+  let cursor: string | null = from;
   for (let page = 0; page < 8; page += 1) {
     // The first page is the plain list (the newest 500); the next ones continue from its cursor
     const query = new URLSearchParams();
@@ -22,11 +29,16 @@ export async function listOrders(status?: PurchaseOrderStatus): Promise<Purchase
       `/v1/purchase-orders${query.size > 0 ? `?${query.toString()}` : ''}`,
       { auth: true },
     );
-    items.push(...got.items);
+    for (const row of got.items) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      items.push(row);
+    }
+    counts ??= got.counts;
     cursor = got.nextCursor ?? null;
     if (!cursor) break;
   }
-  return { items, nextCursor: cursor };
+  return { items, nextCursor: cursor, ...(counts ? { counts } : {}) };
 }
 
 export const getOrder = (id: string) =>

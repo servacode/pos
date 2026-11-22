@@ -3,7 +3,7 @@ import { serialFixInput, serialQuery, stockSerialsQuery } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
-import { fixSerial, lookupSerials, stockSerials, unassignedSales } from '../services/serials';
+import { fixSerial, lookupSerials, serialDrift, stockSerials, unassignedSales } from '../services/serials';
 import { parseBody } from './validation';
 
 /** Serial numbers and IMEIs (packages/core › contracts/purchases.ts SerialRow). */
@@ -17,6 +17,12 @@ export async function serialRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/serials/unassigned', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return unassignedSales(app.db, request.auth);
+  });
+
+  // Round 62: tracked products whose stock and in-stock numbers disagree (computed on read)
+  app.get('/v1/serials/drift', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return serialDrift(app.db, request.auth);
   });
 
   // The numbers in stock in a branch for a product: a count picks the missing pieces from them (round 60)

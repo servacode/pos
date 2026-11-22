@@ -1891,6 +1891,8 @@ export const suppliers = pgTable(
     phone: text('phone'),
     notes: text('notes'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
+    /** Round 62: the days the supplier gives to pay (an invoice's due date starts from it); null when none */
+    termsDays: integer('terms_days'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1937,6 +1939,11 @@ export const purchases = pgTable(
     currency: text('currency'),
     rate: text('rate'),
     foreignTotalMinor: bigint('foreign_total_minor', { mode: 'number' }),
+    /** Round 62: the day the supplier's invoice falls due (credit invoices); null when none was set */
+    dueDate: date('due_date'),
+    /** Round 62: the paper's cash discount and extra charges (freight), in the invoice's currency. Already spread over the lines' costs, kept to show the paper's own total */
+    discountMinor: bigint('discount_minor', { mode: 'number' }),
+    chargesMinor: bigint('charges_minor', { mode: 'number' }),
     createdBy: uuid('created_by').notNull(),
     createdAt: createdAt(),
   },
@@ -1953,6 +1960,31 @@ export const purchases = pgTable(
       t.number.desc().nullsLast(),
     ),
     index('purchases_supplier_idx').on(t.tenantId, t.supplierId),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Round 62: the photos of a supplier's paper invoice (an upload each). The purchase itself is append-only, so the photos
+ * live beside it: added after the invoice is posted, removed by whoever added one by mistake.
+ */
+export const purchaseAttachments = pgTable(
+  'purchase_attachments',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    purchaseId: uuid('purchase_id').notNull(),
+    uploadId: uuid('upload_id').notNull(),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'purchase_attachments_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.purchaseId], foreignColumns: [purchases.tenantId, purchases.id] }),
+    foreignKey({ columns: [t.tenantId, t.uploadId], foreignColumns: [uploads.tenantId, uploads.id] }),
+    unique('purchase_attachments_upload_unique').on(t.tenantId, t.purchaseId, t.uploadId),
     tenantIsolation(),
   ],
 );

@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event';
 import { screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type {
@@ -140,6 +141,8 @@ describe('the shelf count of a store with two branches', () => {
     });
     renderApp('/inventory');
     expect(await screen.findByText(/لا كلفة مسجّلة لها/)).toBeInTheDocument();
+    // The month's profit is folded (round 62): it opens by a press
+    await userEvent.click(await screen.findByRole('button', { name: 'اعرض' }));
     expect(await screen.findByText(/الكلفة غير مسجلة لهذه المبيعات/)).toBeInTheDocument();
     expect(screen.queryByText(/100/)).not.toBeInTheDocument();
   });

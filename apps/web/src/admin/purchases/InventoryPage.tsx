@@ -56,7 +56,7 @@ import {
   storeToday,
 } from './api';
 import { InventoryGrid } from './InventoryGrid';
-import { SerialPick } from './SerialPick';
+import { SerialEntry, SerialPick } from './SerialPick';
 import { countProblem, differenceWord, reviewCount } from './stocktakeReview';
 import './inventory.css';
 
@@ -102,7 +102,7 @@ export function InventoryPage() {
   // The page shows the stock, or the counts already made (a tab of its own, so the list is not a very long page)
   const [part, setPart] = useState<'stock' | 'counts'>('stock');
   // The month's profit is open on a wide screen and folded on a phone (the list is what the phone came for)
-  const [profitOpen, setProfitOpen] = useState(!phone);
+  const [profitOpen, setProfitOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   // The count is looked over (counted, expected, difference) before it is recorded
   const [reviewing, setReviewing] = useState(false);
@@ -246,9 +246,13 @@ export function InventoryPage() {
   const needSerials = review.filter(
     (l) => l.diffQty < 0 && countItems.find((r) => r.variantId === l.variantId)?.tracksSerial,
   );
-  const serialsMissing = needSerials.some(
-    (l) => (countSerials[l.variantId] ?? []).length !== Math.ceil(-l.diffQty / 1000),
+  // Round 62: a surplus of a tracked product needs its numbers too (the stock goes up, so the serial list must)
+  const needNew = review.filter(
+    (l) => l.diffQty > 0 && countItems.find((r) => r.variantId === l.variantId)?.tracksSerial,
   );
+  const serialsMissing =
+    needSerials.some((l) => (countSerials[l.variantId] ?? []).length !== Math.ceil(-l.diffQty / 1000)) ||
+    needNew.some((l) => (countSerials[l.variantId] ?? []).length !== Math.ceil(l.diffQty / 1000));
   const reviewShort = review.reduce((sum, l) => sum + Math.max(0, -l.diffValueMinor), 0);
   const reviewOver = review.reduce((sum, l) => sum + Math.max(0, l.diffValueMinor), 0);
 
@@ -854,7 +858,7 @@ export function InventoryPage() {
                 </div>
               }
             />
-            {needSerials.length > 0 ? (
+            {needSerials.length > 0 || needNew.length > 0 ? (
               <div className="flex flex-col gap-3" style={{ padding: 16 }}>
                 <p className="sx-wait">
                   هذه الأصناف لها أرقام تسلسلية: اختر الأرقام التي خرجت من الرف، فتتفق قائمة الأرقام مع الجرد.
@@ -866,6 +870,21 @@ export function InventoryPage() {
                     variantId={l.variantId}
                     branchId={countBranch}
                     pieces={Math.ceil(-l.diffQty / 1000)}
+                    picked={countSerials[l.variantId] ?? []}
+                    onChange={(list) => setCountSerials((c) => ({ ...c, [l.variantId]: list }))}
+                  />
+                ))}
+                {needNew.length > 0 ? (
+                  <p className="sx-wait">
+                    وجدت قطعاً أكثر من الدفتر لصنف له أرقام تسلسلية: اكتب رقم كل قطعة زائدة (أو امسحه). رقم
+                    سجّلته ضائعاً سابقاً ثم وجدته يعود إلى المخزون من هنا.
+                  </p>
+                ) : null}
+                {needNew.map((l) => (
+                  <SerialEntry
+                    key={l.variantId}
+                    name={l.name}
+                    pieces={Math.ceil(l.diffQty / 1000)}
                     picked={countSerials[l.variantId] ?? []}
                     onChange={(list) => setCountSerials((c) => ({ ...c, [l.variantId]: list }))}
                   />
@@ -924,6 +943,31 @@ export function InventoryPage() {
                   ) : null}
                 </span>
               </div>
+              <div className="ix-hero-note">
+                <p className="ix-method" role="note">
+                  <b>طريقة التقييم: المتوسط المرجّح للكلفة.</b>
+                  <span>
+                    كل شراء جديد يدخل في متوسط كلفة القطعة، والقطعة التي تُباع أو تخرج تُحسب بهذا المتوسط.
+                    قيمة الصنف = الكمية × متوسط الكلفة، وتجد «الأعلى قيمة أولاً» في الترتيب.
+                  </span>
+                </p>
+                {reorderKinds > 0 ? (
+                  <p className="note">
+                    <bdi className="sx-n">{reorderKinds.toLocaleString('en-US')}</bdi> من الأصناف عند حد الطلب
+                    أو تحته.{' '}
+                    <button
+                      type="button"
+                      className="sx-linkbtn"
+                      onClick={() => {
+                        setFilter('reorder');
+                        setView('list');
+                      }}
+                    >
+                      اعرضها
+                    </button>
+                  </p>
+                ) : null}
+              </div>
             </section>
             {noCostKinds > 0 ? (
               <p className="ix-warn" role="note">
@@ -952,47 +996,22 @@ export function InventoryPage() {
                 </Link>
               </p>
             ) : null}
-            <p className="ix-method" role="note">
-              <b>طريقة التقييم: المتوسط المرجّح للكلفة.</b>
-              <span>
-                كل شراء جديد يدخل في متوسط كلفة القطعة، والقطعة التي تُباع أو تخرج تُحسب بهذا المتوسط. قيمة
-                الصنف = الكمية × متوسط الكلفة، وتجد «الأعلى قيمة أولاً» في الترتيب.
-              </span>
-            </p>
-            {reorderKinds > 0 ? (
-              <p className="sx-note tight" style={{ margin: 0, padding: 0, border: 0 }}>
-                <bdi className="sx-n">{reorderKinds.toLocaleString('en-US')}</bdi> من الأصناف عند حد الطلب أو
-                تحته.{' '}
-                <button
-                  type="button"
-                  className="sx-linkbtn"
-                  onClick={() => {
-                    setFilter('reorder');
-                    setView('list');
-                  }}
-                >
-                  اعرضها
-                </button>
-              </p>
-            ) : null}
             <StockDefinitions />
             {profit ? (
               <Panel
                 title="ربح هذا الشهر"
                 aside={
-                  phone ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-expanded={profitOpen}
-                      onClick={() => setProfitOpen((now) => !now)}
-                    >
-                      {profitOpen ? 'أخفِ' : 'اعرض'}
-                    </Button>
-                  ) : null
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-expanded={profitOpen}
+                    onClick={() => setProfitOpen((now) => !now)}
+                  >
+                    {profitOpen ? 'أخفِ' : 'اعرض'}
+                  </Button>
                 }
               >
-                {profitOpen || !phone ? (
+                {profitOpen ? (
                   <>
                     <p className="sx-wait" style={{ marginBottom: 12 }}>
                       من الدفاتر، من أول الشهر حتى اليوم، بعد المرتجع وبدون الضريبة.

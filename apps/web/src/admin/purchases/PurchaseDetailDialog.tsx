@@ -7,6 +7,8 @@ import { ApiError, errorMessage } from '../../lib/api';
 import { correctPurchase, getPurchase } from './api';
 import { draftOfDetail } from './correctionDraft';
 import { PAYMENT_TEXT } from './pui';
+import { PurchasePhotos } from './PurchasePhotos';
+import { useQuietFocus } from './quietFocus';
 
 /**
  * One purchase invoice (from the same record the labels page reads): each line with its quantity,
@@ -14,6 +16,12 @@ import { PAYMENT_TEXT } from './pui';
  * decision 12) turns it back with a reversal document and hands over a copy to fix and save; it is
  * refused, with a way to a return to the supplier, when part of the goods was sold.
  */
+/** What the supplier's paper adds up to: the net the books took, with the discount back and the charges off (invoice currency) */
+const paper = (d: PurchaseDetail, dollars: boolean) =>
+  (dollars && typeof d.foreignTotalMinor === 'number' ? d.foreignTotalMinor : d.totalMinor) +
+  (d.discountMinor ?? 0) -
+  (d.chargesMinor ?? 0);
+
 export function PurchaseDetailDialog({
   purchase,
   onClose,
@@ -33,6 +41,7 @@ export function PurchaseDetailDialog({
   const [asking, setAsking] = useState(false);
   const [working, setWorking] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
+  const quiet = useQuietFocus<HTMLDivElement>();
 
   useEffect(() => {
     let alive = true;
@@ -90,6 +99,7 @@ export function PurchaseDetailDialog({
         </>
       }
     >
+      <div ref={quiet} tabIndex={-1} className="outline-hidden" />
       {error ? <Alert tone="error">{error}</Alert> : null}
       {refused ? (
         <Alert tone="warning" title="لا يمكن تصحيح هذه الفاتورة">
@@ -110,6 +120,11 @@ export function PurchaseDetailDialog({
                 <bdi dir="ltr" className="num">
                   {detail.reference}
                 </bdi>
+              </>
+            ) : null}
+            {detail.dueDate ? (
+              <>
+                {' · '}تستحق في {dayText(detail.dueDate, digits)}
               </>
             ) : null}
           </p>
@@ -197,6 +212,47 @@ export function PurchaseDetailDialog({
               </li>
             ))}
           </ul>
+          {detail.discountMinor || detail.chargesMinor ? (
+            <dl className="flex flex-col gap-1 text-sm text-ink-muted" aria-label="خصم الفاتورة ورسومها">
+              <div className="flex justify-between gap-3">
+                <dt>مجموع الورقة</dt>
+                <dd>
+                  <Money
+                    minor={paper(detail, dollars)}
+                    currency={dollars ? 'USD' : detail.baseCurrency}
+                    className="font-semibold"
+                  />
+                </dd>
+              </div>
+              {detail.discountMinor ? (
+                <div className="flex justify-between gap-3">
+                  <dt>خصم المورد</dt>
+                  <dd>
+                    −
+                    <Money
+                      minor={detail.discountMinor}
+                      currency={dollars ? 'USD' : detail.baseCurrency}
+                      className="font-semibold"
+                    />
+                  </dd>
+                </div>
+              ) : null}
+              {detail.chargesMinor ? (
+                <div className="flex justify-between gap-3">
+                  <dt>رسوم إضافية (شحن…)</dt>
+                  <dd>
+                    +
+                    <Money
+                      minor={detail.chargesMinor}
+                      currency={dollars ? 'USD' : detail.baseCurrency}
+                      className="font-semibold"
+                    />
+                  </dd>
+                </div>
+              ) : null}
+              <p className="text-xs text-ink-subtle">الخصم والرسوم موزّعة على كلفة الأصناف أعلاه.</p>
+            </dl>
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-surface-total px-4 py-3">
             <span className="text-sm font-semibold text-ink-muted">مجموع الفاتورة</span>
             <span className="flex flex-col items-end">
@@ -216,6 +272,11 @@ export function PurchaseDetailDialog({
             </p>
           ) : null}
           {detail.notes ? <p className="text-sm text-ink-muted">{detail.notes}</p> : null}
+          <PurchasePhotos
+            purchaseId={detail.id}
+            photos={detail.attachments ?? []}
+            onChange={(attachments) => setDetail((d) => (d ? { ...d, attachments } : d))}
+          />
           <TextLink as={Link} to={`/labels?purchase=${detail.id}`} className="self-start">
             اطبع ملصقات هذه الفاتورة
           </TextLink>

@@ -40,8 +40,8 @@ describe('round 60: the returns list', () => {
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': { status: 200, body: buyer() },
       'GET /v1/suppliers': { status: 200, body: { items: [], baseCurrency: 'SYP' } },
-      'GET /v1/supplier-returns': { status: 200, body: { items: [row(1)], nextCursor: 'o:1' } },
-      'GET /v1/supplier-returns?cursor=o:1': { status: 200, body: { items: [row(2)], nextCursor: null } },
+      'GET /v1/supplier-returns': { status: 200, body: { items: [row(1)], nextCursor: 'c1' } },
+      'GET /v1/supplier-returns?cursor=c1': { status: 200, body: { items: [row(2)], nextCursor: null } },
       'GET /v1/supplier-returns/r-1': { status: 200, body: detail },
       'GET /v1/store': { status: 200, body: { name: 'متجر', taxNumber: null, address: null, phone: null } },
     });

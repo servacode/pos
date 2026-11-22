@@ -513,4 +513,182 @@ describe('serial tracking at the till and on the server', () => {
     expect(pick.statusCode, pick.body).toBe(200);
     expect(pick.json().items).toEqual(['CNT-1', 'CNT-3']);
   });
+
+  describe('round 62: counts, write-offs and the serial list agree', () => {
+    const branchOf = async (store: Store) =>
+      (
+        await owner.db.execute<{ id: string }>(
+          sql`select id from branches where tenant_id = ${store.tenantId}`,
+        )
+      )[0]!.id;
+    const count = (
+      store: Store,
+      variantId: string,
+      countedQty: number,
+      extra: Record<string, unknown> = {},
+    ) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/stocktakes',
+        headers: as(store),
+        payload: { date: '2026-10-30', lines: [{ variantId, countedQty }], ...extra },
+      });
+    const drift = async (store: Store) =>
+      (await app.inject({ method: 'GET', url: '/v1/serials/drift', headers: as(store) })).json<{
+        items: { variantId: string; stockPieces: number; serialPieces: number }[];
+      }>().items;
+    const fix = (store: Store, serial: string, status: string) =>
+      app.inject({ method: 'POST', url: '/v1/serials/fix', headers: as(store), payload: { serial, status } });
+
+    it('a write-off that says serials later goes through, the drift shows it, and lost puts it right', async () => {
+      const store = await openStore(app);
+      const a15 = await phone(store);
+      await received(store, a15, ['LT-1', 'LT-2', 'LT-3']);
+      expect(await drift(store)).toEqual([]);
+      const refused = await count(store, a15.variantId, 2000);
+      expect(refused.statusCode).toBe(400);
+      const later = await count(store, a15.variantId, 2000, { serialsLater: true });
+      expect(later.statusCode, later.body).toBe(201);
+      // Nothing named a number: all three are still in stock against two in the stock level
+      expect(await history(store, 'LT-3')).toMatchObject({ status: 'in_stock' });
+      expect(await drift(store)).toEqual([
+        { variantId: a15.variantId, name: expect.any(String), stockPieces: 2, serialPieces: 3 },
+      ]);
+      // Lost: only a number in stock can be marked, and it moves no stock
+      const done = await fix(store, 'lt-3', 'lost');
+      expect(done.statusCode, done.body).toBe(200);
+      expect(done.json()).toEqual({ serial: 'LT-3', status: 'lost' });
+      expect(await history(store, 'LT-3')).toMatchObject({ status: 'lost' });
+      expect(await drift(store)).toEqual([]);
+      expect((await fix(store, 'LT-3', 'lost')).statusCode).toBe(400);
+      // A lost number can only come back to the shop, not be sold again by magic
+      expect((await fix(store, 'LT-3', 'sold')).statusCode).toBe(400);
+      expect((await fix(store, 'LT-3', 'in_stock')).statusCode).toBe(200);
+    });
+
+    it('a surplus of a tracked product needs its numbers, the lenient paths do not', async () => {
+      const store = await openStore(app);
+      const a15 = await phone(store);
+      await received(store, a15, ['SP-1', 'SP-2']);
+      const bare = await count(store, a15.variantId, 5000);
+      expect(bare.statusCode).toBe(400);
+      expect(bare.json().error.fields['lines.0.serials']).toContain('3');
+      const few = await count(store, a15.variantId, 5000, {
+        lines: [{ variantId: a15.variantId, countedQty: 5000, serials: ['SP-3'] }],
+      });
+      expect(few.statusCode).toBe(400);
+      const taken = await count(store, a15.variantId, 3000, {
+        lines: [{ variantId: a15.variantId, countedQty: 3000, serials: ['SP-1'] }],
+      });
+      expect(taken.statusCode).toBe(400);
+      expect(taken.json().error.fields.lines).toContain('SP-1');
+      expect(await drift(store)).toEqual([]);
+      const ok = await count(store, a15.variantId, 4000, {
+        lines: [{ variantId: a15.variantId, countedQty: 4000, serials: ['sp-3', 'SP-4'] }],
+      });
+      expect(ok.statusCode, ok.body).toBe(201);
+      expect(await history(store, 'SP-4')).toMatchObject({ status: 'in_stock' });
+      // An offline phone's count still adds stock with no numbers
+      const phoneCount = await count(store, a15.variantId, 5000, { countedAt: new Date().toISOString() });
+      expect(phoneCount.statusCode, phoneCount.body).toBe(201);
+      expect(await drift(store)).toEqual([
+        { variantId: a15.variantId, name: expect.any(String), stockPieces: 5, serialPieces: 4 },
+      ]);
+    });
+
+    it('a product that does not track numbers takes none in a count', async () => {
+      const store = await openStore(app);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: as(store),
+        payload: { nameAr: 'كفر', variants: [{ price: { currency: 'SYP', priceMinor: 10_000 } }] },
+      });
+      const variantId = res.json<ProductDetail>().variants[0]!.id;
+      const bad = await count(store, variantId, 2000, {
+        lines: [{ variantId, countedQty: 2000, serials: ['X-1', 'X-2'] }],
+      });
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json().error.fields['lines.0.serials']).toBeTruthy();
+      expect((await count(store, variantId, 2000)).statusCode).toBe(201);
+    });
+
+    it('a number counted lost is accepted back when the count finds it again', async () => {
+      const store = await openStore(app);
+      const a15 = await phone(store);
+      await received(store, a15, ['LOST-1', 'LOST-2']);
+      const gone = await count(store, a15.variantId, 1000, {
+        lines: [{ variantId: a15.variantId, countedQty: 1000, serials: ['LOST-2'] }],
+      });
+      expect(gone.statusCode, gone.body).toBe(201);
+      expect(await history(store, 'LOST-2')).toMatchObject({ status: 'lost' });
+      const found = await count(store, a15.variantId, 2000, {
+        lines: [{ variantId: a15.variantId, countedQty: 2000, serials: ['LOST-2'] }],
+      });
+      expect(found.statusCode, found.body).toBe(201);
+      expect(await history(store, 'LOST-2')).toMatchObject({ status: 'in_stock' });
+      expect(await drift(store)).toEqual([]);
+      // A number that is in stock is still refused
+      const again = await count(store, a15.variantId, 3000, {
+        lines: [{ variantId: a15.variantId, countedQty: 3000, serials: ['LOST-1'] }],
+      });
+      expect(again.statusCode).toBe(400);
+    });
+
+    it('stock with no numbers gets them added by the owner, and one products numbers can be listed', async () => {
+      const store = await openStore(app);
+      const a15 = await phone(store);
+      await received(store, a15, ['AD-1']);
+      const surplus = await count(store, a15.variantId, 3000, { countedAt: new Date().toISOString() });
+      expect(surplus.statusCode, surplus.body).toBe(201);
+      expect(await drift(store)).toEqual([
+        { variantId: a15.variantId, name: expect.any(String), stockPieces: 3, serialPieces: 1 },
+      ]);
+      const add = (serial: string, variantId: string | null = a15.variantId) =>
+        app.inject({
+          method: 'POST',
+          url: '/v1/serials/fix',
+          headers: as(store),
+          payload: { serial, status: 'in_stock', ...(variantId ? { variantId } : {}) },
+        });
+      // Without a product the number is simply unknown; a product that does not track numbers takes none
+      expect((await add('ad-2', null)).statusCode).toBe(404);
+      expect((await add('ad-2')).statusCode).toBe(200);
+      expect((await add('ad-3')).statusCode).toBe(200);
+      expect(await history(store, 'AD-3')).toMatchObject({ status: 'in_stock' });
+      expect(await drift(store)).toEqual([]);
+      const mine = await app.inject({
+        method: 'GET',
+        url: `/v1/serials?variantId=${a15.variantId}`,
+        headers: as(store),
+      });
+      expect(
+        mine
+          .json<{ items: SerialRow[] }>()
+          .items.map((r) => r.serial)
+          .sort(),
+      ).toEqual(['AD-1', 'AD-2', 'AD-3']);
+    });
+
+    it('the picker finds a number by part of it and says when the list was cut', async () => {
+      const store = await openStore(app);
+      const a15 = await phone(store);
+      await received(store, a15, ['AB-100', 'AB-200', 'CD-300']);
+      const branchId = await branchOf(store);
+      const find = async (q: string) =>
+        (
+          await app.inject({
+            method: 'GET',
+            url: `/v1/inventory/serials?variantId=${a15.variantId}&branchId=${branchId}&q=${encodeURIComponent(q)}`,
+            headers: as(store),
+          })
+        ).json<{ items: string[]; truncated: boolean }>();
+      expect((await find('ab-')).items).toEqual(['AB-100', 'AB-200']);
+      expect((await find('300')).items).toEqual(['CD-300']);
+      // A wildcard typed in the box is text, not a pattern
+      expect((await find('%')).items).toEqual([]);
+      expect((await find('_')).items).toEqual([]);
+      expect(await find('')).toMatchObject({ items: ['AB-100', 'AB-200', 'CD-300'], truncated: false });
+    });
+  });
 });

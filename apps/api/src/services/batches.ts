@@ -511,8 +511,10 @@ export function expiryReport(
       purchase_id: string | null;
       blocked: boolean;
       reason: string | null;
+      tracks_serial: boolean;
     }>(sql`
       select b.variant_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name, b.branch_id, br.name as branch_name,
+             p.tracks_serial,
              b.batch_no, b.expiry_date::text as expiry_date, b.qty::text,
              r.number, r.supplier_id, r.supplier_name, r.received_on, r.purchase_id,
              (bl.id is not null) as blocked, bl.reason
@@ -568,6 +570,7 @@ export function expiryReport(
           : null,
         blocked: r.blocked,
         blockReason: r.reason,
+        ...(r.tracks_serial ? { tracksSerial: true } : {}),
       })),
     };
   });

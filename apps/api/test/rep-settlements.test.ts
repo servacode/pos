@@ -544,6 +544,38 @@ describe('the settlement', () => {
     expect(await stockOf(w.van.id, w.variantId)).toBe(8000);
   });
 
+  it('closes a van count of a product that tracks serial numbers: the shortage needs no numbers (round 62)', async () => {
+    const w = await world();
+    await ownerDb()`update products set tracks_serial = true where id = ${w.productId}`;
+    const settings = await ok<DistributionSettings>(s.accessToken, 'GET', '/v1/distribution/settings');
+    await ok(s.accessToken, 'PUT', '/v1/distribution/settings', {
+      ...settings,
+      keepStockInVanOvernight: true,
+    });
+    const made = await ok<RepSettlementDetail>(
+      s.accessToken,
+      'POST',
+      '/v1/rep-settlements',
+      {
+        repId: w.rep.id,
+        businessDate: DATE,
+        countedCash: { SYP: 330_000 },
+        vanCount: [{ variantId: w.variantId, countedQty: 7000 }],
+      },
+      201,
+    );
+    // Not 400: a rep's van count is never refused for want of serial numbers (the owner puts the list right later)
+    const done = await ok<RepSettlementDetail>(
+      s.accessToken,
+      'POST',
+      `/v1/rep-settlements/${made.id}/approve`,
+      { version: made.version },
+    );
+    expect(done.status).toBe('approved');
+    expect(done.goods.stocktakeId).not.toBeNull();
+    expect(await stockOf(w.van.id, w.variantId)).toBe(7000);
+  });
+
   it('settles with no count at all: only the cash is recorded, the van is left as it is', async () => {
     const w = await world();
     const made = await ok<RepSettlementDetail>(
