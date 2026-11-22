@@ -109,6 +109,8 @@ const discountMeta = {
   approval: approvalSchema.nullable(),
   /** The offer behind a `promotion` discount, so the report groups by it and a rename does not split it. Optional: older tills send only the name as the reason. */
   promotionId: uuidSchema.optional(),
+  /** The customer group behind an invoice discount of the group's percent (round A5): the server checks it against the customer's own group. Optional: older tills never send it. */
+  groupId: uuidSchema.optional(),
 };
 export const documentDiscountSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('percent'), bp: bpSchema, ...discountMeta }),

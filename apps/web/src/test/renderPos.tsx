@@ -78,11 +78,29 @@ export async function saleScreen(options: RenderPosOptions = {}) {
   const local = options.local ?? memoryLocal();
   await openShift(local);
   const pos = renderPos({ ...options, local });
-  const list = await screen.findByRole('list', { name: 'الموظفون' });
-  await pos.user.click(within(list).getByRole('button', { name: /سامر/ }));
-  await pos.user.keyboard(PINS[ids.samer]!);
+  await signInIfAsked(pos.user);
   await catalogueReady(options.sets ?? posSets());
   return pos;
+}
+
+/**
+ * سامر signs in with his code, unless the till still knows him: a render after a «reload» in the same test finds
+ * the cashier signed in (the idle window), and then no code is typed.
+ */
+export async function signInIfAsked(user: ReturnType<typeof renderPos>['user']) {
+  const list = await waitFor(
+    () => {
+      const staff = screen.queryByRole('list', { name: 'الموظفون' });
+      if (staff) return staff;
+      if (screen.queryByRole('list', { name: 'الأصناف' }) || screen.queryByRole('region', { name: 'الدفع' }))
+        return null;
+      throw new Error('neither the sign-in nor the sale screen yet');
+    },
+    { timeout: 10_000 },
+  );
+  if (!list) return;
+  await user.click(within(list).getByRole('button', { name: /سامر/ }));
+  await user.keyboard(PINS[ids.samer]!);
 }
 
 /**

@@ -20,6 +20,7 @@ import { CartWarnings } from './CartWarnings';
 import { BatchBanner } from './BatchBanner';
 import type { batchGuard } from './batches';
 import { restoreLine, type Cart, type CartLine as Line, type PricedCart, type PricingContext } from './cart';
+import { clearInvoiceDiscount } from './groupDiscount';
 import { CART_QUICK, type SaleMode, type SaleScreenProps } from './saleTypes';
 
 export interface CartTotalsProps {
@@ -79,6 +80,8 @@ export function CartTotals({
   startPay,
 }: CartTotalsProps) {
   const digits = useDigits();
+  // With three quiet actions (a pharmacy's «بدائل») each one is narrower, so «ادفع» and its amount keep their room
+  const quick = pharmacy ? CART_QUICK.replace('w-16', 'w-12') : CART_QUICK;
   return (
     <>
       {cart.invoiceDiscount && totals && totals.invoiceDiscountMinor > 0 ? (
@@ -91,7 +94,7 @@ export function CartTotals({
           <PercentIcon size={20} className="shrink-0" />
           <span className="min-w-0 flex-1">
             <span className="font-semibold">
-              خصم الفاتورة{' '}
+              {cart.invoiceGroup ? `خصم المجموعة ${cart.invoiceGroup.name}` : 'خصم الفاتورة'}{' '}
               {cart.invoiceDiscount.type === 'percent'
                 ? `${displayNumber(String(cart.invoiceDiscount.bp / 100), digits)}%`
                 : ''}{' '}
@@ -103,10 +106,30 @@ export function CartTotals({
                 : 'يشمل كل الأسطر، وما تضيفه بعد الآن.'}
             </span>
           </span>
+          <Button variant="ghost" size="sm" onClick={() => setCart(clearInvoiceDiscount)}>
+            أزله
+          </Button>
+        </div>
+      ) : null}
+      {cart.coupon ? (
+        <div
+          role="status"
+          aria-label="كود الخصم"
+          className="mx-3 mb-1.5 flex shrink-0 items-center gap-3 rounded-card border border-info/20 bg-info-soft py-0.5 ps-3 pe-1 text-sm text-info-ink"
+        >
+          <PercentIcon size={20} className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate font-semibold">
+            كود الخصم <bdi dir="ltr">{cart.coupon.code}</bdi> · {cart.coupon.name}
+          </span>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setCart((c) => ({ ...c, invoiceDiscount: null, invoiceApproval: null }))}
+            onClick={() =>
+              setCart((c) => {
+                const { coupon: _gone, ...rest } = c;
+                return rest;
+              })
+            }
           >
             أزله
           </Button>
@@ -207,7 +230,7 @@ export function CartTotals({
                 else setMode({ kind: 'heldList' });
               }}
               disabled={lineCount === 0 && heldCount === 0}
-              className={CART_QUICK}
+              className={quick}
             >
               {lineCount === 0 && heldCount > 0 ? <UndoIcon size={20} /> : <ClockIcon size={20} />}
               <span>{lineCount === 0 && heldCount > 0 ? 'استرجع' : 'علّق'}</span>
@@ -221,7 +244,7 @@ export function CartTotals({
                 title="خصم على الفاتورة (Alt+1)"
                 onClick={() => setMode({ kind: 'invoice' })}
                 disabled={lineCount === 0}
-                className={CART_QUICK}
+                className={quick}
               >
                 <PercentIcon size={20} />
                 <span>خصم</span>
@@ -239,7 +262,7 @@ export function CartTotals({
                   if (line) setMode({ kind: 'alternatives', variantId: line.variantId, lineNo: line.lineNo });
                 }}
                 disabled={lineCount === 0}
-                className={CART_QUICK}
+                className={quick}
               >
                 <SearchIcon size={20} />
                 <span>بدائل</span>

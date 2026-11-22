@@ -7,6 +7,7 @@ import { batchGuard, planBatches } from './batches';
 import { reservedForOthers } from './reserved';
 import { deviceDocuments } from '../shift/shift';
 import { couponPromotion, type Cart } from './cart';
+import { cartCouponRule } from './coupon';
 import { usePos } from '../services';
 import { ONLINE_SOLD_KEY } from './onlineOrders';
 import { flushShortages } from './shortages';
@@ -31,10 +32,13 @@ export function useSaleStock({ catalog, cart, settings, heldList, done }: SaleSt
     const now = new Date();
     const running = catalog.promotions.filter((p) => promotionActive(p, now, settings.timezone));
     // A shop order's coupon: the offer its code opened applies to this sale, as the order was placed
-    return cart.onlineOrder?.couponRule
+    const withOrder = cart.onlineOrder?.couponRule
       ? [...running, couponPromotion(cart.onlineOrder.couponRule)]
       : running;
-  }, [catalog.promotions, settings.timezone, cart]);
+    // A code the cashier typed (round A5): its offer, from the promotions pulled, while it is still running
+    const typed = cartCouponRule(cart, catalog.coupons, now, settings.timezone);
+    return typed ? [...withOrder, typed] : withOrder;
+  }, [catalog.promotions, catalog.coupons, settings.timezone, cart]);
   // 03 › الصيدليات: what the cart takes from which batch (first expiry first), and from the shelf.
   // What this till sold and has not sent yet comes off what it last pulled, as it works offline.
   const posServices = usePos();

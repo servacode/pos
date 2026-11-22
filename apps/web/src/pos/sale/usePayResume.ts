@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { StaffSession } from '../staff/staff';
 import { type Cart, type PricedCart } from './cart';
+import { PAY_DRAFT_KEY } from '../pay/payDraft';
 import { PAY_OPEN_KEY, type PosServices, type SaleMode } from './saleTypes';
 
 export interface PayResumeArgs {
@@ -42,6 +43,13 @@ export function usePayResume({ pos, priced, cart, session, mode, totalMinor, set
       pos.local.remove(PAY_OPEN_KEY).catch(() => undefined);
     }
   }, [payKeyLoaded, priced, cart.lines.length, totalMinor, session.userId, pos.local, setMode]);
+  // The pay screen's saved choices (split parts, method, typed amount) live only while the pay screen is open:
+  // leaving it, by any way, drops them; a screen rebuilt while still in «pay» keeps them
+  const wasPay = useRef(false);
+  useEffect(() => {
+    if (wasPay.current && mode.kind !== 'pay') pos.local.remove(PAY_DRAFT_KEY).catch(() => undefined);
+    wasPay.current = mode.kind === 'pay';
+  }, [mode.kind, pos.local]);
   useEffect(() => {
     // Before the saved flag is read (or while it waits for the cart), leave it alone
     if (!payKeyLoaded || payKey.current) return;

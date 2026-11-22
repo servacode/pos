@@ -29,7 +29,7 @@ import {
   type PricingContext,
 } from './cart';
 import { fetchContractPrices } from '../rentals/api';
-import { ModifierPanel } from './ModifierPanel';
+import { clearInvoiceDiscount, withGroupDiscount } from './groupDiscount';
 import type { modelPieces } from './models';
 import { UnitPanel } from './UnitPanel';
 import { VariantPicker } from './VariantPicker';
@@ -41,7 +41,6 @@ import { placeholderIconFor } from '../../lib/productPlaceholder';
 import type { waitingOrders } from './onlineOrders';
 import { ONLINE_SOLD_KEY, orderCart } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
-import { PrescriptionPanel } from './PrescriptionPanel';
 import { Kbd } from './Kbd';
 import { SalePanel } from './SalePanel';
 import {
@@ -76,6 +75,13 @@ const CancelSentLine = lazyChunk(() =>
 const OnlineOrdersPanel = lazyChunk(() =>
   import('./OnlineOrdersPanel').then((m) => ({ default: m.OnlineOrdersPanel })),
 );
+// «كود الخصم» is typed rarely: its own chunk too
+const CouponForm = lazyChunk(() => import('./CouponForm'));
+// a prescription (pharmacy) and a drink's choices (restaurant, café) serve one kind of store each: their own chunks too
+const PrescriptionPanel = lazyChunk(() =>
+  import('./PrescriptionPanel').then((m) => ({ default: m.PrescriptionPanel })),
+);
+const ModifierPanel = lazyChunk(() => import('./ModifierPanel').then((m) => ({ default: m.ModifierPanel })));
 const SplitBill = lazyChunk(() => import('../hall/SplitBill').then((m) => ({ default: m.SplitBill })));
 
 export interface SaleModePanelProps {
@@ -236,9 +242,14 @@ export function SaleModePanel(p: SaleModePanelProps) {
               onPlanFee={setPlanFeeMinor}
               onCustomer={(picked) =>
                 setCart((c) => {
-                  if (picked) return { ...c, customer: picked };
+                  // The customer's group discount comes with them and leaves with them (sale/groupDiscount.ts)
+                  if (picked)
+                    return withGroupDiscount(
+                      { ...c, customer: picked },
+                      catalog.customers.find((k) => k.id === picked.id),
+                    );
                   const { customer: _gone, ...rest } = c;
-                  return rest;
+                  return withGroupDiscount(rest, undefined);
                 })
               }
               onContractPrices={async (customerId) => {
@@ -375,20 +386,44 @@ export function SaleModePanel(p: SaleModePanelProps) {
           staff={staff}
           check={checkInvoice}
           onApply={(value, approval) => {
-            setCart((c) => ({
-              ...c,
-              invoiceDiscount:
-                value.mode === 'percent'
-                  ? { type: 'percent', bp: value.bp }
-                  : { type: 'amount', minor: (value as { minor: number }).minor },
-              invoiceApproval: approval,
-            }));
+            setCart((c) => {
+              const { invoiceGroup: _group, ...rest } = c;
+              return {
+                ...rest,
+                invoiceDiscount:
+                  value.mode === 'percent'
+                    ? { type: 'percent', bp: value.bp }
+                    : { type: 'amount', minor: (value as { minor: number }).minor },
+                invoiceApproval: approval,
+              };
+            });
             setMode({ kind: 'items' });
           }}
+          extra={
+            <Suspense fallback={null}>
+              <CouponForm
+                coupons={catalog.coupons}
+                cart={cart}
+                ctx={ctx}
+                timeZone={settings.timezone}
+                onApplied={(applied) => {
+                  setCart((c) => ({ ...c, coupon: applied }));
+                  setMode({ kind: 'items' });
+                }}
+                onRemove={() => {
+                  setCart((c) => {
+                    const { coupon: _gone, ...rest } = c;
+                    return rest;
+                  });
+                  setMode({ kind: 'items' });
+                }}
+              />
+            </Suspense>
+          }
           onRemove={
             cart.invoiceDiscount
               ? () => {
-                  setCart((c) => ({ ...c, invoiceDiscount: null, invoiceApproval: null }));
+                  setCart(clearInvoiceDiscount);
                   setMode({ kind: 'items' });
                 }
               : undefined
@@ -429,16 +464,18 @@ export function SaleModePanel(p: SaleModePanelProps) {
           />
         </SalePanel>
       ) : effectiveMode.kind === 'rx' ? (
-        <PrescriptionPanel
-          need={rxNeed}
-          initial={cart.prescription}
-          controlled={hasControlled}
-          onSave={(prescription) => {
-            setCart((c) => ({ ...c, prescription }));
-            setMode({ kind: 'pay' });
-          }}
-          onCancel={() => setMode({ kind: 'items' })}
-        />
+        <Suspense fallback={null}>
+          <PrescriptionPanel
+            need={rxNeed}
+            initial={cart.prescription}
+            controlled={hasControlled}
+            onSave={(prescription) => {
+              setCart((c) => ({ ...c, prescription }));
+              setMode({ kind: 'pay' });
+            }}
+            onCancel={() => setMode({ kind: 'items' })}
+          />
+        </Suspense>
       ) : effectiveMode.kind === 'serial' && lineOf(effectiveMode.lineNo) ? (
         <SerialPanel
           key={effectiveMode.lineNo}
@@ -564,16 +601,18 @@ export function SaleModePanel(p: SaleModePanelProps) {
           />,
         )
       ) : effectiveMode.kind === 'choose' ? (
-        <ModifierPanel
-          key={effectiveMode.item.variantId}
-          item={effectiveMode.item}
-          onAdd={(choice) => {
-            const { item, hit } = effectiveMode;
-            setMode({ kind: 'items' });
-            add(item, hit, undefined, choice);
-          }}
-          onCancel={() => setMode({ kind: 'items' })}
-        />
+        <Suspense fallback={null}>
+          <ModifierPanel
+            key={effectiveMode.item.variantId}
+            item={effectiveMode.item}
+            onAdd={(choice) => {
+              const { item, hit } = effectiveMode;
+              setMode({ kind: 'items' });
+              add(item, hit, undefined, choice);
+            }}
+            onCancel={() => setMode({ kind: 'items' })}
+          />
+        </Suspense>
       ) : effectiveMode.kind === 'alternatives' && catalog.byVariant.get(effectiveMode.variantId) ? (
         <Suspense fallback={null}>
           <AlternativesPanel

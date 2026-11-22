@@ -211,6 +211,32 @@ describe('buildSalePayload', () => {
     expect(sale.invoiceDiscount?.approval?.userId).toBe(MANAGER);
   });
 
+  it("a customer group's percent is an ordinary invoice discount: the same totals as the typed one, the group named beside it", () => {
+    const GROUP = '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a09';
+    const lines = [line(1, 50_000), line(2, 30_000, { qty: 2000 })];
+    const typed = buildSalePayload({
+      ...cart(lines, [cash('SYP', 99_000)]),
+      invoiceDiscount: { type: 'percent', bp: 1000, source: 'manual', reason: null, approval: null },
+    });
+    const group = buildSalePayload({
+      ...cart(lines, [cash('SYP', 99_000)]),
+      invoiceDiscount: {
+        type: 'percent',
+        bp: 1000,
+        source: 'promotion',
+        reason: 'خصم المجموعة جملة',
+        approval: null,
+        groupId: GROUP,
+      },
+    });
+    expect(group.totals).toEqual(typed.totals);
+    expect(group.lines.map((l) => l.priced)).toEqual(typed.lines.map((l) => l.priced));
+    expect(group.totals.invoiceDiscountMinor).toBe(11_000);
+    expect(group.invoiceDiscount).toMatchObject({ source: 'promotion', groupId: GROUP });
+    expect(verifySalePayload(group)).toEqual([]);
+    expect(salePayloadSchema.safeParse(group).success).toBe(true);
+  });
+
   it('converts a dollar price at the sale rate and keeps the catalog price beside it', () => {
     const sale = buildSalePayload(cart([line(1, 3500, { priceCurrency: 'USD' })], [cash('SYP', 455000)]));
     expect(sale.lines[0]).toMatchObject({ priceCurrency: 'USD', priceMinor: 3500, unitPriceMinor: 455000 });

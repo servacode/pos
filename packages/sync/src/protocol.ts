@@ -224,6 +224,10 @@ export const SYNC_FLAGS = [
   'installment_plan_invalid',
   /** The plan's schedule on the sale differs from the server's own: the printed schedule is kept */
   'schedule_mismatch',
+  /** An invoice discount named a customer group that is not the sale's customer's, or took more than the group's percent (round A5): the sale stands */
+  'group_discount_mismatch',
+  /** A code typed at the till opened an offer that was not a code's offer, or had ended or not started when the sale was made (round A5) */
+  'coupon_invalid',
   /** A receipt paid more toward an instalment than was left of it (two tills): the money is accepted, the rest stays as the customer's credit */
   'installment_overpaid',
   /**

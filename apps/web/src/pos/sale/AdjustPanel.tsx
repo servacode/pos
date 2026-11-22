@@ -125,6 +125,8 @@ export interface AdjustPanelProps {
   staff: readonly StaffMember[];
   /** The value shown before typing, e.g. the current quantity */
   preview?: (value: AdjustValue | null) => React.ReactNode;
+  /** Something under the keys (the invoice panel's coupon field, round A5) */
+  extra?: React.ReactNode;
   /** A small centred pad (a service's fee): the field above the keys, not spread over the whole area */
   compact?: boolean;
 }
@@ -147,6 +149,7 @@ export function AdjustPanel({
   staff,
   preview,
   compact = false,
+  extra,
 }: AdjustPanelProps) {
   const digits = useDigits();
   const [mode, setMode] = useState<AdjustMode>(initialMode);
@@ -321,6 +324,7 @@ export function AdjustPanel({
               onExtraKey={() => type('.')}
             />
           </div>
+          {extra}
         </>
       )}
     </SalePanel>

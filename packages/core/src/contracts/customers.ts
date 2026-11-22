@@ -153,6 +153,14 @@ export interface CustomerRow {
   lng?: number | null;
   /** grocery, supermarket…: what a trade promotion targets; absent on older rows */
   kind?: CustomerKind | null;
+  /**
+   * «مجموعات الزبائن» at the till: the group the customer belongs to and its discount (hundredths of a percent), so the
+   * till offers it as an invoice discount offline. Additive and optional: older rows and older tills do without it.
+   * Both are null for no group or an archived one.
+   */
+  groupId?: string | null;
+  groupName?: string | null;
+  groupDiscountBps?: number | null;
 }
 
 export interface CustomerListItem {

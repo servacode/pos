@@ -12,10 +12,12 @@ import {
   BackIcon,
   Button,
   CustomersIcon,
+  displayNumber,
   IconChip,
   Money,
   SearchIcon,
   TextField,
+  useDigits,
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
 import { usePos } from '../services';
@@ -27,6 +29,28 @@ export interface PickedCustomer {
   name: string;
   creditLimitMinor: number | null;
   priceTier?: 'retail' | 'wholesale';
+  /** «مجموعات الزبائن»: the group and its percent (hundredths), as last pulled; shown beside the name */
+  groupName?: string | null;
+  groupDiscountBps?: number | null;
+}
+
+/** «خصم المجموعة X%» for a customer in a group with a percent, or null */
+export function GroupDiscountBadge({
+  customer,
+}: {
+  customer: { groupName?: string | null; groupDiscountBps?: number | null };
+}) {
+  const digits = useDigits();
+  const bp = customer.groupDiscountBps ?? 0;
+  if (!customer.groupName || bp <= 0) return null;
+  return (
+    <span
+      title={customer.groupName}
+      className="shrink-0 self-start rounded-full bg-info-soft px-2 py-0.5 text-xs font-semibold text-info-ink"
+    >
+      خصم المجموعة {displayNumber(String(bp / 100), digits)}%
+    </span>
+  );
 }
 
 /**
@@ -192,6 +216,8 @@ export function CustomerPicker({
                       name: c.name,
                       creditLimitMinor: c.creditLimitMinor,
                       priceTier: c.priceTier,
+                      groupName: c.groupName ?? null,
+                      groupDiscountBps: c.groupDiscountBps ?? null,
                     })
                   }
                   className="flex min-h-14 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-control px-2 py-1.5 text-start sm:flex-nowrap transition-colors duration-120 ease-standard hover:bg-surface-muted active:bg-surface-muted"
@@ -199,6 +225,7 @@ export function CustomerPicker({
                   <Avatar name={c.name} />
                   <span className="flex min-w-0 flex-1 basis-40 flex-col">
                     <span className="font-semibold break-words text-ink sm:truncate">{c.name}</span>
+                    <GroupDiscountBadge customer={c} />
                     {c.phone ? (
                       <bdi dir="ltr" className="num self-start text-sm text-ink-muted">
                         {c.phone}

@@ -40,7 +40,8 @@ describe('round 17: the till', () => {
     await scan(user, PRODUCTS.oil.barcode!.code);
     await user.keyboard('{F12}');
     const pay = await screen.findByRole('region', { name: 'الدفع' });
-    expect(within(pay).getByRole('button', { name: /أتمّ الدفع/ })).toBeEnabled();
+    // Paying waits a moment for the saved parts to be read back
+    await vi.waitFor(() => expect(within(pay).getByRole('button', { name: /أتمّ الدفع/ })).toBeEnabled());
     expect(within(pay).getByText('المبلغ المستلم · نقد بالليرة').nextElementSibling?.textContent).toContain(
       '250',
     );

@@ -53,6 +53,7 @@ import { deliverSalesOrder } from './sales-orders';
 import { applyAllocations, reconcilePlanAfterReturn, recordPlanFromSale } from './installments';
 import { auditExpiredSale, recordReturnBatches, recordSaleBatches } from './batches';
 import { processTempItem } from './till-products';
+import { couponFlags, groupDiscountFlags } from './sale-discount-checks';
 import { inScope, permissionScope } from '../auth/permissions';
 
 /**
@@ -192,6 +193,9 @@ async function processSale({ tx, device, doc }: DocumentContext) {
   const { tenantId } = device;
   if (await moveStock(tx, device, doc, 'sale', sale.lines, -1)) flags.push('negative_stock');
   flags.push(...(await controlledFlags(tx, device, sale)));
+  // Round A5: a group discount or a till coupon the server's own data does not back is flagged, the sale stands
+  flags.push(...(await groupDiscountFlags(tx, sale)));
+  flags.push(...(await couponFlags(tx, sale, new Date(Date.parse(doc.deviceTime) - doc.deviceOffsetMs))));
   // The batch ledger follows the sale: what each line took from which batch (a parallel record)
   flags.push(
     ...(await recordSaleBatches(

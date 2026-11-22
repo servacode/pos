@@ -132,3 +132,4 @@
 
 # a product the till made offline, written by the document processor (round 38)
 /apps/api/src/services/till-products.ts @servacode
+/apps/api/src/services/sale-discount-checks.ts @servacode

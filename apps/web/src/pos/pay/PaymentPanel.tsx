@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { draftFits, PAY_DRAFT_KEY, type PayDraft } from './payDraft';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { CURRENCIES } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
@@ -48,7 +49,7 @@ import type { Catalog } from '../catalog';
 import { warrantyAsksCustomer } from '@serva/core/contracts/till';
 import { CustomerHistory, fetchPurchases } from '../customers/CustomerHistory';
 import { DateField } from '../../lib/DateField';
-import { CustomerPicker, type PickedCustomer } from '../customers/CustomerPicker';
+import { CustomerPicker, GroupDiscountBadge, type PickedCustomer } from '../customers/CustomerPicker';
 import { ExactMoney } from '../ExactMoney';
 import { Kbd } from '../sale/Kbd';
 import { nextOrderNo } from '../sale/orders';
@@ -201,6 +202,8 @@ export function PaymentPanel({
       name: known?.name ?? on.name,
       creditLimitMinor: known?.creditLimitMinor ?? null,
       priceTier: known?.priceTier,
+      groupName: known?.groupName ?? null,
+      groupDiscountBps: known?.groupDiscountBps ?? null,
     };
   });
   const [history, setHistory] = useState(false);
@@ -303,6 +306,14 @@ export function PaymentPanel({
   // A voucher or deposit took its part: the next part starts at what is left, until the cashier changes it
   const [restPrefill, setRestPrefill] = useState(false);
   const [parts, setParts] = useState<Part[]>([]);
+  // What the cashier chose is kept on the device and read back when this screen opens (a reload, a screen rebuilt
+  // under it): until it is read, paying waits, so fresh defaults never post in place of the chosen parts
+  const [draftRead, setDraftRead] = useState(false);
+  const draftRef = useRef<{ lines: number; total: number }>({
+    lines: cart.lines.length,
+    total: goodsTotalMinor,
+  });
+  draftRef.current = { lines: cart.lines.length, total: goodsTotalMinor };
   // A customer named before the pay screen (a held sale, a ticket): their contract prices apply here too, once
   const contractAsked = useRef(false);
   useEffect(() => {
@@ -385,6 +396,59 @@ export function PaymentPanel({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const referenceRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    let alive = true;
+    pos.local
+      .get<PayDraft>(PAY_DRAFT_KEY)
+      .then((saved) => {
+        if (!alive) return;
+        const here = { cashierId, ...draftRef.current };
+        if (draftFits(saved, here) && (saved.split || saved.parts.length > 0 || saved.text)) {
+          const back = saved.parts.map((p) => ({
+            part: p,
+            option: options.find((o) => o.key === p.optionKey),
+          }));
+          if (back.every((p) => p.option)) {
+            setSplit(saved.split);
+            setRestPrefill(saved.restPrefill);
+            setParts(back.map((p) => ({ option: p.option!, tender: p.part.tender })));
+            const chosen = options.find((o) => o.key === saved.optionKey);
+            if (chosen) setOption(chosen);
+            setText(saved.text);
+            setReference(saved.reference);
+          } else {
+            setError('تعذّرت استعادة أجزاء الدفع السابقة. أعد إدخالها.');
+            void pos.local.remove(PAY_DRAFT_KEY);
+          }
+        } else if (saved) {
+          void pos.local.remove(PAY_DRAFT_KEY);
+        }
+        setDraftRead(true);
+      })
+      .catch(() => alive && setDraftRead(true));
+    return () => {
+      alive = false;
+    };
+    // once, when the panel opens
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!draftRead) return;
+    if (!split && parts.length === 0 && !text) {
+      void pos.local.remove(PAY_DRAFT_KEY);
+      return;
+    }
+    void pos.local.set(PAY_DRAFT_KEY, {
+      cashierId,
+      ...draftRef.current,
+      split,
+      restPrefill,
+      optionKey: option.key,
+      text,
+      reference,
+      parts: parts.map((p) => ({ optionKey: p.option.key, tender: p.tender })),
+    } satisfies PayDraft);
+  }, [draftRead, split, restPrefill, parts, option.key, text, reference, cashierId, pos.local]);
 
   const cashSteps = settings.cashRoundingSteps;
   const typed = parseAmount(text, option.currency);
@@ -505,6 +569,7 @@ export function PaymentPanel({
     current.reference === null;
   const onAccount = (method: string) => method === 'credit' || method === 'cheque' || method === 'points';
   const canComplete =
+    draftRead &&
     !saving &&
     !('error' in settlement) &&
     settlement.covered &&
@@ -518,27 +583,29 @@ export function PaymentPanel({
   const waitingFor: string | null =
     canComplete || saving
       ? null
-      : needsCustomer && !customer
-        ? 'اختر الزبون أولاً: الجهاز المباع بكفالة يُسجَّل باسمه.'
-        : blockedOver
-          ? 'المبلغ يتجاوز حدّ دين هذا الزبون.'
-          : voucherProblem
-            ? 'تحقّق من القسيمة أو النقاط المكتوبة.'
-            : needsReference
-              ? option.method === 'cheque'
-                ? 'اكتب البنك ورقم الشيك وتاريخ الاستحقاق.'
-                : 'اكتب رقم الموافقة أو المرجع لهذه الدفعة.'
-              : tenders.length === 0
-                ? `أدخل المبلغ المدفوع (${option.label}).`
-                : 'error' in settlement
-                  ? 'تحقّق من المبلغ المكتوب.'
-                  : !settlement.covered
-                    ? customer &&
-                      options.some((o) => o.method === 'credit') &&
-                      !tenders.some((t) => t.method === 'credit')
-                      ? 'المبلغ لا يغطي الفاتورة كلها. اضغط «آجل على الحساب» ليُسجَّل المتبقي ديناً على الزبون.'
-                      : 'المبلغ لا يغطي الفاتورة كلها بعد.'
-                    : null;
+      : !draftRead
+        ? 'جارٍ استعادة أجزاء الدفع…'
+        : needsCustomer && !customer
+          ? 'اختر الزبون أولاً: الجهاز المباع بكفالة يُسجَّل باسمه.'
+          : blockedOver
+            ? 'المبلغ يتجاوز حدّ دين هذا الزبون.'
+            : voucherProblem
+              ? 'تحقّق من القسيمة أو النقاط المكتوبة.'
+              : needsReference
+                ? option.method === 'cheque'
+                  ? 'اكتب البنك ورقم الشيك وتاريخ الاستحقاق.'
+                  : 'اكتب رقم الموافقة أو المرجع لهذه الدفعة.'
+                : tenders.length === 0
+                  ? `أدخل المبلغ المدفوع (${option.label}).`
+                  : 'error' in settlement
+                    ? 'تحقّق من المبلغ المكتوب.'
+                    : !settlement.covered
+                      ? customer &&
+                        options.some((o) => o.method === 'credit') &&
+                        !tenders.some((t) => t.method === 'credit')
+                        ? 'المبلغ لا يغطي الفاتورة كلها. اضغط «آجل على الحساب» ليُسجَّل المتبقي ديناً على الزبون.'
+                        : 'المبلغ لا يغطي الفاتورة كلها بعد.'
+                      : null;
 
   const extrasRef = useRef<HTMLDivElement>(null);
   const goToMissing = () => {
@@ -624,7 +691,8 @@ export function PaymentPanel({
 
   async function complete(grant: { credit?: Approval; cost?: Approval } = {}, skipPlanAsk = false) {
     if (!canComplete) {
-      if ('error' in settlement) setError(settlement.error);
+      if (!draftRead) setError('جارٍ استعادة أجزاء الدفع. انتظر لحظة ثم أعد المحاولة.');
+      else if ('error' in settlement) setError(settlement.error);
       else if (blockedOver) setError('هذا الزبون يتجاوز حد الدين، ولا يُباع له بالآجل فوق الحد.');
       else if (voucherProblem) setError(voucherProblem);
       else if (needsReference) {
@@ -700,6 +768,7 @@ export function PaymentPanel({
         engineVersion: PRICING_ENGINE_VERSION,
       });
       void pos.local.remove(PLAN_KEY);
+      void pos.local.remove(PAY_DRAFT_KEY);
       onCompleted(entry);
     } catch {
       setSaving(false);
@@ -1108,6 +1177,7 @@ export function PaymentPanel({
                   <span className="flex min-w-40 flex-1 flex-col">
                     <span className="text-xs text-ink-muted">الزبون</span>
                     <span className="font-semibold break-words text-ink">{customer.name}</span>
+                    <GroupDiscountBadge customer={customer} />
                     {owed !== null && owed > 0 ? (
                       <span className="text-sm font-semibold text-danger-ink">
                         عليه <Money minor={owed} currency={base} />

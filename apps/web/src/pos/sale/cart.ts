@@ -172,6 +172,10 @@ export interface Cart {
   prescription?: Prescription;
   invoiceDiscount: { type: 'percent'; bp: number } | { type: 'amount'; minor: number } | null;
   invoiceApproval: Approval | null;
+  /** The invoice discount is the customer group's (round A5): its name for the label, never asks a manager; the sale names the group so the server checks it */
+  invoiceGroup?: { id: string; name: string };
+  /** A code the cashier typed (round A5): the offer it opened prices the lines like a running promotion (sale/coupon.ts) */
+  coupon?: { code: string; promotionId: string; name: string };
   /** The customer the cart is for, when one is attached before payment (prefills a held cart's name) */
   customer?: { id: string; name: string };
   /** Set while the cart is held: the name it was put aside under and when (the held carts' list) */
@@ -591,7 +595,15 @@ export function pricingInput(cart: Cart, ctx: PricingContext): SalePricingInput 
     exchangeRates: ctx.rates,
     lines,
     invoiceDiscount: cart.invoiceDiscount
-      ? { ...cart.invoiceDiscount, source: 'manual', reason: null, approval: cart.invoiceApproval }
+      ? cart.invoiceGroup
+        ? {
+            ...cart.invoiceDiscount,
+            source: 'promotion',
+            reason: `خصم المجموعة ${cart.invoiceGroup.name}`,
+            approval: null,
+            groupId: cart.invoiceGroup.id,
+          }
+        : { ...cart.invoiceDiscount, source: 'manual', reason: null, approval: cart.invoiceApproval }
       : null,
   };
 }
@@ -640,7 +652,9 @@ export function lineNeed(
 }
 
 export function invoiceNeed(cart: Cart, priced: PricedInvoice, rules: ApprovalRules): ApprovalNeed | null {
-  if (!cart.invoiceDiscount || cart.invoiceApproval || rules.overLimitAllowed) return null;
+  // The customer group's percent is the owner's, not the cashier's: it never asks for a code
+  if (!cart.invoiceDiscount || cart.invoiceGroup || cart.invoiceApproval || rules.overLimitAllowed)
+    return null;
   // The discount applies to the goods only: a service's fee is not part of what it is a share of
   const base = priced.lines.reduce(
     (sum, l, i) => (cart.lines[i]?.isService ? sum : sum + l.grossMinor - l.lineDiscountMinor),

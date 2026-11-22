@@ -8,8 +8,8 @@ import {
 import { validateDocumentPayload, type SalePayload } from '@serva/core/contracts/documents';
 import { stripBidiControls } from '@serva/core/text';
 import { memoryLocal } from '../../offline/local';
-import { ids, PINS, posSets, PRODUCTS, staffServer } from '../../test/pos';
-import { openShift, renderPos, scan } from '../../test/renderPos';
+import { ids, posSets, PRODUCTS, staffServer } from '../../test/pos';
+import { openShift, renderPos, scan, signInIfAsked } from '../../test/renderPos';
 import { feeLine, countChoices, planFor } from './instalments';
 import type { Cart } from '../sale/cart';
 import { instalmentRows, rowLabel } from '../print/instalmentLines';
@@ -114,9 +114,7 @@ async function toPay(
     return staff(url, init);
   }) as unknown as typeof fetch;
   const pos = renderPos({ local, sets: withSettings as typeof sets, fetch: server });
-  const list = await screen.findByRole('list', { name: 'الموظفون' });
-  await pos.user.click(within(list).getByRole('button', { name: /سامر/ }));
-  await pos.user.keyboard(PINS[ids.samer]!);
+  await signInIfAsked(pos.user);
   if (!keep) await screen.findByRole('list', { name: 'الأصناف' });
   // After a reload the cart (and its customer) come back from the device, so nothing is scanned again
   if (!keep) await scan(pos.user, PRODUCTS.oil.barcode!.code);

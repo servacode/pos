@@ -31,6 +31,9 @@ const SERIAL_FLAG_TEXT: Record<string, string> = {
   serial_sold_twice: 'رقم تسلسلي مباع من قبل',
   serial_other_product: 'رقم تسلسلي لصنف آخر',
   serial_missing: 'بيعة بلا رقم تسلسلي',
+  // the till's own discounts the server could not confirm (round A5)
+  group_discount_mismatch: 'خصم مجموعة لا يطابق مجموعة الزبون',
+  coupon_invalid: 'كود خصم غير صالح وقت البيع',
 };
 
 /** What the till's receipt component reads, from what the server kept of this sale. */

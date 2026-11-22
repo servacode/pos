@@ -592,4 +592,23 @@ describe('a pharmacy sale carries its batch and prescription', () => {
     const badDate = { ...base, lines: [{ ...base.lines[0]!, batchNo: 'B', batchExpiry: 'soon' }] };
     expect(salePayloadSchema.safeParse(badDate).success).toBe(false);
   });
+
+  it('takes the group behind an invoice discount, optional and only a uuid (older tills never send it)', () => {
+    const base = validSale();
+    const discount = {
+      type: 'percent' as const,
+      bp: 500,
+      source: 'promotion' as const,
+      reason: 'خصم المجموعة',
+      approval: null,
+    };
+    const group = '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a09';
+    expect(salePayloadSchema.safeParse({ ...base, invoiceDiscount: discount }).success).toBe(true);
+    const named = salePayloadSchema.safeParse({ ...base, invoiceDiscount: { ...discount, groupId: group } });
+    expect(named.success).toBe(true);
+    expect(named.data?.invoiceDiscount?.groupId).toBe(group);
+    expect(
+      salePayloadSchema.safeParse({ ...base, invoiceDiscount: { ...discount, groupId: 'vip' } }).success,
+    ).toBe(false);
+  });
 });

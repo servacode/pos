@@ -343,6 +343,16 @@ const PULL_SETS: Record<string, PullSet> = {
       lng: customers.lng,
       // What a trade promotion targets («عروض التجار»); additive
       kind: customers.kind,
+      // «مجموعات الزبائن»: the group and its percent, for the till's invoice discount offline; null for none or an archived group. Additive, older tills ignore them (changing a group touches its customers: services/customer-groups.ts)
+      groupId: sql<
+        string | null
+      >`(select g.id from customer_groups g where g.tenant_id = customers.tenant_id and g.id = customers.group_id and g.archived_at is null)`,
+      groupName: sql<
+        string | null
+      >`(select g.name from customer_groups g where g.tenant_id = customers.tenant_id and g.id = customers.group_id and g.archived_at is null)`,
+      groupDiscountBps: sql<
+        number | null
+      >`(select g.discount_bps from customer_groups g where g.tenant_id = customers.tenant_id and g.id = customers.group_id and g.archived_at is null)`,
       archived: archivedFlag(customers.archivedAt),
       version: customers.version,
     },
@@ -396,7 +406,11 @@ const PULL_SETS: Record<string, PullSet> = {
       customerKinds: promotions.customerKinds,
       priceTiers: promotions.priceTiers,
       repOnly: promotions.repOnly,
-      // A coupon's offer is not for every sale: it reaches the till on the order that carries its code
+      // The code of a live coupon offer (null for an archived one), so the cashier can type it at the till offline; the offer itself stays out of the running ones below. Additive, older tills ignore it
+      couponCode: sql<
+        string | null
+      >`(case when ${promotions.archivedAt} is null then ${promotions.couponCode} end)`,
+      // A coupon's offer is not for every sale: it reaches the till on the order that carries its code, or the code typed at the till
       archived: sql<boolean>`(${promotions.archivedAt} is not null or ${promotions.couponCode} is not null)`,
       version: promotions.version,
     },

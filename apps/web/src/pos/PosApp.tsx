@@ -166,7 +166,9 @@ export function PosSession({ services, persisted }: { services: PosServices; per
             }
             mainClassName="grid place-items-center p-6 lg:px-14 lg:py-8"
           >
-            {catalog ? (
+            {/* Not before the kept session is looked at: a code typed while a reload signs the cashier back in would
+                land in the sale (a pay screen reopened, its keys and Enter taken as an amount and «أتمّ الدفع») */}
+            {catalog && (restored || staff.length === 0) ? (
               <Suspense fallback={null}>
                 <div className="flex w-full flex-col items-center">
                   {lockNote ? (

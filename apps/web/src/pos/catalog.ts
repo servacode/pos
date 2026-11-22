@@ -110,6 +110,8 @@ export interface Catalog {
   customers: CustomerRow[];
   /** Promotions not stopped; which run now is decided at each sale (promotionActive) */
   promotions: PromotionRow[];
+  /** The offers a code opens (round A5): the cashier types the code at the till; never among the running promotions */
+  coupons: PromotionRow[];
   /** Exchange vouchers, as last pulled (pay/vouchers.ts adds this till's own) */
   vouchers: VoucherRow[];
   /** Online shop orders the store accepted, waiting to be sold here (26 › حياة الطلب) */
@@ -312,6 +314,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       .filter((c) => !c.archived)
       .sort((a, b) => a.name.localeCompare(b.name, 'ar')),
     promotions: (sets.promotions ?? []).filter((p) => !p.archived),
+    coupons: (sets.promotions ?? []).filter((p) => Boolean(p.couponCode)),
     vouchers: sets.vouchers ?? [],
     onlineOrders: (sets.online_orders ?? [])
       .filter((o) => o.status === 'accepted')

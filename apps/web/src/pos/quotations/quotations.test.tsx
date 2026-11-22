@@ -4,8 +4,8 @@ import type { SalePayload } from '@serva/core/contracts/documents';
 import type { Quotation } from '@serva/core/contracts/quotations';
 import { stripBidiControls } from '@serva/core/text';
 import { memoryLocal } from '../../offline/local';
-import { ids, PINS, PRODUCTS, staffServer } from '../../test/pos';
-import { openShift, renderPos, scan } from '../../test/renderPos';
+import { PRODUCTS, staffServer } from '../../test/pos';
+import { openShift, renderPos, scan, signInIfAsked } from '../../test/renderPos';
 import { quotationInputOf } from './api';
 import { quotationCart } from './quotationCart';
 
@@ -27,9 +27,7 @@ type Pos = ReturnType<typeof renderPos>;
 const plain = (el: Element) => stripBidiControls(el.textContent ?? '');
 
 async function signIn(user: Pos['user']) {
-  const list = await screen.findByRole('list', { name: 'الموظفون' });
-  await user.click(within(list).getByRole('button', { name: /سامر/ }));
-  await user.keyboard(PINS[ids.samer]!);
+  await signInIfAsked(user);
   await screen.findByRole('list', { name: 'الأصناف' });
 }
 

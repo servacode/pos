@@ -71,6 +71,8 @@ async function save(
         .insert(customerGroups)
         .values({ tenantId: auth.tenantId, id: groupId, name: input.name, discountBps: input.discountBps });
     }
+    // The tills carry each customer's group and its percent (sync-pull › customers): a change here touches them, so they are pulled again
+    if (id) await tx.execute(sql`update customers set updated_at = now() where group_id = ${id}::uuid`);
     await audit(
       tx,
       {
