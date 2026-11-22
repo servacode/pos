@@ -1,0 +1,260 @@
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { stripBidiControls } from '@serva/core/text';
+import { ZReport } from './ZReport';
+import { shiftActivity, type OpenShift } from './shift';
+
+const SHIFT_ID = 'sh-1';
+const doc = (type: string, payload: Record<string, unknown>, seq: number) =>
+  ({ seq, type, doc: { type, payload } }) as never;
+
+const shift: OpenShift = {
+  key: 'k',
+  id: SHIFT_ID,
+  number: 'SFT-001-001-0000001',
+  openedBy: 'u1',
+  openedByName: 'نور',
+  openedAt: Date.UTC(2026, 10, 14, 6, 0),
+  mode: 'per_cashier',
+  opening: [],
+};
+
+function renderZ(entries: never[], showDifference = false) {
+  const activity = shiftActivity(SHIFT_ID, entries);
+  render(
+    <ZReport
+      shift={shift}
+      closedAt={Date.UTC(2026, 10, 14, 15, 0)}
+      closedByName="نور"
+      activity={activity}
+      cash={[]}
+      baseCurrency="SYP"
+      storeName="بوتيك"
+      showDifference={showDifference}
+    />,
+  );
+  return stripBidiControls(screen.getByLabelText('تقرير إغلاق الوردية').textContent ?? '');
+}
+
+describe('the Z report (the till’s closing slip)', () => {
+  it('puts a refund voucher on its own line and never as a negative voucher row', () => {
+    const text = renderZ([
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 169_840_00, discountMinor: 0 },
+          payments: [{ method: 'voucher', currency: 'SYP', amountMinor: 100_00 }],
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'voucher', currency: 'SYP', amountMinor: 1_173_00 }] },
+        2,
+      ),
+    ]);
+    expect(text).toContain('قسائم مرتجع صادرة');
+    // The vouchers used stay a plain positive row; nothing is netted into a minus
+    expect(text).not.toMatch(/قسيمة[^ق]*[−-]\s?1,173/);
+  });
+
+  it('says gross before returns and net after, and the dollar row says what was given back in lira', () => {
+    const text = renderZ([
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 1_200_00, discountMinor: 0 },
+          payments: [{ method: 'cash', currency: 'USD', amountMinor: 2_000 }],
+          change: { currency: 'SYP', amountMinor: 800_00 },
+        },
+        1,
+      ),
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 600_00 }] },
+        2,
+      ),
+    ]);
+    expect(text).toContain('إجمالي المبيعات قبل المرتجعات');
+    expect(text).toContain('صافي المبيعات بعد المرتجعات');
+    expect(text).toMatch(/20\.00\s?\$ مستلمة − باقي 800 ل\.س/);
+  });
+
+  it('takes the returned goods off the sales, not only the pounds paid back (a refund part in dollars)', () => {
+    // The trial: 833 sold, goods worth 243 returned and paid 150 ل.س + 0.76 $ (91.20): net is 590, never 683
+    const text = renderZ([
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 83_300, discountMinor: 0 },
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 83_300 }],
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 24_300 },
+          refunds: [
+            {
+              method: 'cash',
+              currency: 'SYP',
+              amountMinor: 24_120,
+              roundingMinor: -180,
+              foreign: [{ currency: 'USD', amountMinor: 76, baseAmountMinor: 9_120 }],
+            },
+          ],
+        },
+        2,
+      ),
+    ]);
+    expect(text).toMatch(/صافي المبيعات بعد المرتجعات\s*590/);
+    expect(text).not.toMatch(/صافي المبيعات بعد المرتجعات\s*683/);
+  });
+
+  it('names a deposit on its own line, apart from gift vouchers', () => {
+    const text = renderZ([
+      doc('deposit', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 50_000_00 }, 1),
+    ]);
+    expect(text).toContain('عربون');
+    expect(text).toContain('عربون نقداً');
+    expect(text).not.toContain('قسائم الهدية المباعة');
+  });
+
+  it('lists the cash that came into the drawer outside a sale instead of «لا حركات»', () => {
+    expect(renderZ([])).toContain('لا حركات');
+  });
+
+  it('shows customers’ cash payments and vouchers sold for cash among the drawer movements', () => {
+    const text = renderZ([
+      doc('receipt', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 110_000_00 }, 1),
+      doc('gift_voucher', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 50_000_00 }, 2),
+    ]);
+    expect(text).not.toContain('لا حركات');
+    expect(text).toContain('دفعات زبائن نقداً');
+    expect(text).toContain('قسائم بيعت نقداً');
+  });
+});
+
+describe('cash rounding on the Z (round 19)', () => {
+  it('says what rounding took off the shift’s invoices, with its fraction', () => {
+    const sale = (roundingMinor: number, seq: number) =>
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 726_350, discountMinor: 0 },
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 726_000 }],
+          change: null,
+          cashRounding: { currency: 'SYP', roundingMinor },
+        },
+        seq,
+      );
+    const text = renderZ([sale(-350, 1)]);
+    expect(text).toContain('تقريب النقد');
+    expect(text).toContain('−3.5');
+  });
+
+  it('says a deposit taken and a deposit used on two rows, and the rounding of sales and refunds together', () => {
+    const text = renderZ([
+      doc('deposit', { shiftId: SHIFT_ID, currency: 'SYP', amountMinor: 300_00, method: 'cash' }, 1),
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 71_250, discountMinor: 0 },
+          payments: [
+            { method: 'voucher', currency: 'SYP', amountMinor: 300_00, reference: 'DEP-001-001-0000001' },
+            { method: 'cash', currency: 'SYP', amountMinor: 41_000 },
+          ],
+          cashRounding: { currency: 'SYP', roundingMinor: -250 },
+          change: null,
+        },
+        2,
+      ),
+      doc(
+        'return',
+        {
+          shiftId: SHIFT_ID,
+          refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 71_000, roundingMinor: -250 }],
+        },
+        3,
+      ),
+    ]);
+    expect(text).toContain('عربون مقبوض');
+    expect(text).toContain('عربون مستعمل');
+    // The sale lost 2.50 to the step, the refund gained 2.50: together nothing is left, so no row
+    expect(text).not.toContain('تقريب النقد');
+  });
+
+  it('adds the rounding of a cash refund to the sales’ rounding in one clear row', () => {
+    const text = renderZ([
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 71_250, discountMinor: 0 },
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 71_000 }],
+          cashRounding: { currency: 'SYP', roundingMinor: -250 },
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        {
+          shiftId: SHIFT_ID,
+          refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 71_500, roundingMinor: 250 }],
+        },
+        2,
+      ),
+    ]);
+    expect(text).toContain('منها تقريب النقد (بيع ومرتجع)');
+    expect(text).toContain('5');
+  });
+
+  it('shows sales on instalments and instalments collected as their own lines', () => {
+    const text = renderZ([
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 260_000_00, discountMinor: 0 },
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 50_000_00 }],
+          change: null,
+          installmentPlan: { downPaymentMinor: 50_000_00, financedMinor: 210_000_00 },
+        },
+        1,
+      ),
+      doc(
+        'receipt',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          method: 'cash',
+          amountMinor: 35_000_00,
+          allocations: [{ planId: 'p', no: 1, amountMinor: 35_000_00 }],
+        },
+        2,
+      ),
+    ]);
+    expect(text).toContain('مبيعات بالتقسيط');
+    expect(text).toContain('دفعات أولى');
+    expect(text).toContain('أقساط مقبوضة');
+    expect(text).toContain('35,000');
+  });
+});

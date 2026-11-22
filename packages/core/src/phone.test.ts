@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizePhone } from './phone';
+import { normalizeContactPhone, normalizePhone } from './phone';
 
 describe('normalizePhone', () => {
   it('accepts every common form of a Syrian mobile', () => {
@@ -47,6 +47,35 @@ describe('normalizePhone', () => {
       '96391234567',
     ]) {
       expect(normalizePhone(input), input).toBeNull();
+    }
+  });
+});
+
+describe('normalizeContactPhone', () => {
+  it('accepts mobiles exactly as normalizePhone does', () => {
+    expect(normalizeContactPhone('0912345678')).toBe('+963912345678');
+    expect(normalizeContactPhone('+44 20 7946 0958')).toBe('+442079460958');
+  });
+
+  it('accepts Syrian landlines in every common form, with Arabic digits and separators', () => {
+    for (const input of [
+      '0112345678',
+      '011 234 5678',
+      '011-2345678',
+      '+963 11 234 5678',
+      '00963112345678',
+      '963112345678',
+      '٠١١ ٢٣٤ ٥٦٧٨',
+      '(011) 234-5678',
+    ]) {
+      expect(normalizeContactPhone(input), input).toBe('+96311 2345678'.replace(' ', ''));
+    }
+    expect(normalizeContactPhone('021 234 567')).toBe('+96321234567');
+  });
+
+  it('rejects numbers that are neither', () => {
+    for (const input of ['', 'abc', '011234', '0912', '09112345678901', '012345', '+96311123']) {
+      expect(normalizeContactPhone(input), input).toBeNull();
     }
   });
 });

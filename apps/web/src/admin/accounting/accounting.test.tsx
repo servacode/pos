@@ -53,28 +53,51 @@ describe('accounting: who sees it', () => {
     signIn('/accounting', { 'GET /v1/accounts': { status: 200, body: { items: ACCOUNTS } } });
 
     expect(await screen.findByRole('heading', { name: 'دليل الحسابات', level: 1 })).toBeInTheDocument();
-    expect(await menuLinks()).toContain('المحاسبة');
+    expect(await menuLinks()).toContain('التقارير');
+    const pages = screen.getByRole('navigation', { name: 'صفحات التقارير' });
+    expect(within(pages).getByRole('link', { name: 'المحاسبة' })).toHaveAttribute('aria-current', 'page');
     const tabs = screen.getByRole('navigation', { name: 'أقسام المحاسبة' });
     expect(within(tabs).getByRole('link', { name: 'دليل الحسابات' })).toHaveAttribute('aria-current', 'page');
     expect(
       within(tabs)
         .getAllByRole('link')
         .map((l) => l.textContent),
-    ).toEqual(['دليل الحسابات', 'القيود', 'ميزان المراجعة']);
+    ).toEqual([
+      'دليل الحسابات',
+      'القيود',
+      'ميزان المراجعة',
+      'قائمة الدخل',
+      'الميزانية',
+      'التدفق النقدي',
+      'دفتر الأستاذ',
+      'الضريبة',
+      'ذمم الموردين',
+      'إقفال الفترة',
+    ]);
   });
 
   it('is hidden from a manager without accounting.view, and closed if opened by address', async () => {
     signIn('/accounting/journal', {}, MANAGER_KEYS);
 
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
-    expect(await menuLinks()).not.toContain('المحاسبة');
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
+    await menuLinks();
+    expect(screen.queryByRole('link', { name: 'المحاسبة' })).not.toBeInTheDocument();
   });
 
   it('is hidden when the store turned accounting mode off', async () => {
     signIn('/accounting/trial-balance', {}, OWNER_KEYS, false);
 
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
-    expect(await menuLinks()).not.toContain('المحاسبة');
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
+    await menuLinks();
+    expect(screen.queryByRole('link', { name: 'المحاسبة' })).not.toBeInTheDocument();
   });
 });
 
@@ -175,23 +198,35 @@ describe('«القيود»', () => {
     });
 
     const table = await screen.findByRole('table', {
-      name: 'القيود من 1 تشرين الأول 2026 إلى 31 تشرين الأول 2026',
+      name: 'القيود من 01/10/2026 إلى 31/10/2026',
     });
     await within(table).findByText('JRN-2026-0000001');
+    // The general journal: each entry heads its own group of rows (number, day, document, memo),
+    // its lines under it with the debit and the credit in their own columns.
     expect(within(table).getAllByRole('row').map(text)).toEqual([
-      'رقم القيدالتاريخالمستندالبيانالمبلغ',
-      'JRN-2026-000000131 تشرين الأول 2026فاتورة بيع INV-001-002-0000001فاتورة بيع1,200 ل.س',
+      'الحسابمديندائن',
+      'JRN-2026-000000131/10/2026فاتورة بيع INV-001-002-0000001فاتورة بيع',
+      '1110 الصندوق (أدراج الكاشير)30 ل.س',
+      '1111 الصندوق بالدولار9.00 $ بسعر 1301,170 ل.س',
+      '4100 المبيعات1,200 ل.س',
     ]);
+    expect(within(table).getByRole('rowheader', { name: /JRN-2026-0000001/ })).toHaveAttribute(
+      'scope',
+      'rowgroup',
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: 'اعرض المزيد' }));
+    fireEvent.click(screen.getByRole('button', { name: 'الصفحة التالية' }));
     expect(await within(table).findByText('JRN-2026-0000002')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'اعرض المزيد' })).not.toBeInTheDocument();
+    // One page at a time: the first page's entry is gone, and there is no page after this one
+    expect(within(table).queryByText('JRN-2026-0000001')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'الصفحة التالية' })).toBeDisabled();
     expect(within(table).getByRole('link', { name: 'إغلاق وردية SFT-001-002-0000231' })).toHaveAttribute(
       'href',
       '/shifts/shift-1',
     );
 
-    fireEvent.click(within(table).getByRole('button', { name: 'JRN-2026-0000001' }));
+    fireEvent.click(screen.getByRole('button', { name: 'الصفحة السابقة' }));
+    fireEvent.click(await within(table).findByRole('button', { name: 'JRN-2026-0000001' }));
     const drawer = await screen.findByRole('dialog', { name: 'القيد JRN-2026-0000001' });
     const lines = within(drawer).getAllByRole('row').map(text);
     expect(lines).toEqual([
@@ -250,10 +285,13 @@ describe('«القيود»', () => {
       ),
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'اعرض المزيد' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'الصفحة التالية' }));
     expect(await screen.findByText('الخادم مشغول حالياً. حاول بعد قليل.')).toBeInTheDocument();
+    // Still on page 1, with its entry, and the next page can be tried again
     expect(screen.getByText('JRN-2026-0000001')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'اعرض المزيد' })).toBeInTheDocument();
+    expect(screen.getByText(/صفحة/)).toHaveTextContent('صفحة 1');
+    expect(screen.getByRole('button', { name: 'أعد المحاولة' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'الصفحة التالية' })).toBeEnabled();
   });
 });
 
@@ -306,7 +344,7 @@ describe('«ميزان المراجعة»', () => {
     });
 
     await screen.findByText('متوازن');
-    fireEvent.click(screen.getByRole('button', { name: 'صدّر CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'صدّر إلى إكسل' }));
 
     expect(click).toHaveBeenCalledTimes(1);
     const link = click.mock.contexts[0] as HTMLAnchorElement;
@@ -332,6 +370,6 @@ describe('«ميزان المراجعة»', () => {
     });
 
     expect(await screen.findByText('لا حركة على الحسابات في هذه الفترة.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'صدّر CSV' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'صدّر إلى إكسل' })).toBeDisabled();
   });
 });

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, ne, sql } from 'drizzle-orm';
 import {
   MAX_IMAGE_BYTES,
   MAX_PRODUCT_IMAGES,
@@ -44,6 +44,10 @@ export function sniffImage(bytes: Uint8Array): ImageType | null {
 
 export const imageUrl = (tenantId: string, uploadId: string, thumb = false) =>
   `/v1/images/${tenantId}/${uploadId}${thumb ? '?size=thumb' : ''}`;
+
+/** Private: a supplier's invoice photo is served only to a signed-in user with the purchases permission */
+export const purchaseAttachmentUrl = (purchaseId: string, attachmentId: string, thumb = false) =>
+  `/v1/purchases/${purchaseId}/attachments/${attachmentId}${thumb ? '?size=thumb' : ''}`;
 
 async function requireProduct(tx: Transaction, tenantId: string, productId: string) {
   const [row] = await tx
@@ -123,7 +127,9 @@ export function addProductImage(
     const [same] = await tx
       .select({ id: uploads.id })
       .from(uploads)
-      .where(and(eq(uploads.tenantId, tenantId), eq(uploads.sha256, sha256)))
+      .where(
+        and(eq(uploads.tenantId, tenantId), eq(uploads.sha256, sha256), eq(uploads.kind, 'product_image')),
+      )
       .limit(1);
     let uploadId = same?.id;
     if (!uploadId) {
@@ -221,8 +227,21 @@ export function deleteProductImage(
           eq(productImages.id, imageId),
         ),
       )
-      .returning({ id: productImages.id });
+      .returning({ id: productImages.id, uploadId: productImages.uploadId });
     if (gone.length === 0) throw notFound(IMAGE);
+    // The bytes go with the last picture that used them (the same file sent twice is one upload, and
+    // the shop's logo or cover may share it): a deleted picture no longer fills the database
+    // (needs the DELETE grant of migration 0099; until it is applied the bytes stay, as before)
+    const [may] = await tx.execute<{ ok: boolean }>(
+      sql`select has_table_privilege(current_user, 'uploads', 'DELETE') as ok`,
+    );
+    if (may?.ok)
+      await tx.execute(sql`
+      delete from uploads u
+      where u.tenant_id = ${tenantId} and u.id = ${gone[0]!.uploadId}
+        and not exists (select 1 from product_images i where i.tenant_id = u.tenant_id and i.upload_id = u.id)
+        and not exists (select 1 from online_stores o
+                        where o.tenant_id = u.tenant_id and (o.logo_upload_id = u.id or o.cover_upload_id = u.id))`);
     await touchPieces(tx, tenantId, productId);
     await audit(
       tx,
@@ -270,7 +289,7 @@ export function orderProductImages(
   });
 }
 
-/** A picture's bytes, by the store's id and its own; null when there is none. */
+/** A picture's bytes, by the store's id and its own; null when there is none (a purchase photo is never public). */
 export function readImage(
   db: Database,
   tenantId: string,
@@ -281,7 +300,13 @@ export function readImage(
     const [row] = await tx
       .select({ contentType: uploads.contentType, data: thumb ? uploads.thumb : uploads.data })
       .from(uploads)
-      .where(and(eq(uploads.tenantId, tenantId), eq(uploads.id, uploadId)));
+      .where(
+        and(
+          eq(uploads.tenantId, tenantId),
+          eq(uploads.id, uploadId),
+          ne(uploads.kind, 'purchase_attachment'),
+        ),
+      );
     return row ? { contentType: row.contentType, body: row.data } : null;
   });
 }

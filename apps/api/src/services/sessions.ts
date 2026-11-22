@@ -99,7 +99,7 @@ export type RotateResult =
 
 /**
  * Exchanges a refresh token for a new one in the same family. A token reused after the grace
- * window means it was stolen, so every session of that user is ended. Expired families,
+ * window means it may be stolen, so that session family is ended (the user's other devices stay). Expired families,
  * disabled users and suspended stores get nothing.
  */
 export async function rotateSession(
@@ -114,8 +114,13 @@ export async function rotateSession(
 
   if (current.revoked_at) {
     if (!current.replaced_by) return { status: 'invalid' }; // signed out or revoked
-    if (now.getTime() - time(current.revoked_at) <= REUSE_GRACE_MS) return { status: 'race' };
-    await revokeAllForUser(db, current.tenant_id, current.user_id, now);
+    if (now.getTime() - time(current.revoked_at) <= REUSE_GRACE_MS) {
+      // Owner-approved (2026-11-17): shortly after a rotation the browser most likely never got
+      // the answer (a page change or a dropped connection mid-refresh) and still holds this
+      // token. Rotate the family's live token again instead of signing the owner out.
+      return rotateLiveHead(db, current, policy, now, meta);
+    }
+    await revokeFamily(db, current.tenant_id, current.family_id, now);
     return { status: 'invalid' };
   }
   if (time(current.expires_at) <= now.getTime() || time(current.absolute_expires_at) <= now.getTime()) {
@@ -158,6 +163,57 @@ export async function rotateSession(
   });
 }
 
+/**
+ * Recovers a refresh whose answer was lost: the family's one live token is replaced by a new one
+ * and points to it, so a request still carrying it inside the grace window recovers the same way.
+ * A family with no live token (signed out, or ended as stolen) gets nothing.
+ */
+async function rotateLiveHead(
+  db: Database,
+  current: StoredSession,
+  policy: SessionPolicy,
+  now: Date,
+  meta: RequestMeta,
+): Promise<RotateResult> {
+  if (time(current.absolute_expires_at) <= now.getTime()) return { status: 'invalid' };
+  return withTenant(db, current.tenant_id, async (tx): Promise<RotateResult> => {
+    const [head] = await tx
+      .select({ id: sessions.id, expiresAt: sessions.expiresAt })
+      .from(sessions)
+      .where(and(eq(sessions.familyId, current.family_id), isNull(sessions.revokedAt)))
+      .limit(1);
+    if (!head || new Date(head.expiresAt).getTime() <= now.getTime()) return { status: 'invalid' };
+    const [owner] = await tx
+      .select({ userStatus: users.status, tenantStatus: tenants.status })
+      .from(users)
+      .innerJoin(tenants, eq(tenants.id, users.tenantId))
+      .where(eq(users.id, current.user_id))
+      .limit(1);
+    if (owner?.userStatus !== 'active' || owner.tenantStatus !== 'active') return { status: 'invalid' };
+    const next = await createSession(
+      tx,
+      {
+        tenantId: current.tenant_id,
+        userId: current.user_id,
+        now,
+        policy,
+        family: { id: current.family_id, absoluteExpiresAt: new Date(current.absolute_expires_at) },
+      },
+      meta,
+    );
+    const replaced = await tx
+      .update(sessions)
+      .set({ revokedAt: now, replacedBy: next.rowId })
+      .where(and(eq(sessions.id, head.id), isNull(sessions.revokedAt)))
+      .returning({ id: sessions.id });
+    if (replaced.length === 0) {
+      await tx.update(sessions).set({ revokedAt: now }).where(eq(sessions.id, next.rowId));
+      return { status: 'race' };
+    }
+    return { status: 'rotated', session: next };
+  });
+}
+
 /** Ends the session of this refresh token. Returns its family id, or null when unknown. */
 export async function revokeSession(db: Database, refreshToken: string, now: Date): Promise<string | null> {
   const current = await findByToken(db, refreshToken);
@@ -171,12 +227,13 @@ export async function revokeSession(db: Database, refreshToken: string, now: Dat
   return current.family_id;
 }
 
-async function revokeAllForUser(db: Database, tenantId: string, userId: string, now: Date): Promise<void> {
+/** Ends one session family only: the user's other devices stay signed in. */
+async function revokeFamily(db: Database, tenantId: string, familyId: string, now: Date): Promise<void> {
   await withTenant(db, tenantId, (tx) =>
     tx
       .update(sessions)
       .set({ revokedAt: now })
-      .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt))),
+      .where(and(eq(sessions.familyId, familyId), isNull(sessions.revokedAt))),
   );
 }
 

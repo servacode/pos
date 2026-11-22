@@ -1,9 +1,11 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
+  catalogOptionsOf,
   ALL_PERMISSIONS,
   type CurrencyCode,
   type MeResponse,
   type Permission,
+  lifecycleOf,
   type SectorKey,
 } from '@serva/core';
 import {
@@ -27,7 +29,12 @@ export function daysLeft(end: Date | null, now: Date): number | null {
   return Math.max(0, Math.ceil((end.getTime() - now.getTime()) / DAY_MS));
 }
 
-export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promise<MeResponse> {
+export async function loadMe(
+  db: Database,
+  auth: AccessClaims,
+  now: Date,
+  enforceSubscription = true,
+): Promise<MeResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const [user] = await tx.select().from(users).where(eq(users.id, auth.userId)).limit(1);
     if (!user || user.status !== 'active') throw unauthorized();
@@ -35,7 +42,12 @@ export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promi
     const [tenant] = await tx.select().from(tenants).where(eq(tenants.id, auth.tenantId)).limit(1);
     const [settings] = await tx.select().from(tenantSettings).limit(1);
     const [sub] = await tx
-      .select({ subscription: subscriptions, planName: plans.name })
+      .select({
+        subscription: subscriptions,
+        planName: plans.name,
+        graceDays: plans.graceDays,
+        limits: plans.limits,
+      })
       .from(subscriptions)
       .innerJoin(plans, eq(plans.id, subscriptions.planId))
       .limit(1);
@@ -54,14 +66,31 @@ export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promi
     const granted = new Set(roleRows.flatMap((r) => r.permissions));
     const permissions = ALL_PERMISSIONS.filter((p): p is Permission => granted.has(p));
 
-    const branchRows = await tx
+    const allBranchRows = await tx
       .select({ id: branches.id, code: branches.code, name: branches.name })
       .from(branches)
-      .where(eq(branches.isActive, true))
+      .where(and(eq(branches.isActive, true), eq(branches.kind, 'store')))
       .orderBy(branches.code);
+    // A user whose every role is given for one branch only sees those branches, not the whole chain
+    const limitedTo =
+      roleRows.length > 0 && roleRows.every((r) => r.branchId !== null)
+        ? new Set(roleRows.map((r) => r.branchId))
+        : null;
+    const branchRows = limitedTo ? allBranchRows.filter((b) => limitedTo.has(b.id)) : allBranchRows;
 
     const s = sub.subscription;
     const periodEnd = s.status === 'trialing' ? s.trialEndsAt : s.currentPeriodEnd;
+    const life = lifecycleOf(
+      {
+        status: s.status,
+        trialEndsAt: s.trialEndsAt,
+        currentPeriodEnd: s.currentPeriodEnd,
+        graceEndsAt: s.graceEndsAt,
+        updatedAt: s.updatedAt,
+        graceDays: sub.graceDays,
+      },
+      now,
+    );
     return {
       user: {
         id: user.id,
@@ -82,6 +111,9 @@ export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promi
         enabledCurrencies: settings.enabledCurrencies as CurrencyCode[],
         taxInclusive: settings.taxInclusive,
         numberFormat: settings.numberFormat === 'arab' ? 'arab' : 'latn',
+        catalogOptions: catalogOptionsOf(settings.catalogOptions),
+        warrantyTerms: settings.till?.warrantyTerms ?? null,
+        ...(settings.till?.serialsOnWaste === true ? { serialsOnWaste: true } : {}),
       },
       subscription: {
         status: s.status,
@@ -89,6 +121,13 @@ export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promi
         trialEndsAt: s.trialEndsAt?.toISOString() ?? null,
         currentPeriodEnd: s.currentPeriodEnd?.toISOString() ?? null,
         daysLeft: daysLeft(periodEnd, now),
+        lifecycle: life.state,
+        readOnly: enforceSubscription && life.readOnly,
+        writeUntil: life.writeUntil?.toISOString() ?? null,
+        graceDaysLeft: life.daysLeft,
+        repsEnabled:
+          (sub.limits as Record<string, number | null> | null)?.reps !== undefined &&
+          (sub.limits as Record<string, number | null>).reps !== 0,
       },
       branches: branchRows,
       onboarding: { step: settings.onboardingStep, done: settings.onboardedAt !== null },

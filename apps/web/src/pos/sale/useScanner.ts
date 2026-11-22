@@ -4,6 +4,8 @@ import { toLatinDigits } from '@serva/core/text';
 /** A scanner types a whole code within a few dozen milliseconds and ends it with Enter. */
 export const SCAN_GAP_MS = 60;
 export const SCAN_MIN_LENGTH = 3;
+/** A scan this many keys in is let to pause a little (up to four gaps) between two keys */
+export const SCAN_STALL_FROM = 6;
 
 function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -37,12 +39,19 @@ export function useScanner({
 }: ScannerOptions) {
   // `burst`: keys typed with no pause (a scan); `digits`: digits typed at any speed (for «3 ثم *»).
   const buffer = useRef({ burst: '', digits: '', last: 0 });
-  const latest = useRef({ onScan, onMultiplier, now, minLength });
-  latest.current = { onScan, onMultiplier, now, minLength };
+  // Read at the key, not when an effect runs: a listener added and removed by effects leaves gaps
+  // (after a panel closes, or a hold) in which the first key of the next scan has no listener.
+  const latest = useRef({ enabled, onScan, onMultiplier, now, minLength });
+  latest.current = { enabled, onScan, onMultiplier, now, minLength };
 
   useEffect(() => {
-    if (!enabled) return;
     function onKeyDown(event: KeyboardEvent) {
+      if (!latest.current.enabled) {
+        // A keypad is open and takes the keys: what was typed before it must not join a later scan.
+        buffer.current.burst = '';
+        buffer.current.digits = '';
+        return;
+      }
       if (event.ctrlKey || event.metaKey || event.altKey || isEditable(event.target)) return;
       const { onScan, onMultiplier, now, minLength } = latest.current;
       const b = buffer.current;
@@ -67,11 +76,15 @@ export function useScanner({
       }
       if (event.key.length !== 1) return;
       const ch = toLatinDigits(event.key);
-      b.burst = b.burst && t - b.last <= SCAN_GAP_MS ? b.burst + ch : ch;
+      // A busy page can stall one key of a scan past the gap (round 39): a code already this long and moving at a
+      // scanner's pace goes on, instead of starting over and losing the scan. Nobody types six keys that fast by hand.
+      const gap = t - b.last;
+      const goesOn = b.burst.length >= SCAN_STALL_FROM && gap <= SCAN_GAP_MS * 4;
+      b.burst = b.burst && (gap <= SCAN_GAP_MS || goesOn) ? b.burst + ch : ch;
       b.digits = /\d/.test(ch) ? b.digits + ch : '';
       b.last = t;
     }
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [enabled]);
+  }, []);
 }

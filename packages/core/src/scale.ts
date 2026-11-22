@@ -17,6 +17,25 @@ import { z } from 'zod';
 export const SCALE_VALUE_KINDS = ['weight', 'price'] as const;
 export type ScaleValueKind = (typeof SCALE_VALUE_KINDS)[number];
 
+type ScaleShape = {
+  itemDigits: number;
+  valueDigits?: number | undefined;
+  checkDigit?: boolean | undefined;
+};
+
+/** Whether the label ends with a check digit (the default) */
+export const scaleHasCheck = (c: Pick<ScaleShape, 'checkDigit'>): boolean => c.checkDigit !== false;
+
+/** Digits of the weight or price: as set, or what is left of a 13-digit label */
+export function scaleValueDigits(c: ScaleShape): number {
+  return c.valueDigits ?? 13 - 2 - c.itemDigits - (scaleHasCheck(c) ? 1 : 0);
+}
+
+/** The length of a whole label: prefix (2) + item + value + the check digit if any */
+export function scaleLabelLength(c: ScaleShape): number {
+  return 2 + c.itemDigits + scaleValueDigits(c) + (scaleHasCheck(c) ? 1 : 0);
+}
+
 export const scaleBarcodeSchema = z
   .object({
     /** Two-digit prefixes the scale prints, 20–28 */
@@ -32,10 +51,25 @@ export const scaleBarcodeSchema = z
      * price of 0 decimals is in whole pounds (12500 = 12,500 SYP).
      */
     valueDecimals: z.int().min(0).max(3),
+    /**
+     * Digits of the weight or the price. Left out: whatever is left of a 13-digit label after the prefix,
+     * the item and the check digit (5 for the default 5-digit item with a check digit).
+     */
+    valueDigits: z.int().min(2, 'قيمة الوزن أو السعر خانتان على الأقل').max(8).optional(),
+    /** Whether the last digit is the EAN check digit; left out: yes */
+    checkDigit: z.boolean().optional(),
   })
   .refine((v) => v.valueKind === 'weight' || v.valueDecimals <= 2, {
     path: ['valueDecimals'],
     message: 'السعر خانتان عشريتان على الأكثر',
+  })
+  .refine((v) => v.valueDecimals <= scaleValueDigits(v), {
+    path: ['valueDecimals'],
+    message: 'الكسور أكثر من خانات القيمة',
+  })
+  .refine((v) => scaleLabelLength(v) >= 8 && scaleLabelLength(v) <= 18, {
+    path: ['valueDigits'],
+    message: 'طول الملصق من 8 إلى 18 خانة',
   });
 export type ScaleBarcodeConfig = z.output<typeof scaleBarcodeSchema>;
 
@@ -47,7 +81,6 @@ export const DEFAULT_SCALE_BARCODE: ScaleBarcodeConfig = {
   valueDecimals: 3,
 };
 
-/** The EAN-13 check digit of the first twelve digits. */
 /** Exactly `length` ASCII digits, checked character by character. */
 function digitsOf(text: string, length: number): boolean {
   if (text.length !== length) return false;
@@ -55,11 +88,21 @@ function digitsOf(text: string, length: number): boolean {
   return true;
 }
 
+/**
+ * The EAN check digit of the digits before it: from the right, weights 3, 1, 3, 1… (twelve digits give
+ * the EAN-13 check digit; a shorter or longer label uses the same rule).
+ */
+export function eanCheckDigit(data: string): number {
+  if (data.length < 4 || !digitsOf(data, data.length)) throw new RangeError('digits expected');
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) sum += Number(data[i]) * ((data.length - 1 - i) % 2 === 0 ? 3 : 1);
+  return (10 - (sum % 10)) % 10;
+}
+
+/** The EAN-13 check digit of the first twelve digits. */
 export function ean13CheckDigit(first12: string): number {
   if (!digitsOf(first12, 12)) throw new RangeError('twelve digits expected');
-  let sum = 0;
-  for (let i = 0; i < 12; i++) sum += Number(first12[i]) * (i % 2 === 0 ? 1 : 3);
-  return (10 - (sum % 10)) % 10;
+  return eanCheckDigit(first12);
 }
 
 export type ScaleReading =
@@ -68,21 +111,51 @@ export type ScaleReading =
   /** the label's price in minor units of the store's base currency */
   | { itemCode: string; kind: 'price'; priceMinor: number };
 
+/** Why a code is not a scale label of the store's format, in words for the live test box */
+export type ScaleMiss = 'length' | 'letters' | 'prefix' | 'check' | 'zero';
+
+/** A code's parts as the format cuts them, with what it reads, or why it is not a label */
+export type ScaleDiagnosis =
+  | {
+      ok: true;
+      prefix: string;
+      itemCode: string;
+      valueText: string;
+      check: string | null;
+      reading: ScaleReading;
+    }
+  | { ok: false; miss: ScaleMiss; expectedLength: number };
+
+export function diagnoseScaleBarcode(code: string, config: ScaleBarcodeConfig): ScaleDiagnosis {
+  const expectedLength = scaleLabelLength(config);
+  if (code.length !== expectedLength) return { ok: false, miss: 'length', expectedLength };
+  if (!digitsOf(code, expectedLength)) return { ok: false, miss: 'letters', expectedLength };
+  const prefix = code.slice(0, 2);
+  if (!config.prefixes.includes(prefix)) return { ok: false, miss: 'prefix', expectedLength };
+  const hasCheck = scaleHasCheck(config);
+  const dataEnd = hasCheck ? expectedLength - 1 : expectedLength;
+  if (hasCheck && eanCheckDigit(code.slice(0, dataEnd)) !== Number(code[dataEnd])) {
+    return { ok: false, miss: 'check', expectedLength };
+  }
+  const itemEnd = 2 + config.itemDigits;
+  const itemCode = code.slice(2, itemEnd);
+  const valueText = code.slice(itemEnd, dataEnd);
+  const value = Number(valueText);
+  if (value <= 0) return { ok: false, miss: 'zero', expectedLength };
+  const reading: ScaleReading =
+    config.valueKind === 'weight'
+      ? { itemCode, kind: 'weight', qty: value * 10 ** (3 - config.valueDecimals) }
+      : { itemCode, kind: 'price', priceMinor: value * 10 ** (2 - config.valueDecimals) };
+  return { ok: true, prefix, itemCode, valueText, check: hasCheck ? code[dataEnd]! : null, reading };
+}
+
 /**
- * Reads a scale label, or answers null when the code is not one: not 13 digits, a prefix the
+ * Reads a scale label, or answers null when the code is not one: not the format's length, a prefix the
  * store does not use, a wrong check digit, or a value of zero.
  */
 export function parseScaleBarcode(code: string, config: ScaleBarcodeConfig): ScaleReading | null {
-  if (!digitsOf(code, 13)) return null;
-  if (!config.prefixes.includes(code.slice(0, 2))) return null;
-  if (ean13CheckDigit(code.slice(0, 12)) !== Number(code[12])) return null;
-  const itemCode = code.slice(2, 2 + config.itemDigits);
-  const value = Number(code.slice(2 + config.itemDigits, 12));
-  if (value <= 0) return null;
-  if (config.valueKind === 'weight') {
-    return { itemCode, kind: 'weight', qty: value * 10 ** (3 - config.valueDecimals) };
-  }
-  return { itemCode, kind: 'price', priceMinor: value * 10 ** (2 - config.valueDecimals) };
+  const found = diagnoseScaleBarcode(code, config);
+  return found.ok ? found.reading : null;
 }
 
 /**

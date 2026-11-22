@@ -1,143 +1,57 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { CURRENCIES } from '@serva/core/currencies';
-import { convert, lineGross } from '@serva/core/money';
-import type { Approval } from '@serva/core/contracts/documents';
+import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { convert } from '@serva/core/money';
 import { businessDateOf, rateFor } from '@serva/core/sale';
-import { promotionActive } from '@serva/core/promotions';
+import type { PromotionAudience } from '@serva/core/promotions';
 import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
-import { toLatinDigits } from '@serva/core/text';
-import type { OutboxEntry } from '@serva/sync';
-import {
-  BarcodeIcon,
-  Button,
-  CartIcon,
-  CartLine,
-  CashierShell,
-  CloseIcon,
-  cn,
-  displayNumber,
-  formatQuantity,
-  ItemTile,
-  KeyIcon,
-  Money,
-  RemoveIcon,
-  AddIcon,
-  DeleteIcon,
-  OfferIcon,
-  PrintIcon,
-  RetryIcon,
-  SearchIcon,
-  UndoIcon,
-  useDigits,
-  WarningIcon,
-} from '@serva/ui';
-import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
+import { missingPrescription, prescriptionNeed } from '@serva/core/pharmacy';
+import { Button, CheckIcon, CashierShell, Dialog, displayNumber, useDigits } from '@serva/ui';
+import { barcodeKey, type BarcodeHit, type CatalogItem } from '../catalog';
+import { ExactMoney } from '../ExactMoney';
+import { useRep } from '../../rep/state';
 import { counted } from '../format';
-import { ManagerCode } from '../staff/ManagerCode';
-import type { StaffMember, StaffSession } from '../staff/staff';
-import { AdjustPanel, NEED_TEXT, type AdjustMode, type AdjustValue } from './AdjustPanel';
+import { QuoteDialog, type QuoteChoice } from './QuoteDialog';
 import {
   addItem,
   invoiceNeed,
   lineNeed,
-  pieceCount,
-  kitchenLines,
-  markSent,
   missingSerials,
   priceCart,
-  setPriceTier,
+  contractSavingMinor,
   type ItemChoice,
-  EMPTY_CART,
-  removeLine,
-  restoreLine,
-  unitPriceOf,
-  updateLine,
   type ApprovalNeed,
   type ApprovalRules,
-  type Cart,
   type CartLine as Line,
   type PricedCart,
   type PricingContext,
 } from './cart';
 import { useScanner } from './useScanner';
-import { usePos } from '../services';
+import { scanBeep } from '../beep';
+import { fetchContractPrices } from '../rentals/api';
 import { PrintableQuote, type QuoteData } from '../receipt/Quote';
-import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
-import { ModifierPanel } from './ModifierPanel';
-import { gridEntries, lowestPrice, modelPieces, piecesText } from './models';
-import { VariantPicker } from './VariantPicker';
-import { TableBoard } from './TableBoard';
-import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
-import { HoldPanel } from './HoldPanel';
-import { OnlineOrdersPanel } from './OnlineOrdersPanel';
-import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
-import { SerialPanel } from './SerialPanel';
+import { quotationInputOf, saveQuotation } from '../quotations/api';
+import { PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
+import { ItemsArea, type PriceCheck } from './ItemsArea';
+import { armClickGuard } from './clickGuard';
+import { isUnfedService } from './serviceFee';
+import { waitingOrders } from './onlineOrders';
+import { CartHeader } from './CartHeader';
+import { CartBanners } from './CartBanners';
+import { CartLines } from './CartLines';
+import { CartTotals } from './CartTotals';
+import { SaleModePanel } from './SaleModePanel';
+import { useSaleCatalogViews } from './useSaleCatalogViews';
+import { useSalePickers } from './useSalePickers';
+import { saleView } from './saleView';
+import { useSaleStock } from './useSaleStock';
+import { useSaleDevice } from './useSaleDevice';
+import { usePayResume } from './usePayResume';
+import { useSaleAdd } from './useSaleAdd';
+import { useSaleKeys } from './useSaleKeys';
+import { lineActions } from './lineActions';
+import { type SaleMode, type SaleNotice, type SaleScreenProps } from './saleTypes';
 
-const PaymentPanel = lazy(() => import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })));
-
-export type SaleMode =
-  | { kind: 'items' }
-  | { kind: 'line'; lineNo: number; adjust: AdjustMode }
-  | { kind: 'invoice' }
-  | { kind: 'approve'; lineNo: number | null; need: ApprovalNeed }
-  | { kind: 'pay' }
-  | { kind: 'done' }
-  | { kind: 'help' }
-  | { kind: 'choose'; item: CatalogItem; hit: BarcodeHit | null }
-  | { kind: 'tables' }
-  | { kind: 'online' }
-  | { kind: 'hold' }
-  | { kind: 'serial'; lineNo: number }
-  | { kind: 'pick'; productId: string };
-
-export interface SaleScreenProps {
-  statusBar: ReactNode;
-  session: StaffSession;
-  catalog: Catalog;
-  staff: readonly StaffMember[];
-  shiftId: string;
-  cart: Cart;
-  setCart: (update: (cart: Cart) => Cart) => void;
-  heldCount: number;
-  onHold: () => void;
-  onResume: () => void;
-  /** The held orders, for the table board */
-  heldCarts?: readonly Cart[];
-  /** Opens a table's order, or starts one there (CashierApp keeps the held orders) */
-  onOpenTable?: (table: string) => void;
-  /** The last sale's lines, for «كرّر آخر طلب» */
-  lastLines: { variantId: string; barcode: string | null; qty: number }[];
-  onSaved: (entry: OutboxEntry) => void;
-  /** The finished sale's screen, shown in place of the items until the next sale starts */
-  done: ReactNode | null;
-  onNextSale: () => void;
-  /** Keyboard actions that belong to the cashier app (menu, lock) */
-  extraShortcuts?: (event: KeyboardEvent) => boolean;
-  /** Prints a hold's deposit voucher (CashierApp's printer) */
-  onPrintDeposit?: (saved: SavedGiftVoucher) => void;
-}
-
-const SELLER_KEY = 'salesperson';
-
-const SHORTCUTS: [string, string][] = [
-  ['ابحث أو امسح', 'F2 أو /'],
-  ['علّق الفاتورة أو استرجعها', 'F4 أو Alt+3'],
-  ['ادفع', 'F12 أو +'],
-  ['أتمّ الدفع', 'Enter'],
-  ['خصم على الفاتورة', 'Alt+1'],
-  ['حركات الدرج', 'Alt+7'],
-  ['اقفل الشاشة', 'Alt+L'],
-  ['الكمية قبل المسح', '3 ثم *'],
-  ['ارجع للأصناف', 'Esc'],
-  ['هذا الدليل', '؟'],
-];
-
-function isTyping(target: EventTarget | null) {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-  );
-}
+export type { SaleMode, SaleScreenProps } from './saleTypes';
 
 /**
  * The sale screen (kit cashier/Sale, Main): the cart on the right with its total and «ادفع», the
@@ -149,21 +63,47 @@ export function SaleScreen(props: SaleScreenProps) {
   const { session, catalog, staff, cart, setCart } = props;
   const digits = useDigits();
   const settings = catalog.settings!;
-  // The promotions running now, read again with every change to the cart so an hour's offer starts
-  // and stops on time.
-  const activePromotions = useMemo(() => {
-    const now = new Date();
-    return catalog.promotions.filter((p) => promotionActive(p, now, settings.timezone));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the cart is the clock's tick
-  }, [catalog.promotions, settings.timezone, cart]);
+  const {
+    activePromotions,
+    posServices,
+    soldOnline,
+    setSoldOnline,
+    reserved,
+    batchPlan,
+    takePlan,
+    guard,
+    batchWaits,
+  } = useSaleStock({ catalog, cart, settings, heldList: props.heldList, done: props.done });
+  // Who the sale is for, so a promotion meant for wholesale customers, one kind of shop or the reps'
+  // phones reaches only them
+  const repState = useRep();
+  const audience = useMemo<PromotionAudience>(() => {
+    const known = cart.customer ? catalog.customers.find((c) => c.id === cart.customer!.id) : undefined;
+    return {
+      customerKind: known?.kind ?? null,
+      priceTier: cart.priceTier ?? known?.priceTier ?? 'retail',
+      rep: repState !== null,
+    };
+  }, [cart.customer, cart.priceTier, catalog.customers, repState]);
   const ctx = useMemo<PricingContext>(
     () => ({
       currency: settings.baseCurrency,
       taxInclusive: settings.taxInclusive,
       rates: catalog.rates,
       promotions: activePromotions,
+      audience,
+      variants: catalog.byVariant,
+      batchPlan: takePlan.allocations,
     }),
-    [settings.baseCurrency, settings.taxInclusive, catalog.rates, activePromotions],
+    [
+      settings.baseCurrency,
+      settings.taxInclusive,
+      catalog.rates,
+      activePromotions,
+      audience,
+      catalog.byVariant,
+      takePlan.allocations,
+    ],
   );
   const rules = useMemo<ApprovalRules>(
     () => ({
@@ -174,37 +114,94 @@ export function SaleScreen(props: SaleScreenProps) {
   );
   const [mode, setMode] = useState<SaleMode>({ kind: 'items' });
   const [selected, setSelected] = useState<number | null>(null);
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<string | null>(null);
   const [multiplier, setMultiplier] = useState<number | null>(null);
-  const [notice, setNotice] = useState<{ tone: 'warning' | 'info'; text: string } | null>(null);
+  const [notice, setNotice] = useState<SaleNotice | null>(null);
   const [removed, setRemoved] = useState<{ line: Line; index: number } | null>(null);
   const [bump, setBump] = useState<number | null>(null);
+  // «أُضيف ✓»: a picker closes the moment its last choice adds the piece, so the add is said out loud for a moment
+  const [justAdded, setJustAdded] = useState<string | null>(null);
+  useEffect(() => {
+    if (!justAdded) return;
+    const timer = setTimeout(() => setJustAdded(null), 1600);
+    return () => clearTimeout(timer);
+  }, [justAdded]);
+  // «بُدّل ✓»: a line's size or colour swapped from the cart, said in its own words (the cart stays open)
+  const [justSwapped, setJustSwapped] = useState<string | null>(null);
+  useEffect(() => {
+    if (!justSwapped) return;
+    const timer = setTimeout(() => setJustSwapped(null), 1600);
+    return () => clearTimeout(timer);
+  }, [justSwapped]);
   const [quote, setQuote] = useState<QuoteData | null>(null);
+  /** «عرض سعر»: asks a few optional details first, then saves a numbered quotation (and prints it if asked) */
+  const [quoteAsk, setQuoteAsk] = useState<PricedCart | null>(null);
+  const [quoteBusy, setQuoteBusy] = useState(false);
+  async function saveQuote(from: PricedCart, choice: QuoteChoice) {
+    const slip: QuoteData = {
+      settings,
+      lines: from.lines,
+      totals: from.priced.totals,
+      at: Date.now(),
+      cashierName: session.fullName,
+      wholesale: cart.priceTier === 'wholesale',
+    };
+    const token = posServices.device.token;
+    setQuoteBusy(true);
+    try {
+      if (token && posServices.online()) {
+        const saved = await saveQuotation(
+          quotationInputOf(from.lines, cart.invoiceDiscount, cart.customer ?? null, choice.customerName, {
+            status: choice.print ? 'sent' : 'draft',
+            validUntil: businessDateOf(
+              Date.now() + choice.validDays * 86_400_000,
+              settings.timezone,
+              settings.businessDayCutoff,
+            ),
+            notes: choice.notes,
+          }),
+          token,
+          posServices.fetch,
+        );
+        if (saved.kind === 'ok') {
+          setQuoteAsk(null);
+          if (choice.print)
+            setQuote({ ...slip, number: saved.body.number, validUntil: saved.body.validUntil });
+          else
+            setNotice({
+              tone: 'info',
+              text: `حُفظ عرض السعر ${saved.body.number} كمسوّدة. تجده في «العروض».`,
+            });
+          return;
+        }
+      }
+      setQuoteAsk(null);
+      // No server to number it: the slip still prints, marked as not saved
+      if (choice.print) setQuote({ ...slip, unsaved: true });
+      else
+        setNotice({
+          tone: 'warning',
+          text: 'لا إنترنت الآن، فلم يُحفظ عرض السعر. اطبعه أو أعد المحاولة لاحقاً.',
+        });
+    } finally {
+      setQuoteBusy(false);
+    }
+  }
   const [kitchen, setKitchen] = useState<KitchenData | null>(null);
-  // «البائع» (03 › الملابس: عمولة البائع): the last one picked on this device stays picked
-  const pos = usePos();
-  const [seller, setSeller] = useState<string>(session.userId);
-  useEffect(() => {
-    let alive = true;
-    void pos.local.get<string>(SELLER_KEY).then((id) => {
-      if (alive && id && staff.some((m) => m.id === id)) setSeller(id);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [pos.local, staff]);
-  // Online orders this till sold, until the next pull says they are done
-  const [soldOnline, setSoldOnline] = useState<string[]>([]);
-  useEffect(() => {
-    let alive = true;
-    void pos.local.get<string[]>(ONLINE_SOLD_KEY).then((ids) => {
-      if (alive && ids) setSoldOnline(ids);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [pos.local]);
+  // «سعر صنف»: looks an item up (price per size and colour, stock) without adding it to the cart
+  const [checking, setChecking] = useState(false);
+  const [check, setCheck] = useState<PriceCheck | null>(null);
+  const checkingRef = useRef(false);
+  checkingRef.current = checking;
+  // On a phone the cart and the items are two tabs; anything that opens in the items area shows it
+  const [phoneView, setPhoneView] = useState<'items' | 'cart'>('items');
+  const { pos, best, seller, setSeller, lastUnits, setLastUnits, holdSale } = useSaleDevice({
+    catalog,
+    cart,
+    session,
+    staff,
+    setNotice,
+    onHold: props.onHold,
+  });
   const waitingOnline = waitingOrders(catalog.onlineOrders, soldOnline);
   const service = settings.service ?? null;
   // A café with no tables serves takeaway unless told otherwise
@@ -232,79 +229,104 @@ export function SaleScreen(props: SaleScreenProps) {
   }, [cart, priced, ctx, rules]);
   const invoiceNeeds = priced ? invoiceNeed(cart, priced.priced, rules) : null;
   const totalMinor = priced?.priced.totals.totalMinor ?? 0;
+  // The instalment fee of the plan being made on the pay screen: shown with the total in the cart panel
+  const [planFeeMinor, setPlanFeeMinor] = useState(0);
+  usePayResume({ pos, priced, cart, session, mode, totalMinor, setMode });
+  const { onTotal } = props;
+  useEffect(() => onTotal?.(totalMinor), [onTotal, totalMinor]);
+  const contractSaved = cart.lines.reduce((sum, l) => sum + contractSavingMinor(l, ctx), 0);
   const unnumbered = missingSerials(cart);
-  const blocked = needs.size > 0 || invoiceNeeds !== null || unnumbered.length > 0;
+  const blocked =
+    needs.size > 0 ||
+    invoiceNeeds !== null ||
+    unnumbered.length > 0 ||
+    cart.lines.some((l) => isUnfedService(l, catalog.byVariant)) ||
+    guard.blocks.length > 0 ||
+    guard.stockBlocks.length > 0 ||
+    batchWaits;
   const canPay = cart.lines.length > 0 && priced !== null && !blocked;
 
   const showDone = props.done !== null && cart.lines.length === 0;
   const effectiveMode: SaleMode = showDone && mode.kind === 'items' ? { kind: 'done' } : mode;
 
   // ── Adding items ────────────────────────────────────────────────────────────────────────────
-  const add = useCallback(
-    (item: CatalogItem, hit?: BarcodeHit | null, weighedQty?: number, choice?: ItemChoice) => {
-      // An item with modifiers asks for its choices first (beside the cart, not over it)
-      if (item.modifiers?.length && weighedQty === undefined && !choice) {
-        setMode({ kind: 'choose', item, hit: hit ?? null });
-        return;
-      }
-      if (item.price.currency !== ctx.currency) {
-        try {
-          rateFor(ctx.rates, item.price.currency, ctx.currency);
-        } catch {
-          setNotice({
-            tone: 'warning',
-            text: `لا يوجد سعر صرف لـ${CURRENCIES[item.price.currency].nameAr} على هذا الجهاز، فلا يُباع «${item.name}» الآن.`,
-          });
-          return;
-        }
-      }
-      const qty = weighedQty ?? (multiplier ?? 1) * 1000;
-      setMultiplier(null);
-      setNotice(null);
-      if (props.done) props.onNextSale();
-      // From the latest cart, so scans arriving before the next render all count.
-      const current = cartRef.current;
-      const next = addItem(current, item, hit, qty, choice ?? null);
-      cartRef.current = next;
-      setCart(() => next);
-      const added = next.lines.find((l, i) => l !== current.lines[i])?.lineNo ?? null;
-      setBump(added);
-      // 03 › الصيدليات: what is on the shelf may have expired, or soon will
-      if (item.nearestExpiry) {
-        const today = businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff);
-        const soon = businessDateOf(
-          Date.now() + 30 * 86_400_000,
-          settings.timezone,
-          settings.businessDayCutoff,
-        );
-        if (item.nearestExpiry < today) {
-          setNotice({
-            tone: 'warning',
-            text: `صلاحية «${item.name}» انتهت في ${item.nearestExpiry} حسب آخر استلام. تأكد من العلبة قبل البيع.`,
-          });
-        } else if (item.nearestExpiry <= soon) {
-          setNotice({ tone: 'info', text: `صلاحية «${item.name}» تنتهي في ${item.nearestExpiry}.` });
-        }
-      }
-      if (item.tracksSerial && added !== null) {
-        setSelected(added);
-        setMode({ kind: 'serial', lineNo: added });
-      } else if (item.unit?.allowsFraction && added !== null && weighedQty === undefined) {
-        setSelected(added);
-        setMode({ kind: 'line', lineNo: added, adjust: 'qty' });
-      } else if (mode.kind === 'pay' || mode.kind === 'done' || mode.kind === 'help') {
-        setMode({ kind: 'items' });
-      }
-    },
-    [ctx, multiplier, setCart, mode.kind, props, settings.timezone, settings.businessDayCutoff],
+  // An item priced at zero is confirmed before it goes into the cart: «السعر 0 — تأكيد؟»
+  const [zeroAsk, setZeroAsk] = useState<{
+    item: CatalogItem;
+    hit: BarcodeHit | null;
+    weighedQty: number | undefined;
+    choice: ItemChoice | undefined;
+  } | null>(null);
+  const zeroOk = useRef(false);
+  // A simple item with nothing left is added after a confirm tap, like an out-of-stock size
+  const [outAsk, setOutAsk] = useState<{
+    item: CatalogItem;
+    hit: BarcodeHit | null;
+    weighedQty: number | undefined;
+    choice: ItemChoice | undefined;
+  } | null>(null);
+  const outOk = useRef(false);
+  // A product just made at the till (round 39): it joins the cart once the catalog holds it
+  const [justMade, setJustMade] = useState<{ variantId: string; name: string; offline: boolean } | null>(
+    null,
   );
+  // A question is open (no stock, price 0): «أُضيف ✓» must not sit behind it before the cashier has decided
+  const asking = outAsk !== null || zeroAsk !== null;
+  useEffect(() => {
+    if (asking) setJustAdded(null);
+  }, [asking]);
+  const add = useSaleAdd({
+    ctx,
+    multiplier,
+    setCart,
+    mode,
+    props,
+    settings,
+    session,
+    digits,
+    setMode,
+    setSelected,
+    setZeroAsk,
+    setOutAsk,
+    setNotice,
+    setMultiplier,
+    setBump,
+    zeroOk,
+    outOk,
+    cartRef,
+  });
+
+  useEffect(() => {
+    if (!justMade) return;
+    const item = catalog.byVariant.get(justMade.variantId);
+    if (!item) return;
+    setJustMade(null);
+    // The cashier made it to sell it: no «لا يوجد مخزون» question for a product that has no stock yet
+    outOk.current = true;
+    try {
+      add(item, null);
+    } finally {
+      outOk.current = false;
+    }
+    setNotice({
+      tone: 'info',
+      text: `أُضيف «${justMade.name}» وصار في السلة.${justMade.offline ? ' يصل إلى المتجر عند عودة الاتصال.' : ' يراجعه المالك لاحقاً.'}`,
+    });
+  }, [justMade, catalog, add]);
 
   const scan = useCallback(
     (raw: string) => {
       const code = barcodeKey(raw);
       const hit = catalog.byBarcode.get(code);
+      // «سعر صنف»: a scan shows the item's price and stock, and adds nothing
+      const beepOn = settings.till?.scanBeep !== false;
+      const take = (item: CatalogItem, h: BarcodeHit | null, qty?: number) => {
+        scanBeep('ok', beepOn);
+        if (checkingRef.current) handlers.current.showPrice(item, h);
+        else add(item, h, qty);
+      };
       if (hit) {
-        add(hit.item, hit);
+        take(hit.item, hit);
         return;
       }
       // A scale label: the item's number on the scale, then its weight or its price.
@@ -312,7 +334,7 @@ export function SaleScreen(props: SaleScreenProps) {
       const weighed = reading ? catalog.byBarcode.get(reading.itemCode) : undefined;
       if (reading && weighed) {
         if (reading.kind === 'weight') {
-          add(weighed.item, weighed, reading.qty);
+          take(weighed.item, weighed, reading.qty);
           return;
         }
         const { currency, priceMinor } = weighed.item.price;
@@ -323,10 +345,11 @@ export function SaleScreen(props: SaleScreenProps) {
           unitMinor = 0;
         }
         if (unitMinor > 0) {
-          add(weighed.item, weighed, qtyForPrice(reading.priceMinor, unitMinor));
+          take(weighed.item, weighed, qtyForPrice(reading.priceMinor, unitMinor));
           return;
         }
       }
+      scanBeep('error', beepOn);
       if (reading && !weighed) {
         setNotice({
           tone: 'warning',
@@ -334,16 +357,33 @@ export function SaleScreen(props: SaleScreenProps) {
         });
         return;
       }
+      // Decision 15: «أضف صنف جديد» right here for a user who manages the catalog, or after a manager's code
+      // (it needs the server: online only, said so when it is not)
       setNotice({
         tone: 'warning',
-        text: `الباركود ${code} غير معروف على هذا الجهاز. ابحث عن الصنف باسمه.`,
+        text: `الباركود ${code} غير معروف على هذا الجهاز. ابحث عن الصنف باسمه، أو أضفه صنفاً جديداً.`,
+        actionText: 'أضف صنف جديد',
+        onAction: () => {
+          setNotice(null);
+          setMode({ kind: 'newProduct', barcode: code });
+        },
       });
     },
-    [catalog, add, settings.scaleBarcode, ctx],
+    [catalog, add, settings.scaleBarcode, settings.till, ctx],
   );
 
   const keypadOpen =
-    mode.kind === 'line' || mode.kind === 'invoice' || mode.kind === 'approve' || mode.kind === 'serial';
+    mode.kind === 'line' ||
+    mode.kind === 'fee' ||
+    mode.kind === 'invoice' ||
+    mode.kind === 'approve' ||
+    mode.kind === 'batchApprove' ||
+    mode.kind === 'serial' ||
+    mode.kind === 'rx' ||
+    mode.kind === 'holdName' ||
+    mode.kind === 'newProduct' ||
+    mode.kind === 'waste' ||
+    mode.kind === 'heldList';
   // While paying, amounts are typed and confirmed with Enter: only a full barcode counts as a scan.
   useScanner({
     enabled: !keypadOpen,
@@ -363,6 +403,22 @@ export function SaleScreen(props: SaleScreenProps) {
     window.print();
     setKitchen(null);
   }, [kitchen]);
+  // The selected line opens in place with its buttons: bring all of it into view, above the totals
+  useEffect(() => {
+    if (selected === null) return;
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById(`cart-line-${selected}`)
+        ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [selected]);
+  // A panel (quantity, discount, payment…) opens in the items area: on a phone, show that tab
+  // (a unit sheet opened from the cart is the exception: it floats over the cart, which stays where it is)
+  const sheetOverCart = (mode.kind === 'unit' || mode.kind === 'pick') && mode.replaceLine !== undefined;
+  useEffect(() => {
+    if (mode.kind !== 'items' && !sheetOverCart) setPhoneView('items');
+  }, [mode.kind, sheetOverCart]);
   useEffect(() => {
     if (bump === null) return;
     const timer = setTimeout(() => setBump(null), 900);
@@ -374,996 +430,480 @@ export function SaleScreen(props: SaleScreenProps) {
     return () => clearTimeout(timer);
   }, [removed]);
 
-  const results = useMemo(
-    () => searchCatalog(catalog, query, { categoryId: category, limit: 60 }),
-    [catalog, query, category],
-  );
-  const pieces = useMemo(() => modelPieces(catalog.items), [catalog.items]);
-  // «سعر الجملة» shows only where some item has a wholesale price (a clothing shop has none).
-  const hasWholesale = useMemo(
-    () => catalog.items.some((item) => (item.price.wholesalePriceMinor ?? null) !== null),
-    [catalog.items],
-  );
-  const entries = useMemo(() => gridEntries(results, pieces), [results, pieces]);
+  // A quotation opened as the cart keeps the prices as offered; when its customer has contract prices
+  // the till only says so («سعر العقد»), it does not price the lines again
+  const quotedFor = cart.quotation && !cart.contractPriced ? (cart.customer?.id ?? null) : null;
+  useEffect(() => {
+    const token = pos.device.token;
+    if (!quotedFor || !token || !pos.online()) return;
+    let alive = true;
+    void fetchContractPrices(quotedFor, token, pos.fetch).then((prices) => {
+      if (alive && prices.length > 0)
+        setCart((c) => (c.customer?.id === quotedFor ? { ...c, contractPriced: true } : c));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [quotedFor, pos, setCart]);
 
-  function onSearchKey(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'Escape') {
-      setQuery('');
-      return;
+  const { pieces, hasWholesale, inCart, inCartQty, boxesOf, showPrice } = useSaleCatalogViews({
+    catalog,
+    cart,
+    setCart,
+    setCheck,
+  });
+
+  // The tiles and the search field call these; they stay the same function while the cart changes,
+  // so the memoised grid is not drawn again for it.
+  // The boxes an item is sold in (its pack barcodes, one per box size), for the piece-or-box question
+  const packsByVariant = useMemo(() => {
+    const map = new Map<string, BarcodeHit[]>();
+    for (const hit of catalog.byBarcode.values()) {
+      if (hit.barcode.packQty === 1000) continue;
+      const list = map.get(hit.item.variantId) ?? [];
+      if (!list.some((h) => h.barcode.packQty === hit.barcode.packQty)) list.push(hit);
+      map.set(hit.item.variantId, list);
     }
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    const value = toLatinDigits(query.trim());
-    const qty = /^(\d{1,3})\s*[*×]$/.exec(value);
-    if (qty) {
-      setMultiplier(Number(qty[1]));
-      setQuery('');
-      return;
+    return map;
+  }, [catalog.byBarcode]);
+  // The unit chosen for an item IN THIS SALE: one tap adds it again. A new sale starts from the question
+  // (the piece or the box?), never from the unit remembered from an earlier day: a box by a mis-tap is costly
+  const saleUnits = useRef<Record<string, string>>({});
+  useEffect(() => {
+    if (cart.lines.length === 0) saleUnits.current = {};
+  }, [cart.lines.length]);
+  const handlers = useRef({ add, scan, showPrice, packsByVariant, saleUnits });
+  handlers.current = { add, scan, showPrice, packsByVariant, saleUnits };
+  // A second tap on «أضف» lands on the tile that appears under the closed picker: swallowed for a moment
+  const pickerAddedAt = useRef(0);
+  // Leaving a dialog or panel (hold, price, size...) back to the grid: its last click must not reach a tile
+  const lastKind = useRef(mode.kind);
+  useEffect(() => {
+    if (lastKind.current !== mode.kind && mode.kind === 'items') armClickGuard();
+    lastKind.current = mode.kind;
+  }, [mode.kind]);
+  const { pickItem, pickModel } = useSalePickers({
+    handlers,
+    checkingRef,
+    pickerAddedAt,
+    pieces,
+    boxesOf,
+    setMode,
+    setJustAdded,
+    setCheck,
+  });
+  const scanCode = useCallback((code: string) => handlers.current.scan(code), []);
+  const dismissNotice = useCallback(() => setNotice(null), []);
+  const repeatLast = useCallback(() => {
+    for (const l of props.lastLines) {
+      const hit = l.barcode ? catalog.byBarcode.get(l.barcode) : undefined;
+      const item = hit?.item ?? catalog.byVariant.get(l.variantId);
+      if (item) setCart((c) => addItem(c, item, hit ?? null, l.qty));
     }
-    const hit = catalog.byBarcode.get(barcodeKey(value));
-    if (hit) add(hit.item, hit);
-    else if (results.length === 1) add(results[0]!);
-    else if (/^\d{6,}$/.test(value)) scan(value);
-    else return;
-    setQuery('');
-  }
+    if (props.done) props.onNextSale();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the props of this render
+  }, [props.lastLines, props.done, catalog, setCart]);
+  const startChecking = useCallback(() => {
+    setMode({ kind: 'items' });
+    setChecking(true);
+    searchRef.current?.focus();
+  }, []);
+  const stopChecking = useCallback(() => {
+    setChecking(false);
+    setCheck(null);
+  }, []);
 
   // ── Line and invoice changes ────────────────────────────────────────────────────────────────
-  function remove(lineNo: number) {
-    const index = cart.lines.findIndex((l) => l.lineNo === lineNo);
-    if (index < 0) return;
-    setRemoved({ line: cart.lines[index]!, index });
-    setCart((c) => removeLine(c, lineNo));
-    setSelected(null);
-    if (mode.kind !== 'items') setMode({ kind: 'items' });
-  }
+  const { remove, removeNow, changeQty, lineOf, checkLine, applyLine, checkInvoice } = lineActions({
+    cart,
+    setCart,
+    setSelected,
+    setMode,
+    setRemoved,
+    mode,
+    hallTools: props.hallTools,
+    catalog,
+    ctx,
+    rules,
+  });
 
-  function changeQty(line: Line, delta: number) {
-    const qty = line.qty + delta * 1000;
-    if (qty <= 0) remove(line.lineNo);
-    else setCart((c) => updateLine(c, line.lineNo, { qty }));
-  }
-
-  const lineOf = (lineNo: number) => cart.lines.find((l) => l.lineNo === lineNo) ?? null;
-
-  function checkLine(line: Line, value: AdjustValue): { error: string } | { need: ApprovalNeed | null } {
-    const patch = linePatch(line, value);
-    const candidate = { ...line, ...patch, approval: null };
-    try {
-      const { lines } = priceCart(
-        { ...cart, lines: cart.lines.map((l) => (l.lineNo === line.lineNo ? candidate : l)) },
-        ctx,
-      );
-      const index = cart.lines.findIndex((l) => l.lineNo === line.lineNo);
-      if (value.mode === 'price' && value.minor > unitPriceOf(line, ctx)) {
-        return { error: 'السعر الجديد أعلى من سعر الصنف. السعر في السلة يُخفَّض فقط.' };
-      }
-      return { need: lineNeed(candidate, lines[index]!.priced, ctx, rules) };
-    } catch {
-      return { error: 'الخصم أكبر من قيمة السطر.' };
+  // ── Prescription (03 › الصيدليات) ──────────────────────────────────────────────────────────
+  const rxNeed = useMemo(
+    () =>
+      prescriptionNeed(
+        cart.lines.map((l) => catalog.byVariant.get(l.variantId) ?? {}),
+        settings.pharmacy,
+      ),
+    [cart.lines, catalog.byVariant, settings.pharmacy],
+  );
+  const hasControlled = cart.lines.some((l) => catalog.byVariant.get(l.variantId)?.controlled);
+  /** To payment, through the prescription details when an item asks for them and they are not given yet */
+  function startPay() {
+    if (hasControlled && !session.permissions.has('pharmacy.controlled')) {
+      setNotice({
+        tone: 'warning',
+        text: 'في الفاتورة دواء مراقَب لا يبيعه إلا الصيدلاني. احذفه أو سلّم الفاتورة له.',
+      });
+      return;
     }
-  }
-
-  function linePatch(line: Line, value: AdjustValue): Partial<Line> {
-    switch (value.mode) {
-      case 'qty':
-        return { qty: value.qty };
-      case 'percent':
-        return { adjustment: { kind: 'discount', discount: { type: 'percent', bp: value.bp } } };
-      case 'amount':
-        return { adjustment: { kind: 'discount', discount: { type: 'amount', minor: value.minor } } };
-      case 'price':
-        return { adjustment: { kind: 'price', priceMinor: value.minor } };
+    const asked = cart.prescription !== undefined;
+    if (rxNeed.asks && (!asked || missingPrescription(rxNeed, cart.prescription).length > 0)) {
+      setMode({ kind: 'rx' });
+      return;
     }
-  }
-
-  function applyLine(line: Line, value: AdjustValue, approval: Approval | null) {
-    const patch = linePatch(line, value);
-    setCart((c) => updateLine(c, line.lineNo, value.mode === 'qty' ? patch : { ...patch, approval }));
-    setMode({ kind: 'items' });
-  }
-
-  function checkInvoice(value: AdjustValue): { error: string } | { need: ApprovalNeed | null } {
-    const discount =
-      value.mode === 'percent'
-        ? { type: 'percent' as const, bp: value.bp }
-        : { type: 'amount' as const, minor: (value as { minor: number }).minor };
-    const candidate: Cart = { ...cart, invoiceDiscount: discount, invoiceApproval: null };
-    try {
-      return { need: invoiceNeed(candidate, priceCart(candidate, ctx).priced, rules) };
-    } catch {
-      return { error: 'الخصم أكبر من مجموع الفاتورة.' };
-    }
+    setMode({ kind: 'pay' });
   }
 
   // ── Keyboard ────────────────────────────────────────────────────────────────────────────────
-  const keys = useRef<(event: KeyboardEvent) => void>(() => undefined);
-  keys.current = (event) => {
-    if (props.extraShortcuts?.(event)) return;
-    const typing = isTyping(event.target);
-    if (event.key === 'Escape' && mode.kind !== 'items' && mode.kind !== 'pay') {
-      setMode({ kind: 'items' });
-      return;
-    }
-    if (keypadOpen || mode.kind === 'pay') return;
-    if (event.key === 'F2' || (event.key === '/' && !typing)) {
-      event.preventDefault();
-      setMode({ kind: 'items' });
-      searchRef.current?.focus();
-    } else if (event.key === 'F4' || (event.altKey && event.code === 'Digit3')) {
-      event.preventDefault();
-      if (cart.lines.length > 0) props.onHold();
-      else props.onResume();
-    } else if (event.key === 'F12' || (event.key === '+' && !typing)) {
-      event.preventDefault();
-      if (canPay) setMode({ kind: 'pay' });
-    } else if (event.altKey && event.code === 'Digit1') {
-      event.preventDefault();
-      if (cart.lines.length > 0) setMode({ kind: 'invoice' });
-    } else if ((event.key === '?' || event.key === '؟') && !typing) {
-      event.preventDefault();
-      setMode({ kind: 'help' });
-    }
-  };
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => keys.current(event);
-    window.addEventListener('keydown', listener);
-    return () => window.removeEventListener('keydown', listener);
-  }, []);
+  useSaleKeys({
+    props,
+    mode,
+    checking,
+    keypadOpen,
+    cart,
+    canPay,
+    setMode,
+    searchRef,
+    stopChecking,
+    startChecking,
+    holdSale,
+    startPay,
+  });
 
   // ── Rendering ───────────────────────────────────────────────────────────────────────────────
-  const foreign = catalog.rates[0]
-    ? catalog.rates[0].unit === ctx.currency
-      ? catalog.rates[0].quote
-      : catalog.rates[0].unit
-    : null;
-  const totals = priced?.priced.totals;
-  const lineCount = cart.lines.length;
+  const {
+    shownRate,
+    foreign,
+    totals,
+    lineCount,
+    wholesaleOn,
+    showWholesale,
+    canHoldForCustomer,
+    canWaste,
+    ticketTools,
+    orderType,
+    warnRows,
+    warnDanger,
+    lineWarn,
+    replacedLine,
+    payBlock,
+    serviceCount,
+    pieceTotal,
+  } = saleView({
+    catalog,
+    settings,
+    ctx,
+    cart,
+    priced,
+    session,
+    mode,
+    hasWholesale,
+    waitingOnline,
+    heldCount: props.heldCount,
+    defaultOrderType,
+    guard,
+    batchWaits,
+    unnumbered,
+    needs,
+    invoiceNeeds,
+    canPay,
+    setPhoneView,
+    setSelected,
+    setMode,
+  });
 
   const cartPanel = (
     <>
-      <div className="flex h-16 shrink-0 items-center gap-3 px-4">
-        <span className="grid size-10 place-items-center rounded-xl bg-brand-soft text-brand-ink">
-          <CartIcon size={20} />
-        </span>
-        <span className="text-lg font-bold text-ink">
-          {lineCount === 0 ? 'فاتورة جديدة' : 'الفاتورة الحالية'}
-        </span>
-        <span className="flex-1" />
-        {staff.length > 1 ? (
-          <select
-            aria-label="البائع"
-            value={seller}
-            onChange={(e) => {
-              setSeller(e.target.value);
-              void pos.local.set(SELLER_KEY, e.target.value);
-            }}
-            className="h-10 max-w-36 rounded-control border border-line-control bg-surface px-2 text-sm text-ink"
-          >
-            {staff.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.fullName}
-              </option>
-            ))}
-          </select>
-        ) : null}
-        {(session.permissions.has('sale.wholesale') && hasWholesale) || cart.priceTier === 'wholesale' ? (
-          <Button
-            size="sm"
-            variant={cart.priceTier === 'wholesale' ? 'primary' : 'secondary'}
-            aria-pressed={cart.priceTier === 'wholesale'}
-            onClick={() =>
-              setCart((c) => setPriceTier(c, c.priceTier === 'wholesale' ? 'retail' : 'wholesale'))
-            }
-          >
-            سعر الجملة
-          </Button>
-        ) : null}
-        {priced ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<PrintIcon size={16} />}
-            onClick={() =>
-              setQuote({
-                settings,
-                lines: priced.lines,
-                totals: priced.priced.totals,
-                at: Date.now(),
-                cashierName: session.fullName,
-                wholesale: cart.priceTier === 'wholesale',
-              })
-            }
-          >
-            عرض سعر
-          </Button>
-        ) : null}
-        {priced && !cart.onlineOrder ? (
-          <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'hold' })}>
-            احجز
-          </Button>
-        ) : null}
-        {waitingOnline.length > 0 ? (
-          <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'online' })}>
-            طلبات المتجر ({waitingOnline.length})
-          </Button>
-        ) : null}
-        {props.heldCount > 0 ? (
-          <span className="rounded-full bg-warning-soft px-3 py-1 text-xs font-semibold text-warning-ink">
-            {props.heldCount === 1 ? 'فاتورة معلّقة' : `${props.heldCount} فواتير معلّقة`}
-          </span>
-        ) : null}
-      </div>
-      {service ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
-          <div role="group" aria-label="نوع الطلب" className="flex gap-1">
-            {(['dine_in', 'takeaway', 'delivery'] as const).map((type) => (
-              <Button
-                key={type}
-                size="sm"
-                variant={(cart.service?.orderType ?? defaultOrderType) === type ? 'primary' : 'ghost'}
-                aria-pressed={(cart.service?.orderType ?? defaultOrderType) === type}
-                onClick={() =>
-                  setCart((c) => ({
-                    ...c,
-                    service: {
-                      orderType: type,
-                      table: type === 'dine_in' ? (c.service?.table ?? null) : null,
-                    },
-                  }))
-                }
-              >
-                {ORDER_TYPE_TEXT[type]}
-              </Button>
-            ))}
-          </div>
-          <span className="flex-1" />
-          {service.tables.length > 0 ? (
-            <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'tables' })}>
-              {cart.service?.table ? `طاولة ${cart.service.table}` : 'الطاولات'}
-            </Button>
-          ) : null}
-          {service.kitchenTickets && kitchenLines(cart).length > 0 ? (
-            <Button
-              size="sm"
-              onClick={() => {
-                setKitchen({
-                  lines: kitchenLines(cart),
-                  orderType: cart.service?.orderType ?? defaultOrderType,
-                  table: cart.service?.table ?? null,
-                  at: Date.now(),
-                  cashierName: session.fullName,
-                });
-                setCart(markSent);
-              }}
-            >
-              للمطبخ
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-      {cart.onlineOrder ? (
-        <div
-          role="status"
-          className="flex items-center gap-2 border-b border-line bg-brand-soft px-4 py-2 text-sm text-brand-ink"
-        >
-          <span className="flex-1">
-            طلب المتجر{' '}
-            <bdi dir="ltr" className="num font-semibold">
-              {cart.onlineOrder.number}
-            </bdi>{' '}
-            · {cart.onlineOrder.customerName}: يُغلق عند الدفع
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setCart((c) => ({ ...c, onlineOrder: undefined }))}
-          >
-            افصل الطلب
-          </Button>
-        </div>
-      ) : null}
-      {cart.voucher ? (
-        <div
-          role="status"
-          className="flex items-center gap-2 border-b border-line bg-brand-soft px-4 py-2 text-sm text-brand-ink"
-        >
-          <span className="flex-1">
-            استبدال: القسيمة{' '}
-            <bdi dir="ltr" className="num font-semibold">
-              {cart.voucher}
-            </bdi>{' '}
-            تُخصم عند الدفع
-          </span>
-          <Button size="sm" variant="ghost" onClick={() => setCart((c) => ({ ...c, voucher: undefined }))}>
-            ألغِ
-          </Button>
-        </div>
-      ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {lineCount === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-ink-muted">
-            <BarcodeIcon size={48} />
-            <span className="text-lg font-semibold text-ink">السلة فارغة</span>
-            <span>امسح الباركود أو اختر صنفاً من الشبكة.</span>
-          </div>
-        ) : (
-          <ul aria-label="أسطر الفاتورة" className="flex flex-col gap-1.5 px-3 pb-3">
-            {cart.lines.map((line, i) => {
-              const p = priced?.lines[i];
-              const need = needs.get(line.lineNo);
-              const meta = [
-                line.packName ? line.packName : null,
-                line.adjustment?.kind === 'price' ? 'سعر معدّل' : null,
-                p && p.priced.lineDiscountMinor > 0 && line.adjustment?.kind === 'discount' ? (
-                  <span key="d" className="text-info-ink">
-                    خصم <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
-                  </span>
-                ) : null,
-                line.tracksSerial ? (
-                  <button
-                    key="s"
-                    type="button"
-                    className={
-                      (line.serials?.length ?? 0) > 0 ? 'text-ink-muted' : 'font-semibold text-danger-ink'
-                    }
-                    onClick={() => setMode({ kind: 'serial', lineNo: line.lineNo })}
-                  >
-                    {line.serials?.length ? `IMEI ${line.serials.join('، ')}` : 'اكتب الرقم التسلسلي'}
-                  </button>
-                ) : null,
-                p && p.priced.lineDiscountMinor > 0 && p.discount?.source === 'promotion' ? (
-                  <span key="o" className="text-success-ink">
-                    {p.discount.reason} −
-                    <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
-                  </span>
-                ) : null,
-                bump === line.lineNo ? (
-                  <span key="b" className="font-semibold text-brand-ink motion-safe:animate-pop">
-                    +1
-                  </span>
-                ) : null,
-              ].filter(Boolean);
-              return (
-                <CartLine
-                  key={line.lineNo}
-                  name={line.name}
-                  qtyThousandths={line.qty}
-                  unit={line.unitSymbol ?? undefined}
-                  unitPriceMinor={p?.unitPriceMinor ?? 0}
-                  lineTotalMinor={p?.priced.totalMinor ?? 0}
-                  currency={ctx.currency}
-                  meta={
-                    meta.length > 0 ? (
-                      <>
-                        {meta.map((m, k) => (
-                          <span key={k}>
-                            {k > 0 ? ' · ' : ''}
-                            {m}
-                          </span>
-                        ))}
-                      </>
-                    ) : undefined
-                  }
-                  selected={selected === line.lineNo}
-                  onSelect={() => setSelected((s) => (s === line.lineNo ? null : line.lineNo))}
-                >
-                  {need ? (
-                    <p
-                      role="alert"
-                      className="flex w-full items-center gap-2 text-sm font-semibold text-warning-ink"
-                    >
-                      <WarningIcon size={16} />
-                      {NEED_TEXT[need]}
-                    </p>
-                  ) : null}
-                  {line.weighed ? (
-                    <Button
-                      variant="secondary"
-                      onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'qty' })}
-                    >
-                      الوزن
-                    </Button>
-                  ) : (
-                    <div className="inline-flex items-center overflow-hidden rounded-control border border-line">
-                      <button
-                        type="button"
-                        aria-label="أنقص الكمية"
-                        onClick={() => changeQty(line, -1)}
-                        className="grid size-12 place-items-center hover:bg-surface-muted"
-                      >
-                        <RemoveIcon size={20} />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="اكتب الكمية"
-                        onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'qty' })}
-                        className="num min-w-10 text-center text-lg font-bold"
-                      >
-                        {formatQuantity(line.qty, digits)}
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="زِد الكمية"
-                        onClick={() => changeQty(line, 1)}
-                        className="grid size-12 place-items-center hover:bg-surface-muted"
-                      >
-                        <AddIcon size={20} />
-                      </button>
-                    </div>
-                  )}
-                  <Button
-                    variant="secondary"
-                    icon={<OfferIcon size={16} />}
-                    onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'percent' })}
-                  >
-                    خصم
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'price' })}
-                  >
-                    السعر
-                  </Button>
-                  {need ? (
-                    <Button
-                      variant="secondary"
-                      icon={<KeyIcon size={16} />}
-                      onClick={() => setMode({ kind: 'approve', lineNo: line.lineNo, need })}
-                    >
-                      رمز المدير
-                    </Button>
-                  ) : null}
-                  <span className="flex-1" />
-                  <button
-                    type="button"
-                    aria-label="احذف السطر"
-                    onClick={() => remove(line.lineNo)}
-                    className="grid size-12 place-items-center rounded-control text-ink-muted hover:bg-danger-soft hover:text-danger-ink"
-                  >
-                    <DeleteIcon size={20} />
-                  </button>
-                </CartLine>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-      {removed ? (
-        <div role="status" className="flex items-center gap-3 bg-ink px-4 py-2 text-sm text-canvas">
-          <span className="flex-1 truncate">حُذف «{removed.line.name}»</span>
-          <button
-            type="button"
-            onClick={() => {
-              setCart((c) => restoreLine(c, removed.line, removed.index));
-              setRemoved(null);
-            }}
-            className="flex min-h-12 items-center gap-1 px-2 font-bold text-brand-soft"
-          >
-            <UndoIcon size={16} />
-            تراجع
-          </button>
-        </div>
-      ) : null}
-      <div className="m-3 mt-0 flex shrink-0 flex-col gap-3 rounded-[1.25rem] bg-surface-total p-4">
-        {totals && totals.discountMinor > 0 ? (
-          <dl className="flex flex-col gap-0.5 text-sm">
-            <div className="flex justify-between text-ink-muted">
-              <dt>المجموع قبل الخصم</dt>
-              <dd>
-                <Money minor={totals.grossMinor} currency={ctx.currency} />
-              </dd>
-            </div>
-            <div className="flex justify-between font-semibold text-info-ink">
-              <dt>الخصم · وفّر الزبون</dt>
-              <dd>
-                <Money minor={totals.discountMinor} currency={ctx.currency} />
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        {totals && !settings.taxInclusive && totals.taxMinor > 0 ? (
-          <div className="flex justify-between text-sm text-ink-muted">
-            <span>الضريبة</span>
-            <Money minor={totals.taxMinor} currency={ctx.currency} />
-          </div>
-        ) : null}
-        {invoiceNeeds ? (
-          <div role="alert" className="flex items-center gap-2 text-sm font-semibold text-warning-ink">
-            <WarningIcon size={16} />
-            <span className="flex-1">{NEED_TEXT[invoiceNeeds]}</span>
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={() => setMode({ kind: 'approve', lineNo: null, need: invoiceNeeds })}
-            >
-              رمز المدير
-            </Button>
-          </div>
-        ) : null}
-        <div className="flex items-end justify-between gap-3">
-          <div className="flex flex-col pb-1">
-            <span className="font-semibold text-ink-muted">المطلوب</span>
-            <span className="text-xs text-ink-muted">
-              {lineCount === 0
-                ? 'لا أسطر بعد'
-                : `${counted(lineCount, ['سطر واحد', 'سطران', 'أسطر', 'سطراً'], digits)} · ${counted(pieceCount(cart), ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'], digits)}`}
-            </span>
-          </div>
-          <div className="flex flex-col items-end">
-            <output aria-live="polite" aria-label="المطلوب" className="text-total font-bold text-ink">
-              <Money minor={totalMinor} currency={ctx.currency} />
-            </output>
-            {foreign ? (
-              <span className="text-sm text-ink-muted">
-                ≈{' '}
-                <Money
-                  minor={convert(
-                    totalMinor,
-                    ctx.currency,
-                    foreign,
-                    rateFor(ctx.rates, foreign, ctx.currency),
-                  )}
-                  currency={foreign}
-                />{' '}
-                · سعر الصرف <bdi className="num">{displayNumber(catalog.rates[0]!.rate, digits)}</bdi>
-              </span>
-            ) : null}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => (lineCount > 0 ? props.onHold() : props.onResume())}
-            disabled={lineCount === 0 && props.heldCount === 0}
-          >
-            {lineCount === 0 && props.heldCount > 0 ? 'استرجع المعلّقة' : 'علّق'}
-          </Button>
-          <Button
-            variant="secondary"
-            icon={<OfferIcon size={16} />}
-            onClick={() => setMode({ kind: 'invoice' })}
-            disabled={lineCount === 0}
-          >
-            خصم
-          </Button>
-        </div>
-        <Button size="pay" onClick={() => setMode({ kind: 'pay' })} disabled={!canPay}>
-          <span>ادفع</span>
-          <Money minor={totalMinor} currency={ctx.currency} />
-        </Button>
-      </div>
+      <CartHeader
+        lineCount={lineCount}
+        pieceTotal={pieceTotal}
+        serviceCount={serviceCount}
+        cart={cart}
+        setCart={setCart}
+        staff={staff}
+        session={session}
+        seller={seller}
+        setSeller={setSeller}
+        pos={pos}
+        ticketTools={ticketTools}
+        waitingOnline={waitingOnline}
+        canHoldForCustomer={canHoldForCustomer}
+        priced={priced}
+        showWholesale={showWholesale}
+        wholesaleOn={wholesaleOn}
+        canWaste={canWaste}
+        heldCount={props.heldCount}
+        setMode={setMode}
+        setQuoteAsk={setQuoteAsk}
+      />
+      <CartBanners
+        service={service}
+        orderType={orderType}
+        defaultOrderType={defaultOrderType}
+        cart={cart}
+        setCart={setCart}
+        setMode={setMode}
+        hallTools={props.hallTools}
+        onKitchenSent={props.onKitchenSent}
+        setKitchen={setKitchen}
+        cashierName={session.fullName}
+        currency={ctx.currency}
+      />
+      <CartLines
+        lineCount={lineCount}
+        cart={cart}
+        priced={priced}
+        catalog={catalog}
+        ctx={ctx}
+        needs={needs}
+        takePlan={takePlan}
+        bump={bump}
+        packsByVariant={packsByVariant}
+        pieces={pieces}
+        sectors={settings.sectors}
+        selected={selected}
+        setSelected={setSelected}
+        lineWarn={lineWarn}
+        remove={remove}
+        changeQty={changeQty}
+        setMode={setMode}
+      />
+      <CartTotals
+        cart={cart}
+        setCart={setCart}
+        setMode={setMode}
+        totals={totals}
+        ctx={ctx}
+        totalMinor={totalMinor}
+        planFeeMinor={planFeeMinor}
+        contractSaved={contractSaved}
+        taxInclusive={settings.taxInclusive}
+        pharmacy={settings.pharmacy}
+        foreign={foreign}
+        shownRate={shownRate}
+        guard={guard}
+        batchWaits={batchWaits}
+        warnRows={warnRows}
+        warnDanger={warnDanger}
+        removed={removed}
+        setRemoved={setRemoved}
+        lineCount={lineCount}
+        heldCount={props.heldCount}
+        onResume={props.onResume}
+        selected={selected}
+        payBlock={payBlock}
+        canPay={canPay}
+        startPay={startPay}
+      />
     </>
   );
 
+  const itemsArea = (
+    <ItemsArea
+      catalog={catalog}
+      pieces={pieces}
+      bestSellers={best}
+      searchRef={searchRef}
+      inCart={inCart}
+      pickingProduct={effectiveMode.kind === 'pick' ? effectiveMode.productId : null}
+      multiplier={multiplier}
+      notice={notice}
+      onDismissNotice={dismissNotice}
+      hasLastLines={props.lastLines.length > 0}
+      onRepeatLast={repeatLast}
+      onPickItem={pickItem}
+      onPickModel={pickModel}
+      onScanCode={scanCode}
+      onMultiplier={setMultiplier}
+      checking={checking}
+      check={check}
+      onStopChecking={stopChecking}
+      onStartChecking={startChecking}
+      reserved={reserved}
+    />
+  );
+
   return (
-    <CashierShell statusBar={props.statusBar} cart={cartPanel} mainClassName="gap-3.5 p-4 xl:px-6">
-      {quote ? <PrintableQuote data={quote} width={80} /> : null}
-      {kitchen ? <PrintableKitchenTicket data={kitchen} /> : null}
-      {effectiveMode.kind === 'pay' && priced ? (
-        <Suspense fallback={null}>
-          <PaymentPanel
-            cart={cart}
-            ctx={ctx}
-            totalMinor={totalMinor}
-            catalog={catalog}
-            shiftId={props.shiftId}
-            cashierId={session.userId}
-            canCredit={session.permissions.has('sale.credit')}
-            salespersonId={seller !== session.userId ? seller : null}
-            onWholesaleCustomer={() => setCart((c) => setPriceTier(c, 'wholesale'))}
-            onBack={() => setMode({ kind: 'items' })}
-            onCompleted={(entry) => {
-              setMode({ kind: 'items' });
-              setSelected(null);
-              const order = cart.onlineOrder;
-              if (order) {
-                const ids = [...soldOnline.filter((id) => id !== order.id).slice(-49), order.id];
-                setSoldOnline(ids);
-                void pos.local.set(ONLINE_SOLD_KEY, ids);
-              }
-              props.onSaved(entry);
-            }}
-          />
-        </Suspense>
-      ) : effectiveMode.kind === 'done' ? (
-        props.done
-      ) : effectiveMode.kind === 'line' && lineOf(effectiveMode.lineNo) ? (
-        (() => {
-          const line = lineOf(effectiveMode.lineNo)!;
-          const modes: AdjustMode[] =
-            effectiveMode.adjust === 'qty' ? ['qty'] : ['percent', 'amount', 'price'];
-          return (
-            <AdjustPanel
-              key={`${line.lineNo}:${effectiveMode.adjust}`}
-              title={
-                effectiveMode.adjust === 'qty'
-                  ? line.weighed
-                    ? 'الوزن'
-                    : 'الكمية'
-                  : effectiveMode.adjust === 'price'
-                    ? 'سعر جديد في السلة'
-                    : 'خصم على السطر'
-              }
-              subtitle={line.name}
-              modes={modes}
-              initialMode={effectiveMode.adjust}
-              currency={ctx.currency}
-              fractions={line.weighed}
-              staff={staff}
-              check={(value) => checkLine(line, value)}
-              onApply={(value, approval) => applyLine(line, value, approval)}
-              onRemove={
-                line.adjustment
-                  ? () => {
-                      setCart((c) => updateLine(c, line.lineNo, { adjustment: null, approval: null }));
-                      setMode({ kind: 'items' });
-                    }
-                  : undefined
-              }
-              onClose={() => setMode({ kind: 'items' })}
-              preview={() => (
-                <span>
-                  سعر الرف للواحدة{' '}
-                  <Money
-                    minor={unitPriceOf(line, ctx)}
-                    currency={ctx.currency}
-                    className="font-semibold text-ink"
-                  />
-                  {' · '}السطر{' '}
-                  <Money
-                    minor={lineGross(unitPriceOf(line, ctx), line.qty)}
-                    currency={ctx.currency}
-                    className="font-semibold text-ink"
-                  />
-                </span>
-              )}
-            />
-          );
-        })()
-      ) : effectiveMode.kind === 'invoice' ? (
-        <AdjustPanel
-          title="خصم على الفاتورة"
-          subtitle={`على ${counted(lineCount, ['سطر واحد', 'سطرين', 'أسطر', 'سطراً'], digits)}`}
-          modes={['percent', 'amount']}
-          initialMode="percent"
-          currency={ctx.currency}
-          staff={staff}
-          check={checkInvoice}
-          onApply={(value, approval) => {
-            setCart((c) => ({
-              ...c,
-              invoiceDiscount:
-                value.mode === 'percent'
-                  ? { type: 'percent', bp: value.bp }
-                  : { type: 'amount', minor: (value as { minor: number }).minor },
-              invoiceApproval: approval,
-            }));
-            setMode({ kind: 'items' });
-          }}
-          onRemove={
-            cart.invoiceDiscount
-              ? () => {
-                  setCart((c) => ({ ...c, invoiceDiscount: null, invoiceApproval: null }));
-                  setMode({ kind: 'items' });
-                }
-              : undefined
-          }
-          onClose={() => setMode({ kind: 'items' })}
-        />
-      ) : effectiveMode.kind === 'approve' ? (
-        <div className="flex flex-col gap-4">
-          <h2 className="text-2xl font-bold text-ink">موافقة على الخصم</h2>
-          <ManagerCode
-            staff={staff}
-            permission="sale.discount_over_limit"
-            reason={NEED_TEXT[effectiveMode.need]}
-            onApproved={(approval) => {
-              const { lineNo } = effectiveMode;
-              setCart((c) =>
-                lineNo === null ? { ...c, invoiceApproval: approval } : updateLine(c, lineNo, { approval }),
-              );
-              setMode({ kind: 'items' });
-            }}
-            onCancel={() => setMode({ kind: 'items' })}
-          />
-        </div>
-      ) : effectiveMode.kind === 'serial' && lineOf(effectiveMode.lineNo) ? (
-        <SerialPanel
-          key={effectiveMode.lineNo}
-          line={lineOf(effectiveMode.lineNo)!}
-          taken={
-            new Set(
-              cart.lines.filter((l) => l.lineNo !== effectiveMode.lineNo).flatMap((l) => l.serials ?? []),
-            )
-          }
-          onSave={(serials) => {
-            setCart((c) => updateLine(c, effectiveMode.lineNo, { serials }));
-            setMode({ kind: 'items' });
-          }}
-          onCancel={() => setMode({ kind: 'items' })}
-        />
-      ) : effectiveMode.kind === 'pick' && pieces.get(effectiveMode.productId) ? (
-        <VariantPicker
-          key={effectiveMode.productId}
-          name={pieces.get(effectiveMode.productId)![0]!.productName ?? ''}
-          pieces={pieces.get(effectiveMode.productId)!}
-          onAdd={(piece) => {
-            setMode({ kind: 'items' });
-            add(piece);
-          }}
-          onCancel={() => setMode({ kind: 'items' })}
-        />
-      ) : effectiveMode.kind === 'choose' ? (
-        <ModifierPanel
-          key={effectiveMode.item.variantId}
-          item={effectiveMode.item}
-          onAdd={(choice) => {
-            const { item, hit } = effectiveMode;
-            setMode({ kind: 'items' });
-            add(item, hit, undefined, choice);
-          }}
-          onCancel={() => setMode({ kind: 'items' })}
-        />
-      ) : effectiveMode.kind === 'hold' && priced ? (
-        <HoldPanel
-          cart={cart}
-          totalMinor={totalMinor}
-          currency={ctx.currency}
-          shiftId={props.shiftId}
-          cashierId={session.userId}
-          timezone={settings.timezone}
-          cutoff={settings.businessDayCutoff}
-          onPrintDeposit={props.onPrintDeposit}
-          onClose={() => setMode({ kind: 'items' })}
-          onDone={(hold) => {
-            setCart(() => EMPTY_CART);
-            setSelected(null);
-            setMode({ kind: 'items' });
-            setNotice({
-              tone: 'info',
-              text: hold.depositCode
-                ? `حُجز ${hold.number}. العربون بالقسيمة ${hold.depositCode} ويُخصم عند الاستلام.`
-                : `حُجز ${hold.number}. يجده الكاشير في «طلبات المتجر» عند الاستلام.`,
-            });
-          }}
-        />
-      ) : effectiveMode.kind === 'online' ? (
-        <OnlineOrdersPanel
-          orders={waitingOnline}
-          onClose={() => setMode({ kind: 'items' })}
-          onOpen={(order) => {
-            if (cart.lines.length > 0) {
-              setNotice({ tone: 'warning', text: 'أنهِ الفاتورة الحالية أو علّقها، ثم افتح الطلب.' });
-              setMode({ kind: 'items' });
-              return;
-            }
-            const { cart: opened, missing } = orderCart(order, catalog);
-            setCart(() => opened);
-            setMode({ kind: 'items' });
-            if (props.done) props.onNextSale();
-            setNotice(
-              missing.length > 0
-                ? { tone: 'warning', text: `غير موجود على هذا الجهاز: ${missing.join('، ')}. أضفه يدوياً.` }
-                : { tone: 'info', text: `فُتح طلب المتجر ${order.number} للزبون ${order.customerName}.` },
-            );
-          }}
-        />
-      ) : effectiveMode.kind === 'tables' && service ? (
-        <TableBoard
-          tables={service.tables}
-          held={props.heldCarts ?? []}
-          current={cart}
-          currency={ctx.currency}
-          totalOf={(c) => {
-            try {
-              return c.lines.length > 0 ? priceCart(c, ctx).priced.totals.totalMinor : 0;
-            } catch {
-              return 0;
-            }
-          }}
-          onPick={(table) => {
-            setMode({ kind: 'items' });
-            props.onOpenTable?.(table);
-          }}
-          onClose={() => setMode({ kind: 'items' })}
-        />
-      ) : effectiveMode.kind === 'help' ? (
-        <section
-          aria-label="دليل الاختصارات"
-          className="flex flex-col gap-4 rounded-card border border-line bg-surface p-6"
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-ink">دليل الاختصارات</h2>
-            <Button variant="secondary" icon={<CloseIcon />} onClick={() => setMode({ kind: 'items' })}>
-              أغلق
+    <CashierShell
+      statusBar={props.statusBar}
+      cart={cartPanel}
+      mobileView={phoneView}
+      {...(effectiveMode.kind === 'pay' ? { itemsLabel: 'الدفع', cartLabel: 'السلة' } : {})}
+      onMobileView={setPhoneView}
+      cartBadge={lineCount > 0 ? displayNumber(String(lineCount), digits) : undefined}
+      miniBar={
+        lineCount > 0 && mode.kind === 'items' ? (
+          // A phone, in the grid: what is in the cart and its total, one tap from the cart (and the pay button there)
+          <div
+            role="group"
+            aria-label="ملخّص السلة"
+            className="flex min-h-14 items-center gap-3 rounded-card border border-line bg-surface px-3 py-2 shadow-e2"
+          >
+            <span className="min-w-0 flex-1 text-sm/tight font-semibold text-ink">
+              {counted(lineCount, ['صنف واحد', 'صنفان', 'أصناف', 'صنفاً'], digits)}
+              <span className="block text-ink-muted">
+                المجموع{' '}
+                <ExactMoney minor={totalMinor} currency={ctx.currency} className="font-bold text-ink" />
+              </span>
+            </span>
+            <Button size="md" aria-label="افتح السلة" onClick={() => setPhoneView('cart')}>
+              عرض السلة
             </Button>
           </div>
-          <table className="w-full text-start">
-            <thead>
-              <tr className="text-sm text-ink-muted">
-                <th className="py-2 text-start font-semibold">الفعل</th>
-                <th className="py-2 text-start font-semibold">المفتاح</th>
-              </tr>
-            </thead>
-            <tbody>
-              {SHORTCUTS.map(([action, key]) => (
-                <tr key={action} className="border-t border-line">
-                  <td className="py-3">{action}</td>
-                  <td className="py-3">
-                    <kbd
-                      dir="ltr"
-                      className="rounded-small border border-line bg-surface-muted px-2 py-1 font-sans text-sm font-semibold"
-                    >
-                      {key}
-                    </kbd>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      ) : (
-        <>
-          <div className="flex shrink-0 gap-3">
-            <label className="flex h-14 min-w-0 flex-1 items-center gap-2.5 rounded-full border border-line-control/50 bg-surface px-5 shadow-e1 transition-[border-color,box-shadow] duration-120 focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15">
-              <SearchIcon size={20} className="text-ink-muted" />
-              <span className="sr-only">ابحث أو امسح الباركود</span>
-              <input
-                ref={searchRef}
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={onSearchKey}
-                placeholder="ابحث باسم الصنف أو امسح الباركود"
-                autoComplete="off"
-                className="h-full min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-ink-subtle"
-              />
-              {multiplier ? (
-                <span
-                  className="num rounded-full bg-brand-soft px-3 py-1 font-bold text-brand-ink"
-                  aria-label={`الكمية التالية ${multiplier}`}
+        ) : undefined
+      }
+    >
+      {/* In the page body: on a phone the items tab is hidden while the cart shows, and so would a toast inside it */}
+      {(justSwapped ?? justAdded) && !asking
+        ? createPortal(
+            <p
+              role="status"
+              className="pointer-events-none fixed inset-x-4 bottom-24 z-70 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
+            >
+              <CheckIcon size={16} className="shrink-0" />
+              <span className="truncate">
+                {justSwapped ? 'بُدّل ✓' : 'أُضيف ✓'} <bdi>{justSwapped ?? justAdded}</bdi>
+              </span>
+            </p>,
+            document.body,
+          )
+        : null}
+      {quoteAsk ? (
+        <QuoteDialog
+          customerName={cart.customer?.name ?? null}
+          busy={quoteBusy}
+          onSave={(choice) => void saveQuote(quoteAsk, choice)}
+          onClose={() => setQuoteAsk(null)}
+        />
+      ) : null}
+      {outAsk ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setOutAsk(null);
+          }}
+          size="sm"
+          title="لا يوجد مخزون"
+          description={`«${outAsk.item.name}» نفد من المخزون. بيع على كل حال؟`}
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setOutAsk(null)}>
+                لا، لا تُضفه
+              </Button>
+              {/* A pharmacy: the same medicine in another brand, in stock (round 39: also on a phone) */}
+              {settings.pharmacy ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const ask = outAsk;
+                    setOutAsk(null);
+                    setMode({ kind: 'alternatives', variantId: ask.item.variantId });
+                  }}
                 >
-                  ×{displayNumber(String(multiplier), digits)}
-                </span>
+                  بدائل
+                </Button>
               ) : null}
-              {query ? (
-                <button
-                  type="button"
-                  aria-label="امسح البحث"
-                  onClick={() => setQuery('')}
-                  className="grid size-12 place-items-center rounded-small text-ink-muted hover:bg-surface-muted"
-                >
-                  <CloseIcon size={16} />
-                </button>
-              ) : (
-                <span className="hidden items-center gap-1.5 text-xs whitespace-nowrap text-ink-muted lg:flex">
-                  <BarcodeIcon size={16} />
-                  القارئ جاهز
-                </span>
-              )}
-            </label>
-            {props.lastLines.length > 0 ? (
               <Button
-                variant="secondary"
-                icon={<RetryIcon size={16} />}
                 onClick={() => {
-                  for (const l of props.lastLines) {
-                    const hit = l.barcode ? catalog.byBarcode.get(l.barcode) : undefined;
-                    const item = hit?.item ?? catalog.byVariant.get(l.variantId);
-                    if (item) setCart((c) => addItem(c, item, hit ?? null, l.qty));
+                  const ask = outAsk;
+                  setOutAsk(null);
+                  outOk.current = true;
+                  try {
+                    add(ask.item, ask.hit, ask.weighedQty, ask.choice);
+                  } finally {
+                    outOk.current = false;
                   }
-                  if (props.done) props.onNextSale();
                 }}
               >
-                كرّر آخر طلب
+                نعم، بِع على كل حال
               </Button>
-            ) : null}
-          </div>
-          {notice ? (
-            <div
-              role="alert"
-              className={cn(
-                'flex items-center gap-3 rounded-control px-4 py-3 font-semibold',
-                notice.tone === 'warning' ? 'bg-warning-soft text-warning-ink' : 'bg-info-soft text-info-ink',
-              )}
-            >
-              <WarningIcon size={20} />
-              <span className="flex-1">{notice.text}</span>
-              <button
-                type="button"
-                aria-label="أخفِ التنبيه"
-                onClick={() => setNotice(null)}
-                className="grid size-12 place-items-center rounded-small"
+            </>
+          }
+        />
+      ) : null}
+      {zeroAsk ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setZeroAsk(null);
+          }}
+          size="sm"
+          title="السعر 0 — تأكيد؟"
+          description={`«${zeroAsk.item.name}» سعره صفر في الأصناف، فيدخل السلة بلا مقابل. أتبيعه هكذا؟`}
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setZeroAsk(null)}>
+                لا، لا تُضفه
+              </Button>
+              <Button
+                onClick={() => {
+                  const ask = zeroAsk;
+                  setZeroAsk(null);
+                  zeroOk.current = true;
+                  try {
+                    add(ask.item, ask.hit, ask.weighedQty, ask.choice);
+                  } finally {
+                    zeroOk.current = false;
+                  }
+                }}
               >
-                <CloseIcon size={16} />
-              </button>
-            </div>
-          ) : null}
-          {catalog.categories.length > 0 ? (
-            <div role="group" aria-label="التصنيفات" className="flex shrink-0 gap-2 overflow-x-auto pb-1">
-              {[{ id: null, name: 'الكل' }, ...catalog.categories].map((c) => {
-                const on = !query && category === c.id;
-                return (
-                  <button
-                    key={c.id ?? 'all'}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => {
-                      setCategory(c.id);
-                      setQuery('');
-                    }}
-                    className={cn(
-                      'min-h-12 shrink-0 rounded-full px-5 font-semibold whitespace-nowrap transition-colors duration-120',
-                      on
-                        ? 'bg-ink text-surface shadow-e1'
-                        : 'bg-surface text-ink-muted shadow-e1 ring-1 ring-line/70 hover:text-ink',
-                    )}
-                  >
-                    {c.name}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          {results.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-12 text-center text-ink-muted">
-              <span className="text-lg font-semibold text-ink">
-                {catalog.items.length === 0 ? 'لا أصناف على هذا الجهاز بعد' : 'لا يوجد صنف بهذا الاسم'}
-              </span>
-              <span>
-                {catalog.items.length === 0
-                  ? 'تصل الأصناف مع أول اتصال بالإنترنت.'
-                  : 'جرّب كلمة أقصر، أو امسح الباركود.'}
-              </span>
-            </div>
-          ) : (
-            <ul
-              aria-label="الأصناف"
-              className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] content-start gap-3"
-            >
-              {entries.map((entry) => {
-                if (entry.kind === 'model') {
-                  const price = lowestPrice(entry.pieces);
-                  return (
-                    <li key={entry.productId}>
-                      <ItemTile
-                        name={entry.name}
-                        priceMinor={price.priceMinor}
-                        currency={price.currency}
-                        detail={piecesText(entry.pieces.length)}
-                        pictureSlot
-                        {...(entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
-                        selected={
-                          (effectiveMode.kind === 'pick' && effectiveMode.productId === entry.productId) ||
-                          cart.lines.some((l) => entry.pieces.some((p) => p.variantId === l.variantId))
-                        }
-                        onSelect={() => setMode({ kind: 'pick', productId: entry.productId })}
-                        className="w-full"
-                      />
-                    </li>
-                  );
-                }
-                const { item } = entry;
-                return (
-                  <li key={item.variantId}>
-                    <ItemTile
-                      name={item.name}
-                      priceMinor={item.price.priceMinor}
-                      currency={item.price.currency}
-                      weighed={item.unit?.allowsFraction ?? false}
-                      {...(item.imageUrl ? { imageUrl: item.imageUrl } : {})}
-                      selected={cart.lines.some((l) => l.variantId === item.variantId)}
-                      onSelect={() => add(item)}
-                      className="w-full"
-                    />
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </>
-      )}
+                نعم، أضفه بسعر 0
+              </Button>
+            </>
+          }
+        />
+      ) : null}
+      {quote ? <PrintableQuote data={quote} width={80} /> : null}
+      {kitchen ? <PrintableKitchenTicket data={kitchen} /> : null}
+      <SaleModePanel
+        props={props}
+        effectiveMode={effectiveMode}
+        catalog={catalog}
+        cart={cart}
+        ctx={ctx}
+        staff={staff}
+        session={session}
+        settings={settings}
+        seller={seller}
+        pos={pos}
+        soldOnline={soldOnline}
+        setSoldOnline={setSoldOnline}
+        setCart={setCart}
+        setMode={setMode}
+        setSelected={setSelected}
+        setSeller={setSeller}
+        setNotice={setNotice}
+        setJustAdded={setJustAdded}
+        setJustSwapped={setJustSwapped}
+        setJustMade={setJustMade}
+        setPlanFeeMinor={setPlanFeeMinor}
+        add={add}
+        lineOf={lineOf}
+        checkLine={checkLine}
+        applyLine={applyLine}
+        checkInvoice={checkInvoice}
+        removeNow={removeNow}
+        holdSale={holdSale}
+        priced={priced}
+        totalMinor={totalMinor}
+        lineCount={lineCount}
+        packsByVariant={packsByVariant}
+        lastUnits={lastUnits}
+        setLastUnits={setLastUnits}
+        saleUnits={saleUnits}
+        pieces={pieces}
+        inCartQty={inCartQty}
+        pickerAddedAt={pickerAddedAt}
+        outOk={outOk}
+        cartRef={cartRef}
+        itemsArea={itemsArea}
+        replacedLine={replacedLine}
+        batchPlan={batchPlan}
+        rxNeed={rxNeed}
+        hasControlled={hasControlled}
+        waitingOnline={waitingOnline}
+        service={service}
+      />
     </CashierShell>
   );
 }

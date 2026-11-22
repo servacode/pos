@@ -1,15 +1,34 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { ReceiptMethod, ReceiptPayload } from '@serva/core/contracts/documents';
+import { CURRENCIES } from '@serva/core/currencies';
+import { formatMoney } from '@serva/core/money';
+import { stripBidiControls } from '@serva/core/text';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
 import type { SyncDocument } from '@serva/sync';
-import { BackIcon, Button, cn, Money, PrintIcon, TextField } from '@serva/ui';
+import {
+  Alert,
+  Avatar,
+  Button,
+  CardIcon,
+  CashIcon,
+  ChequeIcon,
+  CustomersIcon,
+  Money,
+  PhoneIcon,
+  PrintIcon,
+  TextField,
+  TransferIcon,
+} from '@serva/ui';
 import type { Catalog } from '../catalog';
+import { ChoiceGroup, DoneCard, FlowHeader, OptionTile, SummaryRow } from '../FlowParts';
 import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import type { OpenShift } from '../shift/shift';
 import type { StaffSession } from '../staff/staff';
-import { CustomerPicker, type PickedCustomer } from './CustomerPicker';
+import { CustomerBalance, CustomerPicker, useCustomerBalance, type PickedCustomer } from './CustomerPicker';
+import { allocationsFor, InstalmentPick, useCustomerInstalments } from './InstalmentPick';
+import { amountText } from '../pay/payment';
 
 const METHOD_TEXT: Record<ReceiptMethod, string> = {
   cash: 'نقداً',
@@ -17,6 +36,14 @@ const METHOD_TEXT: Record<ReceiptMethod, string> = {
   card: 'بطاقة',
   transfer: 'تحويل',
   cheque: 'شيك',
+};
+
+const METHOD_ICON: Record<ReceiptMethod, ReactNode> = {
+  cash: <CashIcon />,
+  wallet: <PhoneIcon />,
+  card: <CardIcon />,
+  transfer: <TransferIcon />,
+  cheque: <ChequeIcon />,
 };
 
 export type SavedReceipt = Pick<SyncDocument, 'id' | 'number' | 'deviceTime' | 'payload'>;
@@ -32,17 +59,30 @@ export function ReceiptScreen({
   shift,
   onBack,
   onPrint,
+  initialCustomer,
 }: {
   session: StaffSession;
   catalog: Catalog;
   shift: OpenShift;
   onBack: () => void;
   onPrint: (saved: SavedReceipt) => void;
+  /** The rep opens it from a customer's page: that customer starts picked */
+  initialCustomer?: PickedCustomer;
 }) {
   const pos = usePos();
   const settings = catalog.settings!;
   const base = settings.baseCurrency;
-  const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  const [customer, setCustomer] = useState<PickedCustomer | null>(initialCustomer ?? null);
+  // What the customer owes, as the server says (online only)
+  const owed = useCustomerBalance(customer?.id ?? null);
+  // الأقساط: the customer's open plans (online only); a payment can be taken toward the oldest instalment
+  const instalments = useCustomerInstalments(customer?.id ?? null);
+  const hasPlans = !!instalments && instalments.plans.length > 0;
+  const [onInstalment, setOnInstalment] = useState(true);
+  const [pickedPlan, setPickedPlan] = useState('');
+  const planId = hasPlans
+    ? (instalments.plans.find((p) => p.id === pickedPlan)?.id ?? instalments.plans[0]!.id)
+    : '';
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<ReceiptMethod>('cash');
   const [reference, setReference] = useState('');
@@ -50,6 +90,10 @@ export function ReceiptScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedReceipt | null>(null);
+  // The amount is above what the customer owes: the cashier confirms the rest becomes customer credit
+  const [askOver, setAskOver] = useState(false);
+  // What the customer owed when the receipt was saved: the balance read may refresh after the save
+  const [owedBefore, setOwedBefore] = useState<number | null>(null);
 
   const minor = parseAmount(amount, base);
   const ready =
@@ -57,6 +101,10 @@ export function ReceiptScreen({
 
   async function record() {
     if (!ready || !customer) return;
+    if (owed !== null && minor! > Math.max(owed, 0) && !askOver) {
+      setAskOver(true);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -71,6 +119,8 @@ export function ReceiptScreen({
         reference: method === 'cash' ? null : reference.trim(),
         note: note.trim() || null,
       };
+      const allocations = hasPlans && onInstalment ? allocationsFor(instalments, planId, minor!) : [];
+      if (allocations.length > 0) payload.allocations = allocations;
       const entry = await pos.save({
         type: 'receipt',
         payload: payload as unknown as Record<string, unknown>,
@@ -83,6 +133,7 @@ export function ReceiptScreen({
         deviceTime: entry.doc.deviceTime,
         payload: entry.doc.payload,
       };
+      setOwedBefore(owed);
       setSaved(doc);
       onPrint(doc);
     } catch {
@@ -93,7 +144,9 @@ export function ReceiptScreen({
   }
 
   function again() {
+    setAskOver(false);
     setSaved(null);
+    setOwedBefore(null);
     setCustomer(null);
     setAmount('');
     setReference('');
@@ -102,23 +155,30 @@ export function ReceiptScreen({
   }
 
   return (
-    <div className="flex w-full max-w-3xl flex-col gap-4">
-      <div className="flex items-center gap-4">
-        <Button variant="secondary" icon={<BackIcon />} onClick={onBack}>
-          ارجع للبيع
-        </Button>
-        <div className="flex flex-col">
-          <h1 className="text-3xl font-bold text-ink">قبض من زبون</h1>
-          <p className="text-ink-muted">دفعة من حساب زبون. تُخصم من دينه، ويُطبع له سند قبض.</p>
-        </div>
-      </div>
+    <div className="flex w-full max-w-5xl flex-col gap-6">
+      <FlowHeader
+        onBack={onBack}
+        icon={<CustomersIcon size={24} />}
+        title="قبض من زبون"
+        description="دفعة من حساب زبون. تُخصم من دينه، ويُطبع له سند قبض."
+      />
       {saved ? (
-        <section
-          aria-label="سُجّل القبض"
-          className="flex flex-col items-start gap-4 rounded-card border border-line bg-surface p-6"
+        <DoneCard
+          label="سُجّل القبض"
+          title="سُجّل القبض"
+          actions={
+            <>
+              <Button variant="secondary" icon={<PrintIcon />} onClick={() => onPrint(saved)}>
+                اطبع السند مرة أخرى
+              </Button>
+              <Button onClick={again}>قبض آخر</Button>
+              <Button variant="ghost" onClick={onBack}>
+                ارجع للبيع
+              </Button>
+            </>
+          }
         >
-          <h2 className="text-2xl font-bold text-ink">سُجّل القبض</h2>
-          <p className="text-ink">
+          <p className="text-lg text-ink">
             <bdi dir="ltr" className="num font-semibold">
               {saved.number}
             </bdi>{' '}
@@ -129,94 +189,140 @@ export function ReceiptScreen({
               className="font-bold"
             />
           </p>
-          <div className="flex gap-3">
-            <Button variant="secondary" icon={<PrintIcon />} onClick={() => onPrint(saved)}>
-              اطبع السند مرة أخرى
-            </Button>
-            <Button onClick={again}>قبض آخر</Button>
-            <Button variant="secondary" onClick={onBack}>
-              ارجع للبيع
-            </Button>
-          </div>
-        </section>
-      ) : (
-        <section
-          aria-label="القبض"
-          className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
-        >
-          {customer ? (
-            <div className="flex items-center gap-2 rounded-control border border-line px-3 py-2">
-              <span className="flex flex-1 flex-col">
-                <span className="text-xs text-ink-muted">الزبون</span>
-                <span className="font-semibold text-ink">{customer.name}</span>
-              </span>
-              <Button variant="ghost" onClick={() => setCustomer(null)}>
-                غيّره
-              </Button>
-            </div>
-          ) : (
-            <CustomerPicker
-              catalog={catalog}
-              createdBy={session.userId}
-              onPicked={setCustomer}
-              onCancel={onBack}
-            />
-          )}
-          <TextField
-            label="المبلغ"
-            inputMode="decimal"
-            dir="ltr"
-            value={amount}
-            onChange={(e) =>
-              setAmount(
-                e.target.value
-                  .replace(/[^\d.٠-٩٫]/g, '')
-                  .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-                  .replace('٫', '.'),
-              )
-            }
-          />
-          <div role="group" aria-label="طريقة القبض" className="flex flex-wrap gap-2">
-            {(Object.keys(METHOD_TEXT) as ReceiptMethod[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                aria-pressed={method === m}
-                onClick={() => setMethod(m)}
-                className={cn(
-                  'min-h-11 rounded-control border-2 px-4 font-semibold',
-                  method === m
-                    ? 'border-brand bg-brand-soft text-brand-ink'
-                    : 'border-line bg-surface text-ink',
-                )}
-              >
-                {METHOD_TEXT[m]}
-              </button>
-            ))}
-          </div>
-          {method !== 'cash' ? (
-            <TextField
-              label="رقم العملية"
-              dir="ltr"
-              value={reference}
-              onChange={(e) => setReference(e.target.value.slice(0, 64))}
-            />
-          ) : null}
-          <TextField
-            label="ملاحظة (اختياري)"
-            value={note}
-            onChange={(e) => setNote(e.target.value.slice(0, 200))}
-          />
-          {error ? (
-            <p role="alert" className="font-semibold text-danger-ink">
-              {error}
+          {owedBefore !== null && owedBefore > 0 ? (
+            <p role="status" className="text-ink-muted">
+              {owedBefore - (saved.payload as unknown as ReceiptPayload).amountMinor > 0 ? (
+                <>
+                  بقي عليه{' '}
+                  <Money
+                    minor={owedBefore - (saved.payload as unknown as ReceiptPayload).amountMinor}
+                    currency={base}
+                    className="font-semibold text-ink"
+                  />
+                </>
+              ) : (
+                'سدّد كل ما عليه'
+              )}
             </p>
           ) : null}
-          <Button size="lg" disabled={!ready || saving} loading={saving} onClick={() => void record()}>
-            سجّل القبض{minor ? ' · ' : ''}
-            {minor ? <Money minor={minor} currency={base} /> : null}
-          </Button>
-        </section>
+        </DoneCard>
+      ) : (
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
+          <section
+            aria-label="القبض"
+            className="flex flex-col gap-5 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6"
+          >
+            {customer ? (
+              <div className="flex items-center gap-3 rounded-card border border-brand/30 bg-brand-soft/40 py-2 ps-3 pe-2">
+                <Avatar name={customer.name} />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-xs text-ink-muted">الزبون</span>
+                  <span className="truncate font-semibold text-ink">{customer.name}</span>
+                </span>
+                <CustomerBalance id={customer.id} currency={base} />
+                <Button variant="ghost" onClick={() => setCustomer(null)}>
+                  غيّره
+                </Button>
+              </div>
+            ) : (
+              <CustomerPicker
+                catalog={catalog}
+                createdBy={session.userId}
+                onPicked={setCustomer}
+                onCancel={onBack}
+              />
+            )}
+            {customer && hasPlans ? (
+              <InstalmentPick
+                data={instalments}
+                base={base}
+                on={onInstalment}
+                onToggle={setOnInstalment}
+                planId={planId}
+                onPlan={setPickedPlan}
+                onFill={(m) => {
+                  setAskOver(false);
+                  setOnInstalment(true);
+                  setAmount(amountText(m, base));
+                }}
+              />
+            ) : null}
+            <TextField
+              label="المبلغ"
+              inputMode="decimal"
+              dir="ltr"
+              value={amount}
+              onChange={(e) => {
+                setAskOver(false);
+                setAmount(
+                  e.target.value
+                    .replace(/[^\d.٠-٩٫]/g, '')
+                    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+                    .replace('٫', '.'),
+                );
+              }}
+              inputClassName="num text-2xl font-bold"
+              endAdornment={<span className="me-4 shrink-0 text-base">{CURRENCIES[base].symbolAr}</span>}
+            />
+            <ChoiceGroup label="طريقة القبض" className="grid grid-cols-2 gap-2 xl:grid-cols-3">
+              {(Object.keys(METHOD_TEXT) as ReceiptMethod[]).map((m) => (
+                <OptionTile
+                  key={m}
+                  selected={method === m}
+                  onClick={() => setMethod(m)}
+                  icon={METHOD_ICON[m]}
+                  title={METHOD_TEXT[m]}
+                />
+              ))}
+            </ChoiceGroup>
+            {method !== 'cash' ? (
+              <TextField
+                label="رقم العملية"
+                dir="ltr"
+                value={reference}
+                onChange={(e) => setReference(e.target.value.slice(0, 64))}
+              />
+            ) : null}
+            <TextField
+              label="ملاحظة (اختياري)"
+              value={note}
+              onChange={(e) => setNote(e.target.value.slice(0, 200))}
+            />
+          </section>
+          <aside className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 lg:sticky lg:top-0">
+            <div className="flex flex-col gap-0.5 rounded-control bg-surface-total px-4 py-3">
+              <span className="text-sm font-semibold text-ink-muted">المبلغ المقبوض</span>
+              <Money
+                minor={minor ?? 0}
+                currency={base}
+                className="text-kpi font-bold tracking-tight text-ink"
+                unitClassName="text-base font-semibold text-ink-subtle"
+              />
+            </div>
+            <dl className="flex flex-col">
+              <SummaryRow label="الزبون">{customer?.name ?? '—'}</SummaryRow>
+              <SummaryRow label="الطريقة">{METHOD_TEXT[method]}</SummaryRow>
+            </dl>
+            {error ? <Alert tone="error">{error}</Alert> : null}
+            {askOver && owed !== null ? (
+              <Alert tone="warning">
+                المبلغ أكبر من المستحق ({stripBidiControls(formatMoney(Math.max(owed, 0), base))}). الباقي
+                يصير رصيداً للزبون؟
+              </Alert>
+            ) : null}
+            <Button
+              size="lg"
+              fullWidth
+              disabled={!ready || saving}
+              loading={saving}
+              onClick={() => void record()}
+            >
+              {askOver ? 'نعم، سجّل والباقي رصيد' : 'سجّل القبض'}
+              {minor ? ' · ' : ''}
+              {minor ? <Money minor={minor} currency={base} /> : null}
+            </Button>
+          </aside>
+        </div>
       )}
     </div>
   );

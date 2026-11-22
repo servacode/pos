@@ -36,6 +36,7 @@ export const OWNER_KEYS: AccessKey[] = [
 export const MANAGER_KEYS: AccessKey[] = [
   'sale.create',
   'shift.close_any',
+  'report.view',
   'reports.financial',
   'devices.view',
 ];

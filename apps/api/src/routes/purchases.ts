@@ -1,36 +1,84 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  batchBlockInput,
   expiryQuery,
   inventoryQuery,
+  stocktakeListQuery,
+  transferCancelInput,
+  transferListQuery,
   profitQuery,
+  purchaseAttachmentInput,
   purchaseInput,
+  purchaseCorrectionInput,
+  purchaseDueChangeInput,
   purchaseListQuery,
+  purchaseOrderInput,
+  purchaseOrderListQuery,
+  purchaseOrderStatusInput,
+  purchaseOrderSuggestQuery,
+  purchaseOrderUpdateInput,
+  recallQuery,
   stocktakeInput,
+  supplierDueQuery,
   supplierInput,
+  supplierOpeningBalanceInput,
   supplierPaymentInput,
   supplierReturnInput,
+  supplierReturnListQuery,
   transferInput,
+  transferReceiveInput,
+  transferSettingsInput,
   uuidSchema,
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
+import type { AccessClaims } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
 import {
   createPurchase,
   createStocktake,
+  listStocktakes,
   createSupplierReturn,
   createTransfer,
   inventory,
   listPurchases,
   listSuppliers,
   listSupplierReturns,
+  readSupplierReturn,
   listTransfers,
+  openSupplierBalance,
   paySupplier,
   profitReport,
   readPurchase,
   saveSupplier,
 } from '../services/purchases';
+import {
+  createPurchaseOrder,
+  listPurchaseOrders,
+  movePurchaseOrder,
+  readPurchaseOrder,
+  suggestPurchaseOrder,
+  updatePurchaseOrder,
+} from '../services/purchase-orders';
+import { correctPurchase } from '../services/purchase-correction';
+import { changePurchaseDue } from '../services/purchase-due-change';
+import {
+  attachPurchasePhoto,
+  readPurchasePhoto,
+  removePurchasePhoto,
+  supplierDues,
+} from '../services/purchase-dues';
+import { assertDatesOpen } from '../services/period-close';
+import {
+  cancelTransfer,
+  readTransfer,
+  receiveTransfer,
+  saveTransferSettings,
+  transferSettings,
+} from '../services/transfers';
 import { expiryReport } from '../services/expiry';
+import { listDamagedStock } from '../services/damaged-stock';
+import { recall, setBatchBlocked } from '../services/batches';
 import { parseBody } from './validation';
 
 /** Suppliers, purchases, payments, stock value, counts and profit (contracts/purchases.ts). */
@@ -45,10 +93,21 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     return parsed.data;
   };
   const opts = { preHandler: requireAuth };
+  // Round 37 (decision 17): a document dated in a closed period is refused, in plain Arabic
+  const dateOpen = (auth: AccessClaims, body: unknown) => {
+    const date = (body as { date?: unknown } | null)?.date;
+    return assertDatesOpen(app.db, auth, [typeof date === 'string' ? date : undefined]);
+  };
 
   app.get('/v1/suppliers', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return listSuppliers(app.db, request.auth);
+  });
+  // Round 62: «مستحق هذا الأسبوع»: the credit invoices still owed that fall due within the days asked (7 by default)
+  app.get('/v1/suppliers/due', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const q = parseBody(supplierDueQuery, request.query);
+    return supplierDues(app.db, request.auth, q.days ?? 7, app.clock.now(), q.all !== undefined);
   });
   app.post('/v1/suppliers', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
@@ -74,12 +133,27 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     );
   });
 
+  // Round 47: the debt (or advance) a supplier had before the system (Dr/Cr 3900); a closed period refuses it
+  app.post('/v1/suppliers/:id/opening-balance', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const opened = await openSupplierBalance(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا المورد'),
+      parseBody(supplierOpeningBalanceInput, request.body),
+      meta(request),
+      app.clock.now(),
+    );
+    return reply.code(201).send(opened);
+  });
+
   app.get('/v1/purchases', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return listPurchases(app.db, request.auth, parseBody(purchaseListQuery, request.query));
   });
   app.post('/v1/purchases', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     const created = await createPurchase(
       app.db,
       request.auth,
@@ -92,14 +166,137 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     if (!request.auth) throw unauthorized();
     return readPurchase(app.db, request.auth, idOf(request.params, 'هذه الفاتورة'));
   });
+  // Round 64: a due date corrected after posting (a log row and an audit entry; nothing is posted)
+  app.patch('/v1/purchases/:id/due', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return changePurchaseDue(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الفاتورة'),
+      parseBody(purchaseDueChangeInput, request.body),
+      meta(request),
+    );
+  });
+  // Round 62: the photo of the supplier's paper invoice (it posts nothing; a new photo replaces the old one)
+  app.post(
+    '/v1/purchases/:id/attachments',
+    { ...opts, bodyLimit: 4 * 1024 * 1024 },
+    async (request, reply) => {
+      if (!request.auth) throw unauthorized();
+      const photo = await attachPurchasePhoto(
+        app.db,
+        request.auth,
+        idOf(request.params, 'هذه الفاتورة'),
+        parseBody(purchaseAttachmentInput, request.body),
+        meta(request),
+      );
+      return reply.code(201).send(photo);
+    },
+  );
+  // Private: the photo shows the supplier's prices, so it needs the token (the page loads it with a fetch)
+  app.get('/v1/purchases/:id/attachments/:attachmentId', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const attachment = uuidSchema.safeParse((request.params as { attachmentId?: string }).attachmentId);
+    if (!attachment.success) throw new AppError(404, 'not_found', 'هذه الصورة غير موجودة.');
+    const thumb = (request.query as { size?: string }).size === 'thumb';
+    const photo = await readPurchasePhoto(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الفاتورة'),
+      attachment.data,
+      thumb,
+    );
+    return reply
+      .header('content-type', photo.contentType)
+      .header('cache-control', 'private, max-age=3600')
+      .header('x-content-type-options', 'nosniff')
+      .header('content-security-policy', "default-src 'none'")
+      .send(photo.body);
+  });
+  app.delete('/v1/purchases/:id/attachments/:attachmentId', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const attachment = uuidSchema.safeParse((request.params as { attachmentId?: string }).attachmentId);
+    if (!attachment.success) throw new AppError(404, 'not_found', 'هذه الصورة غير موجودة.');
+    await removePurchasePhoto(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الفاتورة'),
+      attachment.data,
+      meta(request),
+    );
+    return reply.code(204).send();
+  });
+  // «صحّح الفاتورة»: a full reversal document, and the draft of the invoice to write again
+  app.post('/v1/purchases/:id/correct', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
+    const done = await correctPurchase(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الفاتورة'),
+      parseBody(purchaseCorrectionInput, request.body ?? {}),
+      meta(request),
+      app.clock.now(),
+    );
+    return reply.code(201).send(done);
+  });
+
+  // Purchase orders (طلبية شراء): a promise to a supplier; nothing posts, nothing moves
+  app.get('/v1/purchase-orders', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listPurchaseOrders(app.db, request.auth, parseBody(purchaseOrderListQuery, request.query));
+  });
+  app.get('/v1/purchase-orders/suggest', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const q = parseBody(purchaseOrderSuggestQuery, request.query);
+    return suggestPurchaseOrder(app.db, request.auth, { supplierId: q.supplierId, all: q.all === '1' });
+  });
+  app.post('/v1/purchase-orders', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const made = await createPurchaseOrder(
+      app.db,
+      request.auth,
+      parseBody(purchaseOrderInput, request.body),
+      meta(request),
+    );
+    return reply.code(201).send(made);
+  });
+  app.get('/v1/purchase-orders/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return readPurchaseOrder(app.db, request.auth, idOf(request.params, 'هذه الطلبية'));
+  });
+  app.put('/v1/purchase-orders/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return updatePurchaseOrder(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الطلبية'),
+      parseBody(purchaseOrderUpdateInput, request.body),
+      meta(request),
+    );
+  });
+  app.post('/v1/purchase-orders/:id/status', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const body = parseBody(purchaseOrderStatusInput, request.body);
+    return movePurchaseOrder(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الطلبية'),
+      body.status,
+      body.version,
+      meta(request),
+    );
+  });
 
   app.post('/v1/supplier-payments', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     const paid = await paySupplier(
       app.db,
       request.auth,
       parseBody(supplierPaymentInput, request.body),
       meta(request),
+      app.clock.now(),
     );
     return reply.code(201).send(paid);
   });
@@ -108,27 +305,66 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     if (!request.auth) throw unauthorized();
     return inventory(app.db, request.auth, parseBody(inventoryQuery, request.query));
   });
+  // «البضاعة التالفة» (round 35, D7): what each store holds as damaged goods
+  app.get('/v1/damaged-stock', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listDamagedStock(app.db, request.auth);
+  });
   app.get('/v1/inventory/expiry', opts, async (request) => {
     if (!request.auth) throw unauthorized();
-    return expiryReport(app.db, request.auth, parseBody(expiryQuery, request.query).days, app.clock.now());
+    const q = parseBody(expiryQuery, request.query);
+    return expiryReport(app.db, request.auth, q.days, app.clock.now(), {
+      variantId: q.variantId,
+      branchId: q.branchId,
+      unbatched: q.unbatched === '1',
+    });
+  });
+  // Recall (سحب دفعة): who got a batch, and stopping every till from selling it
+  app.get('/v1/batches/recall', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return recall(app.db, request.auth, parseBody(recallQuery, request.query).batchNo);
+  });
+  app.post('/v1/batches/block', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return setBatchBlocked(
+      app.db,
+      request.auth,
+      parseBody(batchBlockInput, request.body),
+      true,
+      meta(request),
+    );
+  });
+  app.post('/v1/batches/unblock', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return setBatchBlocked(
+      app.db,
+      request.auth,
+      parseBody(batchBlockInput, request.body),
+      false,
+      meta(request),
+    );
+  });
+  app.get('/v1/stocktakes', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listStocktakes(app.db, request.auth, parseBody(stocktakeListQuery, request.query));
   });
   app.post('/v1/stocktakes', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
-    const done = await createStocktake(
-      app.db,
-      request.auth,
-      parseBody(stocktakeInput, request.body),
-      meta(request),
-    );
+    await dateOpen(request.auth, request.body);
+    const input = parseBody(stocktakeInput, request.body);
+    const done = await createStocktake(app.db, request.auth, input, meta(request), {
+      lenientSerials: input.serialsLater === true,
+    });
     return reply.code(201).send(done);
   });
 
   app.get('/v1/transfers', opts, async (request) => {
     if (!request.auth) throw unauthorized();
-    return listTransfers(app.db, request.auth);
+    return listTransfers(app.db, request.auth, parseBody(transferListQuery, request.query));
   });
   app.post('/v1/transfers', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     return reply
       .code(201)
       .send(
@@ -136,12 +372,60 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
       );
   });
 
+  // Round 37 (decision 16): a transfer «بالطريق», the store's setting and the receiving branch's confirmation
+  app.get('/v1/transfers/settings', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return transferSettings(app.db, request.auth);
+  });
+  app.put('/v1/transfers/settings', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return saveTransferSettings(
+      app.db,
+      request.auth,
+      parseBody(transferSettingsInput, request.body),
+      meta(request),
+    );
+  });
+  app.get('/v1/transfers/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return readTransfer(app.db, request.auth, idOf(request.params, 'هذا التحويل'));
+  });
+  app.post('/v1/transfers/:id/cancel', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
+    return cancelTransfer(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا التحويل'),
+      parseBody(transferCancelInput, request.body ?? {}),
+      meta(request),
+      app.clock.now(),
+    );
+  });
+  app.post('/v1/transfers/:id/receive', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
+    return receiveTransfer(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا التحويل'),
+      parseBody(transferReceiveInput, request.body ?? {}),
+      meta(request),
+      app.clock.now(),
+    );
+  });
+
   app.get('/v1/supplier-returns', opts, async (request) => {
     if (!request.auth) throw unauthorized();
-    return listSupplierReturns(app.db, request.auth);
+    return listSupplierReturns(app.db, request.auth, parseBody(supplierReturnListQuery, request.query));
+  });
+  app.get('/v1/supplier-returns/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return readSupplierReturn(app.db, request.auth, idOf(request.params, 'هذا المرتجع'));
   });
   app.post('/v1/supplier-returns', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     return reply
       .code(201)
       .send(

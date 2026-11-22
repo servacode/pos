@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeArabic, stripBidiControls, toLatinDigits } from './text';
+import { COUNT_NOUNS, countNoun, normalizeArabic, stripBidiControls, toLatinDigits } from './text';
 
 describe('toLatinDigits', () => {
   it('converts Arabic-Indic and Persian digits', () => {
@@ -46,5 +46,31 @@ describe('normalizeArabic', () => {
     for (const s of ['آلة حاسبة', 'قهوة ‎عربية', 'Nescafé ٢٠٠غ']) {
       expect(normalizeArabic(normalizeArabic(s))).toBe(normalizeArabic(s));
     }
+  });
+});
+
+describe('countNoun', () => {
+  it('agrees the noun with the count', () => {
+    const n = (count: number) => countNoun(count, COUNT_NOUNS.variant);
+    expect(n(1)).toBe('متغيّر واحد');
+    expect(n(2)).toBe('متغيّران');
+    expect(n(0)).toBe('0 متغيّرات');
+    expect(n(3)).toBe('3 متغيّرات');
+    expect(n(10)).toBe('10 متغيّرات');
+    expect(n(11)).toBe('11 متغيّراً');
+    expect(n(15)).toBe('15 متغيّراً');
+    expect(n(100)).toBe('100 متغيّراً');
+    expect(countNoun(15, COUNT_NOUNS.user)).toBe('15 مستخدماً');
+    expect(countNoun(6, COUNT_NOUNS.invoice)).toBe('6 فواتير');
+  });
+
+  it('writes the dual after a preposition with the ya', () => {
+    expect(countNoun(2, COUNT_NOUNS.branch, '2', true)).toBe('فرعين');
+    expect(countNoun(3, COUNT_NOUNS.branch, '3', true)).toBe('3 فروع');
+  });
+
+  it('writes the number as the screen gives it', () => {
+    expect(countNoun(15, COUNT_NOUNS.item, '١٥')).toBe('١٥ صنفاً');
+    expect(countNoun(1, COUNT_NOUNS.item, '١')).toBe('صنف واحد');
   });
 });

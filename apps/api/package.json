@@ -11,6 +11,7 @@
     "seed": "tsx src/scripts/seed.ts",
     "integrity": "tsx src/scripts/integrity.ts",
     "reprocess": "tsx src/scripts/reprocess.ts",
+    "correct-credit-returns": "tsx src/scripts/correct-credit-returns.ts",
     "lint": "eslint src test",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",

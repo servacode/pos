@@ -3,6 +3,7 @@ import { convert } from '@serva/core/money';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { PaymentMethod } from '@serva/core/contracts/documents';
 import { rateFor, type SaleTender } from '@serva/core/sale';
+import type { ChequeDetails } from '@serva/core/contracts/cheques';
 
 /**
  * The payment panel's choices (27 › الدفع عند الكاشير; contract step 4): cash in the base currency
@@ -120,13 +121,19 @@ export function dueIn(
   return convert(dueMinor, base, currency, rateFor(rates, currency, base));
 }
 
-export function tenderOf(option: PayOption, amountMinor: number, reference: string): SaleTender {
+export function tenderOf(
+  option: PayOption,
+  amountMinor: number,
+  reference: string,
+  cheque: ChequeDetails | null = null,
+): SaleTender {
   return {
     method: option.method,
     currency: option.currency,
     amountMinor,
     rate: option.rate,
     reference: option.method === 'cash' ? null : reference.trim() || null,
+    ...(option.method === 'cheque' && cheque ? { cheque } : {}),
   };
 }
 

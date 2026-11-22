@@ -1,11 +1,30 @@
-import { lazy, Suspense, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
-import { FullScreenLoader } from '@serva/ui';
 import { AuthProvider } from '../auth/AuthProvider';
 import { GuestOnly, RequireAuth } from '../auth/guards';
-import { HomePage } from '../pages/HomePage';
+import { useAuth } from '../auth/useAuth';
+import { PaletteStateProvider } from '../layout/paletteState';
+import { PageLoading } from '../layout/PageLoading';
+import { ShellSkeleton } from '../layout/ShellSkeleton';
+import { NotFoundPage } from '../pages/NotFoundPage';
+// Rarely opened: its own chunk keeps the admin shell small
+const ForgotPasswordPage = lazy(() =>
+  import('../pages/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })),
+);
+const LandingPage = lazy(() => import('../pages/LandingPage').then((m) => ({ default: m.LandingPage })));
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
+import { SectorGate } from './SectorGate';
+import {
+  CHEQUE_SECTORS,
+  CONTRACT_PRICE_SECTORS,
+  EXPIRY_SECTORS,
+  HALL_SECTORS,
+  MEDICINAL_SECTORS,
+  RENTAL_SECTORS,
+  SERIAL_SECTORS,
+  WARRANTY_SECTORS,
+} from '../lib/sectors';
 
 // The devices page carries the QR generator: loaded when opened, not with every admin page.
 const DevicesPage = lazy(() => import('./devices/DevicesPage').then((m) => ({ default: m.DevicesPage })));
@@ -14,14 +33,73 @@ const ProductsPage = lazy(() => import('./products/ProductsPage').then((m) => ({
 const ProductRoute = lazy(() => import('./products/ProductPage').then((m) => ({ default: m.ProductRoute })));
 const LabelsPage = lazy(() => import('./labels/LabelsPage').then((m) => ({ default: m.LabelsPage })));
 const SerialsPage = lazy(() => import('./purchases/SerialsPage').then((m) => ({ default: m.SerialsPage })));
+const RentalsPage = lazy(() => import('./contracts/RentalsPage').then((m) => ({ default: m.RentalsPage })));
+const MaintenancePage = lazy(() =>
+  import('./contracts/MaintenancePage').then((m) => ({ default: m.MaintenancePage })),
+);
+const ContractPricesPage = lazy(() =>
+  import('./contracts/ContractPricesPage').then((m) => ({ default: m.ContractPricesPage })),
+);
+const DebtAgeingPage = lazy(() =>
+  import('./contracts/DebtAgeingPage').then((m) => ({ default: m.DebtAgeingPage })),
+);
+const WarrantyPage = lazy(() => import('./warranty/WarrantyPage').then((m) => ({ default: m.WarrantyPage })));
+const TaxRatesPage = lazy(() => import('./tax/TaxRatesPage').then((m) => ({ default: m.TaxRatesPage })));
+const QuotationsPage = lazy(() =>
+  import('./quotations/QuotationsPage').then((m) => ({ default: m.QuotationsPage })),
+);
+const QuotationPage = lazy(() =>
+  import('./quotations/QuotationPage').then((m) => ({ default: m.QuotationPage })),
+);
 const MerchandisePage = lazy(() =>
   import('./reports/MerchandisePage').then((m) => ({ default: m.MerchandisePage })),
+);
+const BelowCostPage = lazy(() =>
+  import('./reports/BelowCostPage').then((m) => ({ default: m.BelowCostPage })),
+);
+const StocktakePhonePage = lazy(() =>
+  import('./purchases/StocktakePhonePage').then((m) => ({ default: m.StocktakePhonePage })),
+);
+const WasteReportPage = lazy(() =>
+  import('./reports/WasteReportPage').then((m) => ({ default: m.WasteReportPage })),
+);
+const FoodCostPage = lazy(() => import('./reports/FoodCostPage').then((m) => ({ default: m.FoodCostPage })));
+const SuppliersPage = lazy(() =>
+  import('./purchases/SuppliersPage').then((m) => ({ default: m.SuppliersPage })),
+);
+const ReportsHomePage = lazy(() =>
+  import('./reports/ReportsHomePage').then((m) => ({ default: m.ReportsHomePage })),
+);
+const SalesReportPage = lazy(() =>
+  import('./reports/SalesReportPage').then((m) => ({ default: m.SalesReportPage })),
+);
+const CancellationsPage = lazy(() =>
+  import('./reports/CancellationsPage').then((m) => ({ default: m.CancellationsPage })),
+);
+const DamagedStockPage = lazy(() =>
+  import('./purchases/DamagedStockPage').then((m) => ({ default: m.DamagedStockPage })),
 );
 const SupplierReturnsPage = lazy(() =>
   import('./purchases/SupplierReturnsPage').then((m) => ({ default: m.SupplierReturnsPage })),
 );
+const PurchaseOrdersPage = lazy(() =>
+  import('./purchases/PurchaseOrdersPage').then((m) => ({ default: m.PurchaseOrdersPage })),
+);
+const PurchaseOrderFormPage = lazy(() =>
+  import('./purchases/PurchaseOrderFormPage').then((m) => ({ default: m.PurchaseOrderFormPage })),
+);
+const PurchaseOrderPage = lazy(() =>
+  import('./purchases/PurchaseOrderPage').then((m) => ({ default: m.PurchaseOrderPage })),
+);
 const TransfersPage = lazy(() =>
   import('./purchases/TransfersPage').then((m) => ({ default: m.TransfersPage })),
+);
+const ImportPage = lazy(() => import('./import/ImportPage').then((m) => ({ default: m.ImportPage })));
+const PriceListPage = lazy(() =>
+  import('./products/PriceListPage').then((m) => ({ default: m.PriceListPage })),
+);
+const PriceHistoryPage = lazy(() =>
+  import('./products/PriceHistoryPage').then((m) => ({ default: m.PriceHistoryPage })),
 );
 const BulkPricesPage = lazy(() =>
   import('./products/BulkPricesPage').then((m) => ({ default: m.BulkPricesPage })),
@@ -29,8 +107,31 @@ const BulkPricesPage = lazy(() =>
 const OnlineStorePage = lazy(() =>
   import('./shop/OnlineStorePage').then((m) => ({ default: m.OnlineStorePage })),
 );
+const ControlledRegisterPage = lazy(() =>
+  import('./pharmacy/ControlledRegisterPage').then((m) => ({ default: m.ControlledRegisterPage })),
+);
 const ExpiryPage = lazy(() => import('./purchases/ExpiryPage').then((m) => ({ default: m.ExpiryPage })));
+const RecallPage = lazy(() => import('./purchases/RecallPage').then((m) => ({ default: m.RecallPage })));
+const ExpiringSoonPage = lazy(() =>
+  import('./purchases/ExpiringSoonPage').then((m) => ({ default: m.ExpiringSoonPage })),
+);
+const ShortagesPage = lazy(() =>
+  import('./purchases/ShortagesPage').then((m) => ({ default: m.ShortagesPage })),
+);
 const ChequesPage = lazy(() => import('./cheques/ChequesPage').then((m) => ({ default: m.ChequesPage })));
+// الأقساط: the plans, the due list and the store's rules
+const InstalmentPlansPage = lazy(() =>
+  import('./installments/PlansPage').then((m) => ({ default: m.PlansPage })),
+);
+const InstalmentPlanPage = lazy(() =>
+  import('./installments/PlanPage').then((m) => ({ default: m.PlanPage })),
+);
+const InstalmentWorklistPage = lazy(() =>
+  import('./installments/WorklistPage').then((m) => ({ default: m.WorklistPage })),
+);
+const InstalmentSettingsPage = lazy(() =>
+  import('./installments/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
 const PromotionsPage = lazy(() =>
   import('./promotions/PromotionsPage').then((m) => ({ default: m.PromotionsPage })),
 );
@@ -38,6 +139,8 @@ const CategoriesPage = lazy(() =>
   import('./categories/CategoriesPage').then((m) => ({ default: m.CategoriesPage })),
 );
 // The start wizard and «إعدادات المتجر» (04)
+// The home page is its own chunk: it keeps the admin chunk under its size budget
+const HomePage = lazy(() => import('../pages/HomePage').then((m) => ({ default: m.HomePage })));
 const WelcomePage = lazy(() => import('./store/WelcomePage').then((m) => ({ default: m.WelcomePage })));
 const SettingsPage = lazy(() => import('./store/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const BroadcastsPage = lazy(() =>
@@ -58,25 +161,80 @@ const InventoryPage = lazy(() =>
 const SubscriptionPage = lazy(() =>
   import('./subscription/SubscriptionPage').then((m) => ({ default: m.SubscriptionPage })),
 );
+const BranchesPage = lazy(() => import('./branches/BranchesPage').then((m) => ({ default: m.BranchesPage })));
+const StaffPage = lazy(() => import('./staff/StaffPage').then((m) => ({ default: m.StaffPage })));
 const PinPage = lazy(() => import('./staff/PinPage').then((m) => ({ default: m.PinPage })));
 // The reports: «مبيعات اليوم», the shifts and their close report, «شاشة الدليل», and the books.
 const DayReportPage = lazy(() =>
   import('./reports/DayReportPage').then((m) => ({ default: m.DayReportPage })),
 );
+const InvoicesPage = lazy(() => import('./sales/InvoicesPage').then((m) => ({ default: m.InvoicesPage })));
 const ShiftsPage = lazy(() => import('./reports/ShiftsPage').then((m) => ({ default: m.ShiftsPage })));
 const ShiftReportPage = lazy(() =>
   import('./reports/ShiftReportPage').then((m) => ({ default: m.ShiftReportPage })),
 );
 const EvidencePage = lazy(() => import('./reports/EvidencePage').then((m) => ({ default: m.EvidencePage })));
-const ChartOfAccountsPage = lazy(() =>
-  import('./accounting/ChartOfAccountsPage').then((m) => ({ default: m.ChartOfAccountsPage })),
+// Statements, expenses and the profit and loss (29).
+const StatementPage = lazy(() =>
+  import('./ledger/StatementPage').then((m) => ({ default: m.StatementPage })),
 );
-const JournalPage = lazy(() => import('./accounting/JournalPage').then((m) => ({ default: m.JournalPage })));
-const TrialBalancePage = lazy(() =>
-  import('./accounting/TrialBalancePage').then((m) => ({ default: m.TrialBalancePage })),
+const ExpensesPage = lazy(() => import('./ledger/ExpensesPage').then((m) => ({ default: m.ExpensesPage })));
+const Accounting = lazy(() => import('./accounting/AccountingRoutes'));
+const Distribution = lazy(() => import('./distribution/DistributionRoutes'));
+const DistributionReports = lazy(() =>
+  import('./distribution/DistributionReportsPage').then((m) => ({ default: m.DistributionReportsPage })),
 );
 
-const page = (element: ReactNode) => <Suspense fallback={<FullScreenLoader />}>{element}</Suspense>;
+/** The root: the home page for a signed-in user, the landing page for a visitor (the session is restored first) */
+function Front() {
+  const { state } = useAuth();
+  if (state.status === 'loading') return <ShellSkeleton />;
+  return state.status === 'signedIn' ? <HomePage /> : <LandingPage />;
+}
+
+// The pages share ONE Suspense boundary (around all the routes, below): a boundary per page would show
+// its fallback, and remount the shell, on every move to a page that is not loaded yet.
+const page = (element: ReactNode) => element;
+
+/** The sections people open most, fetched when the browser is idle so a first click finds them loaded. */
+const PREFETCH: Array<() => Promise<unknown>> = [
+  () => import('../pages/HomePage'),
+  () => import('./reports/DayReportPage'),
+  () => import('./sales/InvoicesPage'),
+  () => import('./customers/CustomersPage'),
+  () => import('./products/ProductsPage'),
+  () => import('./purchases/PurchasesPage'),
+  () => import('./purchases/InventoryPage'),
+  () => import('./reports/ReportsHomePage'),
+  () => import('./store/SettingsPage'),
+];
+
+/** What the one boundary shows on the first page of a visit: the shell's frame, with the person's own once known. */
+function RouteFallback() {
+  const { state } = useAuth();
+  return state.status === 'signedIn' ? <PageLoading /> : <ShellSkeleton />;
+}
+
+function PrefetchSections() {
+  const { state } = useAuth();
+  const signedIn = state.status === 'signedIn';
+  useEffect(() => {
+    // Tests render one page at a time: loading every section there only slows them down
+    if (!signedIn || import.meta.env.MODE === 'test') return;
+    const idle = (window as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+    let index = 0;
+    let timer = 0;
+    const next = () => {
+      const load = PREFETCH[index++];
+      if (!load) return;
+      load().catch(() => undefined);
+      timer = window.setTimeout(() => (idle ? idle(next) : next()), 150);
+    };
+    timer = window.setTimeout(() => (idle ? idle(next) : next()), 1200);
+    return () => window.clearTimeout(timer);
+  }, [signedIn]);
+  return null;
+}
 
 /**
  * Store admin: online, signed in with phone and password. Booting it restores the session from
@@ -86,47 +244,181 @@ const page = (element: ReactNode) => <Suspense fallback={<FullScreenLoader />}>{
 export function AdminApp() {
   return (
     <AuthProvider>
-      <Routes>
-        <Route element={<GuestOnly />}>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-        </Route>
-        <Route element={<RequireAuth />}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/devices" element={page(<DevicesPage />)} />
-          <Route path="/products" element={page(<ProductsPage />)} />
-          <Route path="/products/:id" element={page(<ProductRoute />)} />
-          <Route path="/categories" element={page(<CategoriesPage />)} />
-          <Route path="/promotions" element={page(<PromotionsPage />)} />
-          <Route path="/cheques" element={page(<ChequesPage />)} />
-          <Route path="/customers" element={page(<CustomersPage />)} />
-          <Route path="/messages" element={page(<BroadcastsPage />)} />
-          <Route path="/purchases" element={page(<PurchasesPage />)} />
-          <Route path="/inventory" element={page(<InventoryPage />)} />
-          <Route path="/expiry" element={page(<ExpiryPage />)} />
-          <Route path="/online-store" element={page(<OnlineStorePage />)} />
-          <Route path="/prices" element={page(<BulkPricesPage />)} />
-          <Route path="/transfers" element={page(<TransfersPage />)} />
-          <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
-          <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
-          <Route path="/serials" element={page(<SerialsPage />)} />
-          <Route path="/labels" element={page(<LabelsPage />)} />
-          <Route path="/customers/:id" element={page(<CustomerPage />)} />
-          <Route path="/me/pin" element={page(<PinPage />)} />
-          <Route path="/welcome" element={page(<WelcomePage />)} />
-          <Route path="/settings" element={page(<SettingsPage />)} />
-          <Route path="/subscription" element={page(<SubscriptionPage />)} />
-          <Route path="/sales/today" element={page(<DayReportPage />)} />
-          <Route path="/shifts" element={page(<ShiftsPage />)} />
-          <Route path="/shifts/:id" element={page(<ShiftReportPage />)} />
-          <Route path="/evidence" element={page(<EvidencePage />)} />
-          <Route path="/accounting" element={<Navigate to="/accounting/accounts" replace />} />
-          <Route path="/accounting/accounts" element={page(<ChartOfAccountsPage />)} />
-          <Route path="/accounting/journal" element={page(<JournalPage />)} />
-          <Route path="/accounting/trial-balance" element={page(<TrialBalancePage />)} />
-        </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <PrefetchSections />
+      <PaletteStateProvider>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route element={<GuestOnly />}>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            </Route>
+            {/* A visitor who is not signed in sees the landing page at the root; a signed-in user, the home page */}
+            <Route path="/" element={<Front />} />
+            <Route element={<RequireAuth />}>
+              <Route path="/devices" element={page(<DevicesPage />)} />
+              <Route path="/products" element={page(<ProductsPage />)} />
+              <Route path="/products/import" element={<Navigate to="/import?type=products" replace />} />
+              <Route path="/products/:id" element={page(<ProductRoute />)} />
+              <Route path="/categories" element={page(<CategoriesPage />)} />
+              <Route path="/promotions" element={page(<PromotionsPage />)} />
+              <Route
+                path="/cheques"
+                element={page(
+                  <SectorGate sectors={CHEQUE_SECTORS}>
+                    <ChequesPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route path="/installments" element={page(<InstalmentPlansPage />)} />
+              <Route path="/installments/due" element={page(<InstalmentWorklistPage />)} />
+              <Route path="/installments/settings" element={page(<InstalmentSettingsPage />)} />
+              <Route path="/installments/:id" element={page(<InstalmentPlanPage />)} />
+              <Route path="/customers" element={page(<CustomersPage />)} />
+              <Route path="/messages" element={page(<BroadcastsPage />)} />
+              <Route path="/purchases" element={page(<PurchasesPage />)} />
+              <Route path="/suppliers" element={page(<SuppliersPage />)} />
+              <Route path="/inventory" element={page(<InventoryPage />)} />
+              <Route path="/inventory/count" element={page(<StocktakePhonePage />)} />
+              <Route
+                path="/expiry"
+                element={page(
+                  <SectorGate sectors={EXPIRY_SECTORS}>
+                    <ExpiryPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/recall"
+                element={page(
+                  <SectorGate sectors={EXPIRY_SECTORS}>
+                    <RecallPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/expiring-soon"
+                element={page(
+                  <SectorGate sectors={MEDICINAL_SECTORS}>
+                    <ExpiringSoonPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/shortages"
+                element={page(
+                  <SectorGate sectors={MEDICINAL_SECTORS}>
+                    <ShortagesPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/controlled-register"
+                element={page(
+                  <SectorGate sectors={['pharmacy']}>
+                    <ControlledRegisterPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route path="/online-store" element={page(<OnlineStorePage />)} />
+              <Route path="/prices" element={page(<BulkPricesPage />)} />
+              <Route path="/price-history" element={page(<PriceHistoryPage />)} />
+              <Route path="/price-list" element={page(<PriceListPage />)} />
+              <Route path="/import" element={page(<ImportPage />)} />
+              <Route path="/transfers" element={page(<TransfersPage />)} />
+              <Route path="/purchase-orders" element={page(<PurchaseOrdersPage />)} />
+              <Route path="/purchase-orders/new" element={page(<PurchaseOrderFormPage />)} />
+              <Route path="/purchase-orders/:id" element={page(<PurchaseOrderPage />)} />
+              <Route path="/purchase-orders/:id/edit" element={page(<PurchaseOrderFormPage />)} />
+              <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
+              <Route path="/damaged-stock" element={page(<DamagedStockPage />)} />
+              <Route path="/reports" element={page(<ReportsHomePage />)} />
+              <Route path="/reports/sales" element={page(<SalesReportPage />)} />
+              <Route path="/reports/below-cost" element={page(<BelowCostPage />)} />
+              <Route path="/reports/food-cost" element={page(<FoodCostPage />)} />
+              <Route path="/reports/waste" element={page(<WasteReportPage />)} />
+              <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
+              <Route
+                path="/reports/cancellations"
+                element={page(
+                  <SectorGate sectors={HALL_SECTORS}>
+                    <CancellationsPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/serials"
+                element={page(
+                  <SectorGate sectors={SERIAL_SECTORS}>
+                    <SerialsPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/warranty"
+                element={page(
+                  <SectorGate sectors={WARRANTY_SECTORS}>
+                    <WarrantyPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/rentals"
+                element={page(
+                  <SectorGate sectors={RENTAL_SECTORS}>
+                    <RentalsPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/maintenance"
+                element={page(
+                  <SectorGate sectors={RENTAL_SECTORS}>
+                    <MaintenancePage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/contract-prices"
+                element={page(
+                  <SectorGate sectors={CONTRACT_PRICE_SECTORS}>
+                    <ContractPricesPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route path="/reports/debt-ageing" element={page(<DebtAgeingPage />)} />
+              <Route path="/labels" element={page(<LabelsPage />)} />
+              <Route path="/tax-rates" element={page(<TaxRatesPage />)} />
+              <Route path="/quotations" element={page(<QuotationsPage />)} />
+              <Route path="/quotations/:id" element={page(<QuotationPage />)} />
+              <Route path="/customers/:id" element={page(<CustomerPage />)} />
+              <Route path="/customers/:id/statement" element={page(<StatementPage type="customer" />)} />
+              <Route path="/suppliers/:id/statement" element={page(<StatementPage type="supplier" />)} />
+              <Route path="/expenses" element={page(<ExpensesPage />)} />
+              <Route path="/branches" element={page(<BranchesPage />)} />
+              <Route path="/staff" element={page(<StaffPage />)} />
+              <Route path="/me/pin" element={page(<PinPage />)} />
+              <Route path="/welcome" element={page(<WelcomePage />)} />
+              <Route path="/settings" element={page(<SettingsPage />)} />
+              <Route path="/subscription" element={page(<SubscriptionPage />)} />
+              {/* A parent path with no page of its own opens its first child, not «غير موجود» */}
+              <Route path="/sales" element={<Navigate to="/sales/today" replace />} />
+              <Route path="/me" element={<Navigate to="/me/pin" replace />} />
+              <Route path="/sales/today" element={page(<DayReportPage />)} />
+              <Route path="/sales/invoices" element={page(<InvoicesPage />)} />
+              <Route path="/shifts" element={page(<ShiftsPage />)} />
+              <Route path="/shifts/:id" element={page(<ShiftReportPage />)} />
+              <Route path="/evidence" element={page(<EvidencePage />)} />
+              <Route path="/accounting/*" element={page(<Accounting />)} />
+              <Route path="/distribution/*" element={page(<Distribution />)} />
+              <Route path="/reports/distribution" element={page(<DistributionReports />)} />
+            </Route>
+            <Route element={<RequireAuth />}>
+              <Route path="*" element={<NotFoundPage />} />
+            </Route>
+          </Routes>
+        </Suspense>
+      </PaletteStateProvider>
     </AuthProvider>
   );
 }

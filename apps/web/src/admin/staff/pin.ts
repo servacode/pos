@@ -1,23 +1,17 @@
-import { toLatinDigits, type MeResponse, type Permission } from '@serva/core';
+import { requiredPinLength, toLatinDigits, type MeResponse } from '@serva/core';
 
 /**
  * The rules of the cashier sign-in code (16 › تخمين رمز PIN): anyone who approves other people's
  * operations (a discount over the limit, a refund, cash out of the drawer…) uses 6 digits; a
  * cashier may use 4. The server checks the same rules; this screen says them before sending.
  */
-const APPROVING: readonly Permission[] = [
-  'sale.discount_over_limit',
-  'sale.refund',
-  'sale.void',
-  'drawer.open_no_sale',
-  'cash.move',
-  'shift.close_any',
-];
-
 export function needsSixDigits(me: MeResponse): boolean {
+  // The server's own rule (packages/core), not a copy that drifts
   return (
-    me.user.roles.some((role) => role.key === 'owner' || role.key === 'manager') ||
-    me.user.permissions.some((permission) => APPROVING.includes(permission))
+    requiredPinLength(
+      me.user.roles.map((role) => role.key),
+      me.user.permissions,
+    ) === 6
   );
 }
 

@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReturnPayload, SalePayload, ShiftClosePayload } from '@serva/core/contracts/documents';
 import { validateDocumentPayload } from '@serva/core/contracts/documents';
 import { memoryLocal } from '../../offline/local';
-import { ids, PINS, PRODUCTS } from '../../test/pos';
+import { ids, PINS, PRODUCTS, staffServer } from '../../test/pos';
 import { openShift, renderPos, scan, SHIFT_ID } from '../../test/renderPos';
-import { matchesNumber, returnableSales } from './returns';
+import { matchesInvoice, matchesNumber, returnableSales } from './returns';
 
 beforeEach(() => {
   vi.spyOn(window, 'print').mockImplementation(() => undefined);
@@ -48,6 +48,8 @@ describe('«مرتجع» on the till', () => {
     expect(record).toBeDisabled();
     await user.click(screen.getByRole('button', { name: /زد زيت/ }));
     expect(screen.getByRole('status', { name: 'المبلغ المردود' })).toHaveTextContent('250');
+    // Round 39: the goods start sellable; damaged is the cashier's own choice
+    await user.click(screen.getByRole('button', { name: 'تالفة: لا تُباع' }));
     await user.click(record);
     // A cashier without «المرتجعات» needs the manager
     expect(screen.getByRole('region', { name: 'رمز المدير' })).toBeInTheDocument();
@@ -65,12 +67,14 @@ describe('«مرتجع» on the till', () => {
       saleNumber: 'INV-001-002-0000001',
       shiftId: SHIFT_ID,
       cashierId: ids.samer,
-      reason: 'تالف أو منتهي الصلاحية',
+      reason: 'الزبون غيّر رأيه',
       lines: [{ saleLineNo: 1, qty: 1000 }],
       totals: { totalMinor: 25_000 },
       refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 25_000, reference: null }],
       approval: { userId: ids.maryam, method: 'pin' },
     });
+    // The cashier chose «تالفة»: the goods go to the damaged stock, not back on the shelf
+    expect(payload.damaged).toBe(true);
 
     // The second piece is all that is left; then nothing is
     await user.click(screen.getByRole('button', { name: 'مرتجع آخر من نفس الفاتورة' }));
@@ -80,10 +84,12 @@ describe('«مرتجع» on the till', () => {
     await user.click(screen.getByRole('button', { name: 'ارجع للبيع' }));
     await user.click(await screen.findByRole('button', { name: 'المزيد' }));
     await user.click(screen.getByRole('menuitem', { name: 'أغلق الوردية' }));
-    await user.click((await screen.findAllByRole('button', { name: 'تخطَّ العدّ واكتب المجموع' }))[0]!);
+    await screen.findAllByRole('textbox', { name: 'المجموع' });
     await user.type(screen.getAllByRole('textbox', { name: 'المجموع' })[0]!, '250');
-    await user.click(screen.getByRole('button', { name: 'تابع للملخّص' }));
+    await user.click(screen.getByRole('button', { name: 'راجع وأغلق' }));
     await user.click(await screen.findByRole('button', { name: 'أغلق الوردية' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، أغلق الوردية' }));
+    await user.click(await screen.findByRole('button', { name: 'تمّ' }));
     await screen.findByRole('heading', { name: 'من يعمل الآن؟' });
     const close = outbox.find((e) => e.type === 'shift_close')!.doc.payload as unknown as ShiftClosePayload;
     expect(close.cash[0]).toMatchObject({
@@ -122,6 +128,184 @@ describe('«مرتجع» on the till', () => {
       { method: 'card', currency: 'SYP', amountMinor: 25_000, reference: 'R-12' },
     ]);
     expect(payload.approval).toBeNull();
+  });
+});
+
+describe('the damaged goods of a return (round 35, D7)', () => {
+  async function toReturn() {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { user, outbox } = renderPos({ local });
+    await signIn(user, 'مريم');
+    await sellTwoOils(user);
+    await user.keyboard('{Alt>}r{/Alt}');
+    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    await user.click(screen.getByRole('button', { name: /زد زيت/ }));
+    return { user, outbox };
+  }
+
+  it('sends a return for another reason as an ordinary one, and lets the cashier say the piece is broken', async () => {
+    const { user, outbox } = await toReturn();
+    await user.click(screen.getByRole('button', { name: 'الزبون غيّر رأيه' }));
+    expect(screen.getByRole('button', { name: 'سليمة: تعود إلى الرف' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
+    const first = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(first.damaged).toBeUndefined();
+    expect(validateDocumentPayload('return', first)).toEqual({ ok: true, checked: true });
+
+    await user.click(screen.getByRole('button', { name: 'مرتجع آخر من نفس الفاتورة' }));
+    await user.click(await screen.findByRole('button', { name: 'الكل' }));
+    await user.click(screen.getByRole('button', { name: 'الزبون غيّر رأيه' }));
+    await user.click(screen.getByRole('button', { name: 'تالفة: لا تُباع' }));
+    expect(screen.getByText(/البضاعة التالفة/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findAllByRole('heading', { name: 'سُجّل المرتجع' });
+    const returns = outbox.filter((e) => e.type === 'return');
+    const second = returns[1]!.doc.payload as unknown as ReturnPayload;
+    expect(second).toMatchObject({ reason: 'الزبون غيّر رأيه', damaged: true });
+    expect(validateDocumentPayload('return', second)).toEqual({ ok: true, checked: true });
+  });
+
+  it('starts on «سليمة» whatever the store, and damaged is an explicit choice (round 39)', async () => {
+    const { user, outbox } = await toReturn();
+    expect(screen.getByRole('button', { name: 'سليمة: تعود إلى الرف' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'تالفة: لا تُباع' })).toHaveAttribute('aria-pressed', 'false');
+    // Picking the damaged reason moves the goods to the damaged stock by itself, and the cashier can still take it back
+    await user.click(screen.getByRole('button', { name: 'تالف أو منتهي الصلاحية' }));
+    expect(screen.getByRole('button', { name: 'تالفة: لا تُباع' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'سليمة: تعود إلى الرف' }));
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
+    const payload = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(payload.reason).toBe('تالف أو منتهي الصلاحية');
+    expect(payload.damaged).toBeUndefined();
+  });
+});
+
+describe('a return of a credit sale (08 › مرتجع مبيعات: تخفيض دين الزبون)', () => {
+  it('defaults to the customer’s account, shows no reference, and names the customer in the document', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { user, outbox } = renderPos({ local });
+    await signIn(user, 'مريم');
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.keyboard('{F12}');
+    const pay = await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
+    await user.type(within(pay).getByLabelText('ابحث بالاسم أو الجوال'), 'خالد');
+    await user.click(within(pay).getByRole('button', { name: /أبو خالد/ }));
+    await user.click(within(pay).getByRole('button', { name: 'آجل على الحساب' }));
+    await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+
+    await user.keyboard('{Alt>}r{/Alt}');
+    const row = await screen.findByRole('button', { name: /INV-001-002-0000001/ });
+    // The list names the customer of an invoice made on this device
+    expect(row).toHaveTextContent('أبو خالد');
+    await user.click(row);
+    // The cash option stays; the account is the default for a sale that was on credit
+    expect(screen.getByRole('button', { name: 'نقداً من الدرج' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'إلى حساب الزبون' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'الكل' }));
+    expect(screen.queryByLabelText('رقم العملية')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، سجّل' }));
+    await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
+    const payload = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(validateDocumentPayload('return', payload)).toEqual({ ok: true, checked: true });
+    expect(payload).toMatchObject({
+      customerId: ids.abuKhaled,
+      refunds: [{ method: 'account', currency: 'SYP', amountMinor: 25_000, reference: null }],
+    });
+  });
+});
+
+describe('what an account refund says about the debt', () => {
+  async function accountReturn(balanceMinor: number) {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const staff = staffServer();
+    const fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
+      String(url).endsWith('/purchases')
+        ? new Response(JSON.stringify({ balanceMinor, items: [], sizes: [] }), { status: 200 })
+        : staff(url, init),
+    ) as unknown as typeof globalThis.fetch;
+    const { user } = renderPos({ local, fetch });
+    await signIn(user, 'مريم');
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.keyboard('{F12}');
+    const pay = await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
+    await user.type(within(pay).getByLabelText('ابحث بالاسم أو الجوال'), 'خالد');
+    await user.click(within(pay).getByRole('button', { name: /أبو خالد/ }));
+    await user.click(within(pay).getByRole('button', { name: 'آجل على الحساب' }));
+    await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+    await user.keyboard('{Alt>}r{/Alt}');
+    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    await user.click(screen.getByRole('button', { name: 'الكل' }));
+  }
+
+  it('says «يُحسم من دين الزبون» only when the customer owes something', async () => {
+    await accountReturn(100_000);
+    expect(await screen.findByText('يُحسم من دين الزبون')).toBeInTheDocument();
+  });
+
+  it('says it becomes a credit for the customer when they owe nothing', async () => {
+    await accountReturn(0);
+    expect(await screen.findByText('يُضاف رصيداً للزبون')).toBeInTheDocument();
+    expect(screen.queryByText('يُحسم من دين الزبون')).not.toBeInTheDocument();
+  });
+});
+
+describe('a return of a sale paid by cheque', () => {
+  it('goes to the customer’s account by default, says the cheque stays, and cash only when chosen', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { user, outbox } = renderPos({ local });
+    await signIn(user, 'مريم');
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.keyboard('{F12}');
+    const pay = await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
+    await user.type(within(pay).getByLabelText('ابحث بالاسم أو الجوال'), 'خالد');
+    await user.click(within(pay).getByRole('button', { name: /أبو خالد/ }));
+    await user.click(within(pay).getByRole('button', { name: 'شيك' }));
+    await user.type(within(pay).getByLabelText('البنك'), 'بنك سورية');
+    await user.type(within(pay).getByLabelText('رقم الشيك'), '5512');
+    await user.type(within(pay).getByLabelText('تاريخ الاستحقاق'), '30/11/2030');
+    await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+
+    await user.keyboard('{Alt>}r{/Alt}');
+    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    expect(screen.getByRole('button', { name: 'نقداً من الدرج' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'إلى حساب الزبون' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/الشيك نفسه يبقى كما هو/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'الكل' }));
+    // Irreversible: the first tap only asks, nothing is saved until it is confirmed
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    expect(screen.getByText(/ولا يمكن التراجع عنه/)).toBeInTheDocument();
+    expect(outbox.some((e) => e.type === 'return')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'لا، ارجع' }));
+    expect(outbox.some((e) => e.type === 'return')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، سجّل' }));
+    await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
+    const payload = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(payload.refunds).toEqual([
+      { method: 'account', currency: 'SYP', amountMinor: 25_000, reference: null },
+    ]);
   });
 });
 
@@ -174,6 +358,34 @@ describe('«استبدال» on the till (03 › الملابس)', () => {
       expect.objectContaining({ method: 'voucher', amountMinor: 25_000, reference: 'SRT-001-002-0000001' }),
       expect.objectContaining({ method: 'cash', amountMinor: 10_000 }),
     ]);
+  });
+
+  it('a cash exchange refunds the piece in cash, then the other piece is sold and paid in cash', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { user, outbox } = renderPos({ local });
+    await signIn(user, 'مريم');
+    await sellTwoOils(user);
+
+    await user.keyboard('{Alt>}r{/Alt}');
+    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    await user.click(screen.getByRole('button', { name: /زد زيت/ }));
+    await user.click(screen.getByRole('button', { name: 'استبدال بقطعة أخرى' }));
+    await user.click(screen.getByRole('button', { name: 'ردّ الفرق نقداً' }));
+    expect(screen.getByRole('status', { name: 'المبلغ المردود' })).toHaveTextContent('المبلغ المردود');
+    await user.click(screen.getByRole('button', { name: 'سجّل وبِع البديل' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    const ret = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(ret.reason).toBe('تبديل');
+    expect(ret.refunds).toEqual([{ method: 'cash', currency: 'SYP', amountMinor: 25_000, reference: null }]);
+
+    await scan(user, PRODUCTS.tea.barcode!.code);
+    await user.keyboard('{F12}');
+    await screen.findByRole('region', { name: 'الدفع' });
+    await user.keyboard('350{Enter}');
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+    const sale = outbox.filter((e) => e.type === 'sale')[1]!.doc.payload as unknown as SalePayload;
+    expect(sale.payments).toEqual([expect.objectContaining({ method: 'cash', amountMinor: 35_000 })]);
   });
 
   it('a voucher over the price pays it all, keeps the rest, and is found by its last digits', async () => {
@@ -245,5 +457,39 @@ describe('the invoices a till can return from', () => {
     expect(matchesNumber('INV-001-002-0000154', '154')).toBe(true);
     expect(matchesNumber('INV-001-002-0000154', '١٥٤')).toBe(true);
     expect(matchesNumber('INV-001-002-0000154', '155')).toBe(false);
+  });
+});
+
+describe('one search box for the invoices of this till', () => {
+  const sale = {
+    id: 's1',
+    number: 'INV-001-002-0000154',
+    deviceTime: '2026-10-31T10:00:00Z',
+    sale: { customerId: 'c1', customerName: null },
+    returned: [],
+  } as never;
+  const customers = [{ id: 'c1', name: 'ريم الأحمد', phone: '0944 123 456' }];
+
+  it('finds by the end of the number, the customer name or the phone', () => {
+    expect(matchesInvoice(sale, '154', customers)).toBe(true);
+    expect(matchesInvoice(sale, 'ريم', customers)).toBe(true);
+    expect(matchesInvoice(sale, '944123', customers)).toBe(true);
+    expect(matchesInvoice(sale, 'نور', customers)).toBe(false);
+    expect(matchesInvoice(sale, '999', customers)).toBe(false);
+    expect(matchesInvoice(sale, '', customers)).toBe(true);
+  });
+
+  it('reads a phone in any form: leading zero, spaces, +963, 00963', () => {
+    const stored = [{ id: 'c1', name: 'ريم', phone: '+963944123456' }];
+    for (const typed of [
+      '0944123456',
+      '0944 123 456',
+      '+963 944 123 456',
+      '00963944123456',
+      '944123456',
+      '٠٩٤٤١٢٣',
+    ])
+      expect(matchesInvoice(sale, typed, stored), typed).toBe(true);
+    expect(matchesInvoice(sale, '0955123456', stored)).toBe(false);
   });
 });

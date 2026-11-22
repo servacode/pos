@@ -6,11 +6,17 @@ import {
   categories,
   customers,
   exchangeRates,
+  noSaleReasons,
   onlineOrders,
   prices,
   products,
   promotions,
+  regions,
   roles,
+  routeCustomers,
+  routes,
+  salesOrders,
+  serials,
   stockLevels,
   syncTombstones,
   taxRates,
@@ -24,6 +30,7 @@ import {
   type Database,
   type Transaction,
 } from '@serva/db';
+import type { PharmacySettings } from '@serva/core';
 import { CONTRACT_VERSION, INITIAL_CURSOR, type PullResponse, type PullSetPage } from '@serva/sync';
 import type { DeviceClaims } from '../auth/device-guard';
 import { AppError } from '../errors';
@@ -48,7 +55,24 @@ interface PullSet {
 export interface PullScope {
   tenantId: string;
   branchId: string;
+  /** The pulling device (a rep phone's staff list is its van's: see staffOfDevice) */
+  deviceId?: string;
 }
+
+/**
+ * Who a device's staff picker may list (round 38). A rep's phone belongs to its rep, so the people it lists are the
+ * ones the server lets in (services/devices.ts › mayUseRepPhone): the van's active rep, a manager and the owner.
+ * Any other device (a till on a van branch too) lists everyone, as ever. `userId` is the user's id column of the set being pulled.
+ */
+const staffOfDevice = (device: PullScope, userId: SQL | PgColumn, tenantId: SQL | PgColumn) => sql`(
+  not exists (select 1 from devices d where d.tenant_id = ${tenantId} and d.id = ${device.deviceId ?? null}::uuid
+              and d.kind = 'rep_phone')
+  or exists (select 1 from sales_reps sr where sr.tenant_id = ${tenantId} and sr.user_id = ${userId} and sr.status = 'active'
+             and (sr.van_branch_id = ${device.branchId}::uuid
+                  or (${device.deviceId ?? null}::uuid is not null and sr.device_id = ${device.deviceId ?? null}::uuid)))
+  or exists (select 1 from user_roles ur join roles r on r.tenant_id = ur.tenant_id and r.id = ur.role_id
+             where ur.tenant_id = ${tenantId} and ur.user_id = ${userId} and r.key in ('owner', 'manager')
+               and (ur.branch_id is null or ur.branch_id = ${device.branchId}::uuid)))`;
 
 const archivedFlag = (column: PgColumn) => sql<boolean>`(${column} is not null)`;
 
@@ -77,6 +101,21 @@ const PULL_SETS: Record<string, PullSet> = {
       scaleBarcode: tenantSettings.scaleBarcode,
       service: tenantSettings.service,
       loyalty: tenantSettings.loyalty,
+      // A pharmacy or medical-supplies store gets the defaults for what its owner never chose, so its
+      // tills enforce the batch rules (same as services/store.ts › pharmacyOf): the owner's values win
+      pharmacy: sql<PharmacySettings | null>`case
+        when exists (select 1 from tenants t
+                     where t.id = tenant_settings.tenant_id and 'pharmacy' = any(t.sectors))
+          then '{"prescription":"optional","blockNoBatch":true}'::jsonb || coalesce(tenant_settings.pharmacy, '{}'::jsonb)
+        when exists (select 1 from tenants t
+                     where t.id = tenant_settings.tenant_id and 'medical_supplies' = any(t.sectors))
+          then '{"prescription":"optional","autoBatch":true,"blockNoBatch":true}'::jsonb
+               || coalesce(tenant_settings.pharmacy, '{}'::jsonb)
+        else tenant_settings.pharmacy end`,
+      till: tenantSettings.till,
+      // الأقساط: the store's rules, so the till can price a plan offline (null: off)
+      installments: tenantSettings.installments,
+      sectors: sql<string[]>`(select t.sectors from tenants t where t.id = tenant_settings.tenant_id)`,
       version: tenantSettings.version,
     },
   },
@@ -90,8 +129,14 @@ const PULL_SETS: Record<string, PullSet> = {
       address: branches.address,
       phone: branches.phone,
       isActive: branches.isActive,
+      // A van is a branch of kind van: a till tells it from a store by this (older caches have no kind: a store)
+      kind: branches.kind,
+      parentBranchId: branches.parentBranchId,
+      vehiclePlate: branches.vehiclePlate,
       version: branches.version,
     },
+    // A store's damaged-goods place (round 35, D7) is the server's own: no till ever lists it
+    scope: () => sql`${branches.kind} <> 'damaged'`,
   },
   users: {
     table: users,
@@ -105,6 +150,7 @@ const PULL_SETS: Record<string, PullSet> = {
       pinVersion: users.pinVersion,
       version: users.version,
     },
+    scope: (device) => staffOfDevice(device, users.id, users.tenantId),
   },
   roles: {
     table: roles,
@@ -128,6 +174,7 @@ const PULL_SETS: Record<string, PullSet> = {
       branchId: userRoles.branchId,
       version: userRoles.version,
     },
+    scope: (device) => staffOfDevice(device, userRoles.userId, userRoles.tenantId),
   },
   products: {
     table: products,
@@ -144,6 +191,10 @@ const PULL_SETS: Record<string, PullSet> = {
       taxRateId: products.taxRateId,
       sellOnPos: products.sellOnPos,
       genericName: products.genericName,
+      strength: products.strength,
+      dosageForm: products.dosageForm,
+      requiresPrescription: products.requiresPrescription,
+      controlled: products.controlled,
       tracksSerial: products.tracksSerial,
       warrantyMonths: products.warrantyMonths,
       modifiers: products.modifiers,
@@ -162,13 +213,16 @@ const PULL_SETS: Record<string, PullSet> = {
       attributes: variants.attributes,
       sortOrder: variants.sortOrder,
       nearestExpiry: variants.nearestExpiry,
+      shelfBatches: variants.shelfBatches,
       // Its colour's picture (or any option value it has) first, else the product's main one
+      // The columns are written with their table: a single-table select prints them bare, and inside
+      // this subquery a bare product_id means the picture's own (so any product got the first picture)
       imageUrl: sql<string | null>`(
         select '/v1/images/' || i.tenant_id || '/' || i.upload_id || '?size=thumb'
         from product_images i
-        where i.tenant_id = ${variants.tenantId} and i.product_id = ${variants.productId}
+        where i.tenant_id = ${variants}."tenant_id" and i.product_id = ${variants}."product_id"
           and (i.option_value is null
-               or exists (select 1 from jsonb_array_elements(${variants.attributes}) a
+               or exists (select 1 from jsonb_array_elements(${variants}."attributes") a
                           where a ->> 'value' = i.option_value))
         order by (i.option_value is null), i.sort_order, i.created_at
         limit 1)`,
@@ -201,6 +255,7 @@ const PULL_SETS: Record<string, PullSet> = {
       packQty: barcodes.packQty,
       packName: barcodes.packName,
       packPriceMinor: barcodes.packPriceMinor,
+      packWholesaleMinor: barcodes.packWholesaleMinor,
       version: barcodes.version,
     },
   },
@@ -249,6 +304,8 @@ const PULL_SETS: Record<string, PullSet> = {
       variantId: stockLevels.variantId,
       qty: stockLevels.qty,
       reservedQty: stockLevels.reservedQty,
+      // What is left of each batch here (03 › الصيدليات): the till allocates a sale from it
+      batches: stockLevels.batches,
       version: stockLevels.version,
     },
     // The device's own branch only (17 › السحب).
@@ -279,9 +336,38 @@ const PULL_SETS: Record<string, PullSet> = {
       creditLimitMinor: customers.creditLimitMinor,
       priceTier: customers.priceTier,
       loyaltyPoints: customers.loyaltyPoints,
+      // «المندوبون»: where he is, and whether the supervisor approved him (pending: cash only); additive, older clients ignore them
+      regionId: customers.regionId,
+      approvalStatus: customers.approvalStatus,
+      lat: customers.lat,
+      lng: customers.lng,
+      // What a trade promotion targets («عروض التجار»); additive
+      kind: customers.kind,
+      // «مجموعات الزبائن»: the group and its percent, for the till's invoice discount offline; null for none or an archived group. Additive, older tills ignore them (changing a group touches its customers: services/customer-groups.ts)
+      groupId: sql<
+        string | null
+      >`(select g.id from customer_groups g where g.tenant_id = customers.tenant_id and g.id = customers.group_id and g.archived_at is null)`,
+      groupName: sql<
+        string | null
+      >`(select g.name from customer_groups g where g.tenant_id = customers.tenant_id and g.id = customers.group_id and g.archived_at is null)`,
+      groupDiscountBps: sql<
+        number | null
+      >`(select g.discount_bps from customer_groups g where g.tenant_id = customers.tenant_id and g.id = customers.group_id and g.archived_at is null)`,
       archived: archivedFlag(customers.archivedAt),
       version: customers.version,
     },
+    // A van's phone keeps only the customers on its rep's routes and the ones it added itself; every other device keeps all
+    scope: (device) => sql`(
+      not exists (select 1 from branches b where b.tenant_id = ${customers.tenantId} and b.id = ${device.branchId}::uuid and b.kind = 'van')
+      or exists (select 1 from route_customers rc
+                 join routes r on r.tenant_id = rc.tenant_id and r.id = rc.route_id
+                 join sales_reps sr on sr.tenant_id = r.tenant_id and sr.id = r.rep_id
+                 where rc.tenant_id = ${customers.tenantId} and rc.customer_id = ${customers.id}
+                   and sr.van_branch_id = ${device.branchId}::uuid)
+      or (${customers.createdByDoc} is not null and exists (
+            select 1 from sync_inbox i join devices d on d.tenant_id = i.tenant_id and d.id = i.device_id
+            where i.tenant_id = ${customers.tenantId} and i.doc_id = ${customers.createdByDoc}
+              and d.branch_id = ${device.branchId}::uuid)))`,
   },
   vouchers: {
     table: vouchers,
@@ -313,7 +399,19 @@ const PULL_SETS: Record<string, PullSet> = {
       daysOfWeek: promotions.daysOfWeek,
       fromTime: promotions.fromTime,
       toTime: promotions.toTime,
-      archived: archivedFlag(promotions.archivedAt),
+      // Trade promotions (tiered, free_item) and who they are for; additive, older tills ignore them
+      tiers: sql<{ minQty: number; percentBp: number }[]>`coalesce(${promotions.tiers}, '[]'::jsonb)`,
+      freeVariantId: promotions.freeVariantId,
+      freeQty: promotions.freeQty,
+      customerKinds: promotions.customerKinds,
+      priceTiers: promotions.priceTiers,
+      repOnly: promotions.repOnly,
+      // The code of a live coupon offer (null for an archived one), so the cashier can type it at the till offline; the offer itself stays out of the running ones below. Additive, older tills ignore it
+      couponCode: sql<
+        string | null
+      >`(case when ${promotions.archivedAt} is null then ${promotions.couponCode} end)`,
+      // A coupon's offer is not for every sale: it reaches the till on the order that carries its code, or the code typed at the till
+      archived: sql<boolean>`(${promotions.archivedAt} is not null or ${promotions.couponCode} is not null)`,
       version: promotions.version,
     },
   },
@@ -337,14 +435,134 @@ const PULL_SETS: Record<string, PullSet> = {
       depositCode: onlineOrders.depositCode,
       deliveryFeeMinor: onlineOrders.deliveryFeeMinor,
       deliveryArea: onlineOrders.deliveryArea,
+      couponRule: onlineOrders.couponRule,
+      // Round 37 (decision 14): the till counts what each hold reserves at its own branch, and until when
+      branchId: onlineOrders.branchId,
+      reservedUntil: onlineOrders.reservedUntil,
       version: onlineOrders.version,
     },
     scope: () =>
       sql`${onlineOrders.status} <> 'pending' and (${onlineOrders.status} = 'accepted' or ${onlineOrders.decidedAt} > now() - interval '30 days')`,
   },
+  // The branch's pieces of serial-tracked products, in stock or sold lately (03 › الإلكترونيات): the
+  // till refuses a number that is not in stock, offline too.
+  serials: {
+    table: serials,
+    id: serials.id,
+    tenantId: serials.tenantId,
+    columns: {
+      variantId: serials.variantId,
+      serial: serials.serial,
+      status: serials.status,
+      saleNumber: sql<
+        string | null
+      >`(select i.number from invoices i where i.tenant_id = serials.tenant_id and i.id = serials.sale_id)`,
+      version: serials.version,
+    },
+    scope: (device) =>
+      sql`${serials.branchId} = ${device.branchId} and (${serials.status} in ('in_stock', 'rented') or ${serials.soldOn} > current_date - 45)`,
+  },
 };
 
-export const PULL_SET_NAMES = Object.keys(PULL_SETS);
+/** The routes of the rep whose van is the device's branch */
+const repOfVan = (device: PullScope, repId: SQL | PgColumn, tenantId: SQL | PgColumn) =>
+  sql`exists (select 1 from sales_reps sr where sr.tenant_id = ${tenantId} and sr.id = ${repId}
+              and sr.van_branch_id = ${device.branchId}::uuid)`;
+
+/**
+ * «المندوبون»: the sets only a rep's phone (a device of kind rep_phone) pulls, scoped to its van's
+ * rep. Nothing here carries cost. A till never gets them, so older and ordinary clients are unaffected.
+ */
+const REP_PULL_SETS: Record<string, PullSet> = {
+  regions: {
+    table: regions,
+    id: regions.id,
+    tenantId: regions.tenantId,
+    columns: {
+      name: regions.name,
+      parentId: regions.parentId,
+      sortOrder: regions.sortOrder,
+      isActive: regions.isActive,
+      version: regions.version,
+    },
+  },
+  routes: {
+    table: routes,
+    id: routes.id,
+    tenantId: routes.tenantId,
+    columns: {
+      name: routes.name,
+      regionId: routes.regionId,
+      weekdays: routes.weekdays,
+      repId: routes.repId,
+      sortOrder: routes.sortOrder,
+      isActive: routes.isActive,
+      version: routes.version,
+    },
+    scope: (device) => repOfVan(device, routes.repId, routes.tenantId),
+  },
+  route_customers: {
+    table: routeCustomers,
+    id: routeCustomers.id,
+    tenantId: routeCustomers.tenantId,
+    columns: {
+      routeId: routeCustomers.routeId,
+      customerId: routeCustomers.customerId,
+      visitOrder: routeCustomers.visitOrder,
+      version: routeCustomers.version,
+    },
+    scope: (device) =>
+      sql`exists (select 1 from routes r where r.tenant_id = ${routeCustomers.tenantId} and r.id = ${routeCustomers.routeId}
+                  and ${repOfVan(device, sql`r.rep_id`, sql`r.tenant_id`)})`,
+  },
+  no_sale_reasons: {
+    table: noSaleReasons,
+    id: noSaleReasons.id,
+    tenantId: noSaleReasons.tenantId,
+    columns: {
+      key: noSaleReasons.key,
+      name: noSaleReasons.name,
+      sortOrder: noSaleReasons.sortOrder,
+      isActive: noSaleReasons.isActive,
+      version: noSaleReasons.version,
+    },
+  },
+  // Orders taken in or filled from this van: the open ones, and the ones changed lately so a phone sees one leave
+  sales_orders: {
+    table: salesOrders,
+    id: salesOrders.id,
+    tenantId: salesOrders.tenantId,
+    columns: {
+      number: salesOrders.number,
+      status: salesOrders.status,
+      customerId: salesOrders.customerId,
+      branchId: salesOrders.branchId,
+      warehouseBranchId: salesOrders.warehouseBranchId,
+      repId: salesOrders.repId,
+      businessDate: sql<string>`${salesOrders.businessDate}::text`,
+      currency: salesOrders.currency,
+      totalMinor: salesOrders.totalMinor,
+      depositMinor: salesOrders.depositMinor,
+      deliveryDate: sql<string | null>`${salesOrders.deliveryDate}::text`,
+      lines: salesOrders.lines,
+      version: salesOrders.version,
+    },
+    scope: (device) =>
+      sql`(${salesOrders.branchId} = ${device.branchId}::uuid or ${salesOrders.warehouseBranchId} = ${device.branchId}::uuid)
+          and (${salesOrders.status} in ('open', 'partial') or ${salesOrders.updatedAt} > now() - interval '30 days')`,
+  },
+};
+Object.assign(PULL_SETS, REP_PULL_SETS);
+
+export const PULL_SET_NAMES = Object.keys(PULL_SETS).filter((name) => !(name in REP_PULL_SETS));
+/** The sets a rep's phone pulls on top of the usual ones (its bootstrap and its default pull) */
+export const REP_PULL_SET_NAMES = Object.keys(REP_PULL_SETS);
+
+/** The sets this device is served: the usual ones, plus the rep's when it is a rep_phone */
+export async function setsFor(tx: Transaction, deviceId: string): Promise<string[]> {
+  const [d] = await tx.execute<{ kind: string }>(sql`select kind from devices where id = ${deviceId}`);
+  return d?.kind === 'rep_phone' ? [...PULL_SET_NAMES, ...REP_PULL_SET_NAMES] : PULL_SET_NAMES;
+}
 
 const MAX_UUID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
 
@@ -361,8 +579,10 @@ function parseCursor(cursor: string): Key {
 const compareKeys = (a: Key, b: Key) =>
   a.xid < b.xid ? -1 : a.xid > b.xid ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
-export function unknownSets(names: string[]): void {
-  const unknown = names.filter((name) => !(name in PULL_SETS));
+export function unknownSets(names: string[], allowed?: readonly string[]): void {
+  const unknown = names.filter(
+    (name) => !(name in PULL_SETS) || (allowed ? !allowed.includes(name) : name in REP_PULL_SETS),
+  );
   if (unknown.length > 0) {
     throw new AppError(400, 'validation_failed', 'مجموعة بيانات غير معروفة.', {
       cursors: unknown.join(', '),
@@ -383,24 +603,41 @@ export async function pullChanges(
   limit: number,
   now: Date,
 ): Promise<PullResponse> {
-  const names = Object.keys(cursors).length > 0 ? Object.keys(cursors) : PULL_SET_NAMES;
-  unknownSets(names);
   return withTenant(db, device.tenantId, async (tx) => {
+    const allowed = await setsFor(tx, device.deviceId);
+    const names = Object.keys(cursors).length > 0 ? Object.keys(cursors) : allowed;
+    unknownSets(names, allowed);
     const state = await readServerState(tx);
     const xmin = await currentXmin(tx);
     const sets: Record<string, PullSetPage> = {};
     const resync: string[] = [];
+    // Sets the server asked this device to download again (a rep's route lost customers: the pull cannot say «delete»)
+    const [asked] = await tx.execute<{ sets: string[] }>(
+      sql`select resync_sets as sets from devices where id = ${device.deviceId}`,
+    );
+    const flagged = new Set(asked?.sets ?? []);
     let hasMore = false;
     for (const name of names) {
       const after = parseCursor(cursors[name] ?? INITIAL_CURSOR);
       // Tombstones older than the horizon are gone: a cursor before it cannot see those deletions.
-      if (after.xid !== 0n && after.xid < state.tombstoneHorizon) {
+      // A set the device has not pulled yet has nothing stale to forget: it is served from the start anyway
+      if (after.xid !== 0n && (flagged.has(name) || after.xid < state.tombstoneHorizon)) {
         resync.push(name);
         continue;
       }
       const page = await pullSet(tx, device, PULL_SETS[name]!, name, after, xmin, limit);
       sets[name] = page.page;
       hasMore ||= page.hasMore;
+    }
+    // What the answer tells the device to download again is no longer owed
+    const done = names.filter((name) => flagged.has(name));
+    if (done.length > 0) {
+      await tx.execute(sql`
+        update devices set resync_sets = array(select s from unnest(resync_sets) s where s <> all(array[${sql.join(
+          done.map((d) => sql`${d}`),
+          sql`, `,
+        )}]::text[]))
+        where id = ${device.deviceId}`);
     }
     return {
       contractVersion: CONTRACT_VERSION,

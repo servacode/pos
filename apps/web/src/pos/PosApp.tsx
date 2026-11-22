@@ -5,10 +5,20 @@ import { deviceStore } from '../offline/database';
 import { dexieLocal } from '../offline/local';
 import { useDevice } from '../offline/useDevice';
 import { loadCatalog, type Catalog } from './catalog';
+import { withPendingProducts } from './sale/localProducts';
 import { PosProvider, saveWith, type PosServices } from './services';
+import {
+  DEFAULT_IDLE_MINUTES,
+  forgetSession,
+  keepSession,
+  restoreSession,
+  touchSession,
+} from './staff/persist';
 import { staffRoster, type StaffSession } from './staff/staff';
+import { TillBoundary } from './chunks';
+import { useLocalStock } from './localStock';
 import { StatusBar, type OutboxStatus } from './StatusBar';
-import { useOnline } from './useOnline';
+import { isWeakConnection, startConnectionProbe, useOnline, useReachable } from './useOnline';
 
 // Linking runs once per device: its screens load only on a device that is not linked yet.
 const DeviceLink = lazy(() => import('./link/DeviceLink').then((m) => ({ default: m.DeviceLink })));
@@ -43,28 +53,33 @@ export function useOutboxStatus(pos: PosServices, tick: number): OutboxStatus | 
  * database through `services`, so it opens the same with or without internet; tests pass fakes.
  */
 export function PosSession({ services, persisted }: { services: PosServices; persisted: boolean | null }) {
-  const online = useOnline();
+  const online = useReachable();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [session, setSession] = useState<StaffSession | null>(null);
   const [tick, setTick] = useState(0);
+  // A product made at the till offline joins the catalog at once (sale/localProducts.ts)
+  const [productsTick, setProductsTick] = useState(0);
 
   // Read the pulled sets on start and again after every sync cycle (new prices, new staff).
   useEffect(() => {
     let alive = true;
-    void loadCatalog(services.store, services.now()).then(
+    void loadCatalog(services.store, services.now(), (sets) =>
+      withPendingProducts(services.local, services.store, sets),
+    ).then(
       (loaded) => alive && setCatalog(loaded),
       () => undefined,
     );
     return () => {
       alive = false;
     };
-  }, [services]);
+  }, [services, productsTick]);
 
   const pos = useMemo<PosServices>(
     () => ({
       ...services,
       save: async (input) => {
         const entry = await services.save(input);
+        if (input.type === 'temp_item') setProductsTick((t) => t + 1);
         setTick((t) => t + 1);
         return entry;
       },
@@ -72,11 +87,56 @@ export function PosSession({ services, persisted }: { services: PosServices; per
     [services],
   );
   const outbox = useOutboxStatus(pos, tick);
+  // The tiles show what is left after this device's own sales, even before the server counts them
+  const shownCatalog = useLocalStock(pos, catalog, tick);
   const staff = useMemo(
     () => (catalog ? staffRoster(catalog.staff, services.device.branchCode) : []),
     [catalog, services.device.branchCode],
   );
-  const signOut = useCallback(() => setSession(null), []);
+  const deviceKey = services.device.deviceId ?? services.device.deviceCode ?? '';
+  const [lockNote, setLockNote] = useState<string | null>(null);
+  const signedIn = useCallback(
+    (next: StaffSession) => {
+      keepSession(
+        next,
+        staff.find((m) => m.id === next.userId),
+        deviceKey,
+        services.now(),
+      );
+      setLockNote(null);
+      setSession(next);
+    },
+    [staff, deviceKey, services],
+  );
+  const signOut = useCallback((note?: string) => {
+    forgetSession();
+    setLockNote(note ?? null);
+    setSession(null);
+  }, []);
+  // A reload keeps the person signed in for the idle window, with no code kept (staff/persist.ts)
+  const [restored, setRestored] = useState(false);
+  const idleMinutes = catalog?.settings?.idleMinutes ?? DEFAULT_IDLE_MINUTES;
+  useEffect(() => {
+    if (restored || !catalog || staff.length === 0) return;
+    setRestored(true);
+    const back = restoreSession(staff, deviceKey, services.now(), idleMinutes);
+    if (back) setSession((now) => now ?? back);
+  }, [restored, catalog, staff, deviceKey, services, idleMinutes]);
+  useEffect(() => {
+    if (!session) return;
+    let last = 0;
+    const touch = () => {
+      const t = services.now();
+      if (t - last < 5_000) return;
+      last = t;
+      touchSession(t);
+    };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+    for (const type of events) window.addEventListener(type, touch, { capture: true, passive: true });
+    return () => {
+      for (const type of events) window.removeEventListener(type, touch, { capture: true });
+    };
+  }, [session, services]);
   const digits = catalog?.settings?.numberFormat ?? 'latn';
 
   useEffect(() => {
@@ -86,17 +146,19 @@ export function PosSession({ services, persisted }: { services: PosServices; per
   return (
     <PosProvider services={pos}>
       <DigitsProvider digits={digits}>
-        {session && catalog ? (
-          <Suspense fallback={null}>
-            <CashierApp
-              session={session}
-              catalog={catalog}
-              persisted={persisted}
-              online={online}
-              outbox={outbox}
-              onSignOut={signOut}
-            />
-          </Suspense>
+        {session && shownCatalog ? (
+          <TillBoundary>
+            <Suspense fallback={null}>
+              <CashierApp
+                session={session}
+                catalog={shownCatalog}
+                persisted={persisted}
+                online={online}
+                outbox={outbox}
+                onSignOut={signOut}
+              />
+            </Suspense>
+          </TillBoundary>
         ) : (
           <CashierShell
             statusBar={
@@ -104,9 +166,21 @@ export function PosSession({ services, persisted }: { services: PosServices; per
             }
             mainClassName="grid place-items-center p-6 lg:px-14 lg:py-8"
           >
-            {catalog ? (
+            {/* Not before the kept session is looked at: a code typed while a reload signs the cashier back in would
+                land in the sale (a pay screen reopened, its keys and Enter taken as an amount and «أتمّ الدفع») */}
+            {catalog && (restored || staff.length === 0) ? (
               <Suspense fallback={null}>
-                <StaffSignIn staff={staff} onSignedIn={setSession} />
+                <div className="flex w-full flex-col items-center">
+                  {lockNote ? (
+                    <p
+                      role="status"
+                      className="mb-4 rounded-control border border-line bg-surface-muted px-4 py-2 text-center text-sm text-ink"
+                    >
+                      {lockNote}
+                    </p>
+                  ) : null}
+                  <StaffSignIn staff={staff} onSignedIn={signedIn} />
+                </div>
               </Suspense>
             ) : null}
           </CashierShell>
@@ -124,6 +198,7 @@ export function PosSession({ services, persisted }: { services: PosServices; per
 export function PosApp() {
   const { loading, device, persisted, sync, reload, engineSave } = useDevice();
   const online = useOnline();
+  useEffect(() => (import.meta.env.MODE === 'test' ? undefined : startConnectionProbe()), []);
 
   const local = useMemo(() => (device ? dexieLocal(deviceStore().db) : null), [device]);
   const services = useMemo<PosServices | null>(() => {
@@ -134,7 +209,7 @@ export function PosApp() {
       local,
       device,
       save: saveWith(store, engineSave),
-      online: () => globalThis.navigator?.onLine ?? true,
+      online: () => (globalThis.navigator?.onLine ?? true) && !isWeakConnection(),
       now: Date.now,
       sync,
     };
@@ -142,7 +217,7 @@ export function PosApp() {
 
   return (
     <>
-      <title>الكاشير · Serva POS</title>
+      <title>الكاشير · SERVA</title>
       <Routes>
         <Route
           index

@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { MeResponse, StoreResponse } from '@serva/core';
-import { apiError, mockFetch, type MockRequest } from '../../test/fetchMock';
+import { apiError, mockFetch, type MockReply, type MockRequest } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
@@ -37,7 +37,12 @@ function store(overrides: Partial<StoreResponse> = {}): StoreResponse {
 }
 
 /** A fake server keeping the store between requests, as the real one would. */
-function openWizard(me: MeResponse, initial: StoreResponse, path = '/') {
+function openWizard(
+  me: MeResponse,
+  initial: StoreResponse,
+  path = '/',
+  extra: Record<string, MockReply | (() => MockReply)> = {},
+) {
   let current = initial;
   let meNow = me;
   const routes = {
@@ -66,15 +71,22 @@ function openWizard(me: MeResponse, initial: StoreResponse, path = '/') {
       return { status: 200, body: current };
     },
   };
-  const mock = mockFetch(routes);
+  const mock = mockFetch({ ...routes, ...extra });
   return { ...mock, ...renderApp(path), store: () => current };
 }
 
 describe('the start wizard', () => {
   it('opens for a new store instead of the home page, at step 1', async () => {
     openWizard(owner(), store());
-    expect(await screen.findByRole('heading', { name: 'شو بتشتغل؟', level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'ما نشاط محلّك؟', level: 1 })).toBeInTheDocument();
     expect(screen.getByText('الخطوة', { exact: false })).toHaveTextContent('الخطوة 1 من 4');
+    // Each activity card carries its icon from the design system's table (tab 14)
+    const cards = await screen.findAllByRole('checkbox');
+    expect(cards).toHaveLength(13);
+    for (const card of cards) expect(card.closest('label')?.querySelector('svg')).not.toBeNull();
+    expect(
+      screen.getByRole('checkbox', { name: 'صيدلية' }).closest('label')?.querySelector('svg'),
+    ).toHaveClass('lucide-pill');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 
@@ -120,6 +132,53 @@ describe('the start wizard', () => {
     ]);
   });
 
+  it('ticks the first tasks the store has already done', async () => {
+    openWizard(owner(3), store({ onboarding: { step: 3, done: false } }), '/', {
+      'GET /v1/me/home-summary': {
+        status: 200,
+        body: {
+          baseCurrency: 'SYP',
+          debts: null,
+          photos: { goodsCount: 3, withoutPhoto: 3 },
+          lowStock: null,
+        },
+      },
+      'GET /v1/devices': { status: 200, body: { devices: [{ id: 'd1', status: 'active' }] } },
+      'GET /v1/staff': {
+        status: 200,
+        // Someone else's PIN does not tick the owner's own card
+        body: { staff: [{ id: 'someone-else', isOwner: false, hasPin: true }], roles: [], branches: [] },
+      },
+    });
+    const products = await screen.findByRole('link', { name: /أضف أصنافك/ });
+    await waitFor(() => expect(products).toHaveTextContent('تمّ'));
+    expect(screen.getByRole('link', { name: /اربط جهاز الكاشير/ })).toHaveTextContent('تمّ');
+    expect(screen.getByRole('link', { name: /اختر رمز الدخول للكاشير/ })).not.toHaveTextContent('تمّ');
+    expect(screen.getByRole('link', { name: /اختر رمز الدخول للكاشير/ })).toHaveTextContent('لم يتم');
+    expect(screen.getByRole('link', { name: /أول عملية بيع/ })).not.toHaveTextContent('تمّ');
+  });
+
+  it('ticks the PIN card when the signed-in owner has his own PIN, and not for a service-only catalogue', async () => {
+    openWizard(owner(3), store({ onboarding: { step: 3, done: false } }), '/', {
+      'GET /v1/me/home-summary': {
+        status: 200,
+        body: {
+          baseCurrency: 'SYP',
+          debts: null,
+          photos: { goodsCount: 0, withoutPhoto: 0 },
+          lowStock: null,
+        },
+      },
+      'GET /v1/staff': {
+        status: 200,
+        body: { staff: [{ id: 'user-1', isOwner: true, hasPin: true }], roles: [], branches: [] },
+      },
+    });
+    const pin = await screen.findByRole('link', { name: /اختر رمز الدخول للكاشير/ });
+    await waitFor(() => expect(pin).toHaveTextContent('تمّ'));
+    expect(screen.getByRole('link', { name: /أضف أصنافك/ })).not.toHaveTextContent('تمّ');
+  });
+
   it('resumes at the step the owner left', async () => {
     openWizard(owner(2), store({ onboarding: { step: 2, done: false } }));
     expect(await screen.findByRole('heading', { name: 'العملة والأسعار', level: 1 })).toBeInTheDocument();
@@ -134,7 +193,7 @@ describe('the start wizard', () => {
 
   it('lets every step be skipped, and «لاحقاً» ends it', async () => {
     const { user, requestsTo } = openWizard(owner(), store());
-    await user.click(await screen.findByRole('button', { name: 'تخطَّ' }));
+    await user.click(await screen.findByRole('button', { name: 'تخط' }));
     expect(await screen.findByRole('heading', { name: 'معلومات محلّك', level: 1 })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'لاحقاً، خذني إلى الرئيسية' }));
     await waitFor(() =>
@@ -145,7 +204,7 @@ describe('the start wizard', () => {
   it('does not open for a store that finished it, nor for staff who cannot change the store', async () => {
     openWizard(owner(4, true), store());
     expect(await screen.findByRole('heading', { name: /^أهلاً، /, level: 1 })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'شو بتشتغل؟' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'ما نشاط محلّك؟' })).not.toBeInTheDocument();
   });
 });
 
@@ -160,9 +219,27 @@ describe('«إعدادات المتجر»', () => {
     const rate = await screen.findByLabelText('سعر الدولار اليوم بالليرة');
     await user.clear(rate);
     await user.type(rate, '132');
-    await user.click(screen.getAllByRole('button', { name: 'احفظ' })[1]!);
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
     expect(await screen.findByText('حُفظت العملة وسعر الصرف.')).toBeInTheDocument();
     expect(saved().usdRate).toBe('132');
+  });
+
+  it('asks twice before saving a rate that looks like an old-pound figure', async () => {
+    const { user, store: saved } = openWizard(
+      owner(4, true),
+      store({ enabledCurrencies: ['SYP', 'USD'], usdRate: '130', sectors: ['cafe'] }),
+      '/settings',
+    );
+    const rate = await screen.findByLabelText('سعر الدولار اليوم بالليرة');
+    expect(rate).toHaveAttribute('placeholder', '120');
+    await user.clear(rate);
+    await user.type(rate, '13000');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/عشرة أضعاف/)).toBeInTheDocument();
+    expect(saved().usdRate).toBe('130');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText('حُفظت العملة وسعر الصرف.')).toBeInTheDocument();
+    expect(saved().usdRate).toBe('13000');
   });
 
   it('shows the owner-only notice to others', async () => {

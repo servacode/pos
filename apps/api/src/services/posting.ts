@@ -17,6 +17,7 @@ import {
   taxRates,
   type Transaction,
 } from '@serva/db';
+import { postingDateFor } from './period-close';
 
 /**
  * The automatic entries of tab 10 (› القيود التلقائية) for the phase-1 documents, posted inside
@@ -37,7 +38,8 @@ import {
  * - return: the sale's lines turned around, for what came back.
  *     Dr 4100 sales ex tax before discount, the tax account of each rate
  *     Cr 4200 discounts ex tax, and the money paid back: 1110 drawer of the shift (cash),
- *        1140 card, 1150 wallet, 1130 transfer
+ *        1140 card, 1150 wallet, 1130 transfer; or, refunded to the customer's account, 1200 for
+ *        the customer the return names (party), which takes the debt down like a collection
  * - receipt: a customer's payment. Dr 1110 drawer of the shift (cash), 1140 card, 1150 wallet,
  *   1130 transfer, 1160 cheque (party); Cr 1200 for the customer (party).
  * - voucher (03 › قسيمة الاستبدال): a return refunded as a voucher credits 2310 instead of paying
@@ -80,6 +82,14 @@ export interface DraftEntry {
   memo: string;
   baseCurrency: string;
   lines: DraftLine[];
+  /**
+   * auto (the default: one per document, unique by its source), or manual and reversal (29 ›
+   * القيود اليدوية والعكسية): the same insert, balance check and numbering, with who wrote it and,
+   * for a reversal, the entry it reverses.
+   */
+  kind?: 'auto' | 'manual' | 'reversal';
+  reversesId?: string | null;
+  createdBy?: string | null;
 }
 
 const refKey = (ref: AccountRef) => ('code' in ref ? ref.code : `${ref.cash}:${ref.currency}`);
@@ -151,7 +161,7 @@ export async function postEntry(tx: Transaction, draft: DraftEntry): Promise<str
         eq(journalEntries.tenantId, draft.tenantId),
         eq(journalEntries.sourceType, draft.sourceType),
         eq(journalEntries.sourceId, draft.sourceId),
-        eq(journalEntries.kind, 'auto'),
+        eq(journalEntries.kind, draft.kind ?? 'auto'),
       ),
     );
   if (existing) return null;
@@ -162,6 +172,8 @@ export async function postEntry(tx: Transaction, draft: DraftEntry): Promise<str
     lines.map((l) => l.account),
   );
   const year = Number(draft.date.slice(0, 4));
+  // Round 37 (decision 17): an event in a closed period is never refused here; it posts on the first open day
+  const { postingDate, moved } = await postingDateFor(tx, draft.tenantId, draft.date);
   const { seq, number } = await nextNumber(tx, draft.tenantId, year);
   const [entry] = await tx
     .insert(journalEntries)
@@ -172,14 +184,17 @@ export async function postEntry(tx: Transaction, draft: DraftEntry): Promise<str
       seq,
       number,
       entryDate: draft.date,
-      postingDate: draft.date,
-      kind: 'auto',
+      postingDate,
+      postedToOpenPeriod: moved,
+      kind: draft.kind ?? 'auto',
       sourceType: draft.sourceType,
       sourceId: draft.sourceId,
       sourceNumber: draft.sourceNumber,
       memo: draft.memo,
       baseCurrency: draft.baseCurrency,
       totalMinor: debit,
+      reversesId: draft.reversesId ?? null,
+      createdBy: draft.createdBy ?? null,
     })
     .returning({ id: journalEntries.id });
   await tx.insert(journalLines).values(
@@ -390,13 +405,40 @@ export function returnLines(ret: ReturnPayload, taxAccountOf: (taxRateId: string
   lines.push(baseLine({ code: '4200' }, -discount, base));
   for (const r of ret.refunds) {
     if (r.method === 'cash') {
+      // Round 36: the dollar's part leaves the dollar drawer (its dollars and the rate it was taken at);
+      // the invoice currency's drawer pays the rest. A refund with no foreign part pays it all, as before.
+      const foreign = r.foreign ?? [];
+      const foreignBase = foreign.reduce((n, f) => n + f.baseAmountMinor, 0);
+      if (foreign.length === 0 || r.amountMinor - foreignBase !== 0) {
+        lines.push({
+          account: { cash: '1110', currency: r.currency },
+          baseMinor: -(r.amountMinor - foreignBase),
+          currency: r.currency,
+          amountMinor: -(r.amountMinor - foreignBase),
+          rate: null,
+          shiftId: ret.shiftId,
+        });
+      }
+      for (const f of foreign) {
+        lines.push({
+          account: { cash: '1110', currency: f.currency },
+          baseMinor: -f.baseAmountMinor,
+          currency: f.currency,
+          amountMinor: -f.amountMinor,
+          rate: f.rate,
+          shiftId: ret.shiftId,
+        });
+      }
+      // Round 21: the drawer paid the rounded amount; the difference to what the goods came to
+      // is cash rounding, on the same account a sale's rounding uses (6400). Absent on a refund
+      // an older till made, which paid exactly the total. Paying less is a gain (a credit).
+      if (r.roundingMinor) lines.push(baseLine({ code: '6400' }, r.roundingMinor, r.currency));
+    } else if (r.method === 'account') {
+      // The debt comes down by what went back; beyond the debt it is the store's credit to the
+      // customer, a credit balance on 1200 exactly as an over-payment by receipt is.
       lines.push({
-        account: { cash: '1110', currency: r.currency },
-        baseMinor: -r.amountMinor,
-        currency: r.currency,
-        amountMinor: -r.amountMinor,
-        rate: null,
-        shiftId: ret.shiftId,
+        ...baseLine({ code: '1200' }, -r.amountMinor, r.currency, 'على حساب الزبون'),
+        party: ret.customerId ? { type: 'customer', id: ret.customerId } : null,
       });
     } else {
       lines.push({
@@ -478,7 +520,7 @@ export async function postReceipt(tx: Transaction, source: SaleSource, r: Receip
 // ─── Gift voucher ────────────────────────────────────────────────────────────
 
 /** A gift voucher sold: the money in (the drawer of its shift, or its method's account), 2310 owed. */
-export function giftVoucherLines(g: GiftVoucherPayload, number: string): DraftLine[] {
+export function giftVoucherLines(g: GiftVoucherPayload, number: string, label = 'قسيمة هدية'): DraftLine[] {
   const money: DraftLine =
     g.method === 'cash'
       ? {
@@ -495,7 +537,7 @@ export function giftVoucherLines(g: GiftVoucherPayload, number: string): DraftLi
           g.currency,
           [methodMemo[g.method], g.reference].filter(Boolean).join(' '),
         );
-  return [money, baseLine({ code: '2310' }, -g.amountMinor, g.currency, `قسيمة هدية ${number}`)];
+  return [money, baseLine({ code: '2310' }, -g.amountMinor, g.currency, `${label} ${number}`)];
 }
 
 export async function postGiftVoucher(
@@ -513,6 +555,24 @@ export async function postGiftVoucher(
     memo: `قسيمة هدية ${source.number}${g.forName ? ` إلى ${g.forName}` : ''}`,
     baseCurrency: g.currency,
     lines: giftVoucherLines(g, source.number),
+  });
+}
+
+/**
+ * A deposit («عربون», D4): the same lines as a gift voucher (the money in, 2310 owed), under its own
+ * source type so the ledger and the reports name it.
+ */
+export async function postDeposit(tx: Transaction, source: SaleSource, g: GiftVoucherPayload): Promise<void> {
+  await postEntry(tx, {
+    tenantId: source.tenantId,
+    branchId: source.branchId,
+    date: source.businessDate,
+    sourceType: 'deposit',
+    sourceId: source.docId,
+    sourceNumber: source.number,
+    memo: `عربون ${source.number}${g.forName ? ` من ${g.forName}` : ''}`,
+    baseCurrency: g.currency,
+    lines: giftVoucherLines(g, source.number, 'عربون'),
   });
 }
 

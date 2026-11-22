@@ -90,10 +90,13 @@ describe('refresh and logout', () => {
     expect(rotated).toBeDefined();
     expect(rotated).not.toBe(cookie);
 
-    // Within the grace window a reuse is treated as two tabs racing: 409, retry with the new cookie.
+    // Within the grace window a reuse is a lost answer, not theft: a new token, and the chain goes on
+    // (after the window the old one is refused: sessions.test.ts)
     const reused = await refresh(cookie);
-    expect(reused.statusCode).toBe(409);
-    expect((await refresh(rotated!)).statusCode).toBe(200);
+    expect(reused.statusCode).toBe(200);
+    const latest = refreshCookie(reused);
+    expect(latest).toBeDefined();
+    expect((await refresh(latest!)).statusCode).toBe(200);
   });
 
   it('refuses refresh without a cookie', async () => {

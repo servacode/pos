@@ -1,9 +1,14 @@
 import { z } from 'zod';
 import type { CustomerRow } from './customers';
 import type { OnlineOrderRow } from './shop';
+import type { SerialStockRow } from './purchases';
 import type { PromotionRow } from './promotions';
 import type { ScaleBarcodeConfig } from '../scale';
+import type { InstalmentSettings } from '../installments';
 import type { LoyaltySettings, ServiceSettings } from './store';
+import type { PharmacySettings, ShelfBatch, StockBatch } from './pharmacy';
+import type { TillSettings } from './till';
+import type { SectorKey } from '../sectors';
 import type { CurrencyCode } from '../currencies';
 import type { Permission } from '../permissions';
 import type { ShiftMode } from './documents';
@@ -49,6 +54,7 @@ import {
  *   GET    /v1/tax-rates                 owner, manager      → { items: TaxRate[] }
  *   POST   /v1/tax-rates                 owner               createTaxRateInput → TaxRate (201)
  *   PATCH  /v1/tax-rates/{id}            owner               updateTaxRateInput → TaxRate
+ *   PUT    /v1/tax-rates/default         owner               defaultTaxRateInput → { items, defaultRateBp }
  *
  * Concurrent edits (17 › التعديل المتزامن): every update sends the `version` it was read at, in
  * the body as PATCH /v1/devices/{id} does; a different current version answers 409 `stale_version`,
@@ -110,9 +116,15 @@ export const BARCODE_KINDS = ['standard', 'internal'] as const;
 export type BarcodeKind = (typeof BARCODE_KINDS)[number];
 
 /** A price as the owner enters it: an amount in pounds or in dollars (10 › التسعير بعملة والبيع بأخرى). */
+/** No shelf price is believable above this (in minor units): a slipped key is refused with a clear message. */
+export const MAX_PRICE_MINOR = 1_000_000_000_000;
+export const priceMinorSchema = nonNegativeMinorSchema.max(MAX_PRICE_MINOR, {
+  message: 'السعر كبير جداً. تحقق من الأرقام.',
+});
+
 export const priceInputSchema = z.object({
   currency: currencyCodeSchema,
-  priceMinor: nonNegativeMinorSchema,
+  priceMinor: priceMinorSchema,
 });
 export type PriceInput = z.input<typeof priceInputSchema>;
 
@@ -123,6 +135,8 @@ const packFields = {
   packName: optionalText(30, 'اسم العبوة طويل جداً'),
   /** The pack's own price in the variant's price currency; null = packQty × the unit price */
   packPriceMinor: nonNegativeMinorSchema.nullable().default(null),
+  /** The pack's own wholesale price; null = the piece wholesale price × packQty */
+  packWholesaleMinor: nonNegativeMinorSchema.nullable().default(null),
 };
 
 /**
@@ -255,10 +269,23 @@ const productFields = {
   nameEn: optionalText(120, 'الاسم الإنجليزي طويل جداً'),
   categoryId: uuidSchema.nullable().default(null),
   brand: optionalText(60, 'اسم الماركة طويل جداً'),
+  /** «الموسم/التشكيلة» (صيف 2026): filters the list and groups the sales report; null: none */
+  season: optionalText(40, 'اسم الموسم طويل جداً'),
   /** «الاسم العلمي» (03 › الصيدليات): the till finds the medicine by it too */
   genericName: optionalText(120, 'الاسم العلمي طويل جداً'),
+  /** «التركيز» (500 ملغ) and «الشكل الدوائي» (أقراص، شراب): with the generic name they tell the alternatives (round 38) */
+  strength: optionalText(40, 'التركيز طويل جداً'),
+  dosageForm: optionalText(40, 'الشكل الدوائي طويل جداً'),
+  /** «يحتاج وصفة» (03 › الصيدليات): the till asks for the prescription number and the doctor */
+  requiresPrescription: z.boolean().default(false),
+  /** «مراقَب»: only the pharmacist sells it, with the patient's details, and it enters the register */
+  controlled: z.boolean().default(false),
+  /** «يتطلب صلاحية»: a purchase line of it must carry an expiry date (medical supplies, medicines) */
+  requiresExpiry: z.boolean().default(false),
   /** «له رقم تسلسلي أو IMEI» (03 › الإلكترونيات): each piece is received and sold by its number */
   tracksSerial: z.boolean().default(false),
+  /** «قابل للتأجير» (03 › الأدوات الطبية): its serial-tracked pieces can be rented out */
+  rentable: z.boolean().default(false),
   /** «الكفالة» in months from the sale; null: none */
   warrantyMonths: z.int().min(1).max(120).nullable().default(null),
   type: z.enum(PRODUCT_TYPES).default('stock'),
@@ -321,14 +348,23 @@ export const updateProductInput = z
     nameEn: patchText(120, 'الاسم الإنجليزي طويل جداً'),
     categoryId: uuidSchema.nullable().optional(),
     brand: patchText(60, 'اسم الماركة طويل جداً'),
+    season: patchText(40, 'اسم الموسم طويل جداً'),
     genericName: patchText(120, 'الاسم العلمي طويل جداً'),
+    strength: patchText(40, 'التركيز طويل جداً'),
+    dosageForm: patchText(40, 'الشكل الدوائي طويل جداً'),
+    requiresPrescription: z.boolean().optional(),
+    controlled: z.boolean().optional(),
+    requiresExpiry: z.boolean().optional(),
     tracksSerial: z.boolean().optional(),
+    rentable: z.boolean().optional(),
     warrantyMonths: z.int().min(1).max(120).nullable().optional(),
     type: z.enum(PRODUCT_TYPES).optional(),
     unitId: uuidSchema.optional(),
     taxRateId: uuidSchema.nullable().optional(),
     sellOnPos: z.boolean().optional(),
     modifiers: modifiersSchema.optional(),
+    /** Round 37: «اعتمد الصنف» — a product made at the till (temporary) is reviewed and becomes active; nothing else is set this way */
+    status: z.literal('active').optional(),
     variants: z.array(updateVariantInput).max(300, '300 متغيّر على الأكثر').optional(),
   })
   .superRefine((product, ctx) => {
@@ -352,9 +388,21 @@ export const productListQuery = z.object({
     .optional()
     .transform((v) => (v ? latinDigits(v) || undefined : undefined)),
   categoryId: uuidSchema.optional(),
+  /** Only this season (exact name) */
+  season: z.string().trim().min(1).max(40).optional(),
   status: z.enum(PRODUCT_LIST_STATUSES).default('active'),
   /** Stock of this branch only */
   branchId: uuidSchema.optional(),
+  /** «ينتهي قريباً» (within 30 days, not yet expired) or «منتهية» (a batch past its date) */
+  expiry: z.enum(['soon', 'expired']).optional(),
+  /** «نفد»: only stocked products whose net quantity is zero or below */
+  stock: z.enum(['out']).optional(),
+  /** The order: by name (default) or the least stock first */
+  sort: z.enum(['name', 'stock']).default('name'),
+  /** '1': also the unit, the wholesale price and (for cost.view) the average cost, for the export */
+  detail: z.enum(['1']).optional(),
+  /** Adds `costMinor` (the average cost) to each row, for who holds cost.view */
+  cost: z.enum(['1']).optional(),
   ...listPageQuery,
 });
 export type ProductListQuery = z.input<typeof productListQuery>;
@@ -371,6 +419,7 @@ export interface BarcodeView {
   packQty: number;
   packName: string | null;
   packPriceMinor: number | null;
+  packWholesaleMinor?: number | null;
 }
 
 export interface VariantStock {
@@ -378,7 +427,7 @@ export interface VariantStock {
   branchName: string;
   /** Thousandths; negative when sold below zero (10 › المخزون السالب) */
   qty: number;
-  /** Held for customer orders (phase 2); 0 until then */
+  /** Round 37: held for customers (holds at the till and accepted orders) at this branch, thousandths; available = qty - reservedQty */
   reservedQty: number;
 }
 
@@ -409,8 +458,15 @@ export interface ProductDetail {
   nameEn: string | null;
   categoryId: string | null;
   brand: string | null;
+  season: string | null;
   genericName: string | null;
+  strength?: string | null;
+  dosageForm?: string | null;
+  requiresPrescription: boolean;
+  controlled: boolean;
+  requiresExpiry: boolean;
   tracksSerial: boolean;
+  rentable: boolean;
   warrantyMonths: number | null;
   type: ProductType;
   status: ProductStatus;
@@ -432,6 +488,7 @@ export interface ProductListItem {
   nameEn: string | null;
   categoryId: string | null;
   categoryName: string | null;
+  season: string | null;
   type: ProductType;
   status: ProductStatus;
   archivedAt: string | null;
@@ -445,10 +502,50 @@ export interface ProductListItem {
   barcode: string | null;
   /** Sum over live variants (and branches, unless branchId was given), thousandths */
   stockQty: number;
+  /** What can be sold: each piece's stock, the ones below zero counted as 0 (thousandths); absent from older servers */
+  sellableQty?: number;
+  /** At least one picture on the product (the list's «بلا صورة» count); absent from older servers */
+  hasImage?: boolean;
+  /** The first picture's thumbnail (for the list's small photo); absent from older servers */
+  thumbUrl?: string | null;
+  /** The earliest expiry over the live pieces that hold stock (yyyy-mm-dd); null when none is tracked */
+  nearestExpiry?: string | null;
+  /** Only with `detail=1` */
+  unitName?: string | null;
+  /** Lowest and highest wholesale price over live variants; null when none has one (`detail=1`) */
+  wholesale?: { minMinor: number; maxMinor: number } | null;
+  /** The average cost of one unit in the base currency; null: none, or the user lacks cost.view (`detail=1`) */
+  costMinor?: number | null;
+  /** The shelf price averaged over the same stocked units the cost is averaged over (the margin's price) */
+  costPriceMinor?: number | null;
   version: number;
 }
 
-export type ProductListResponse = ListResponse<ProductListItem>;
+/** The store's stock in numbers (whole store, whatever the list's search shows): one definition for every screen */
+export interface ProductListTotals {
+  products: number;
+  /** Live combinations (sizes, colours…) over all products */
+  variants: number;
+  /** Thousandths on the shelf: each combination's stock, one below zero counted as 0 */
+  pieces: number;
+  /** Stocked combinations below zero («ناقص») */
+  negative: number;
+  /** Stocked combinations at zero or below («نفد») */
+  runOut: number;
+  /** How many products those combinations belong to («12 مقاساً نفد من 4 منتجات») */
+  runOutProducts?: number;
+  /** The stocked product with the least left */
+  lowest: { nameAr: string; qty: number } | null;
+}
+
+export type ProductListResponse = ListResponse<ProductListItem> & {
+  /** Whole-store stock numbers for the tiles (first page of the active list only) */
+  totals?: ProductListTotals;
+  /** Over every active product of the store, not the page: how many sell at 0 and how many have no picture (first page only) */
+  attention?: { zeroPrice: number; noPhoto: number; expiringSoon?: number; uncategorised?: number };
+  /** How many products each status filter holds (first page only) */
+  statusCounts?: { active: number; temporary: number; archived: number };
+};
 
 /**
  * GET /v1/products/options (catalog reader): every option the store's pieces use (المقاس، اللون،
@@ -457,6 +554,8 @@ export type ProductListResponse = ListResponse<ProductListItem>;
  */
 export interface OptionValuesResponse {
   options: { name: string; values: string[] }[];
+  /** The seasons the store's products carry, A→Z */
+  seasons: string[];
 }
 
 /** GET /v1/barcodes/{code}: the product behind a code (the cashier searches on its own device). */
@@ -560,6 +659,22 @@ export const updateTaxRateInput = z.object({
 });
 export type UpdateTaxRateInput = z.input<typeof updateTaxRateInput>;
 
+/**
+ * «الضريبة الافتراضية»: the rate a new product starts with (null: none). The store keeps the rate's
+ * percentage (tenant_settings.default_tax_rate_bp, which the tills already pull); nothing about how
+ * tax is calculated or posted changes.
+ */
+export const defaultTaxRateInput = z.object({ taxRateId: uuidSchema.nullable() });
+export type DefaultTaxRateInput = z.input<typeof defaultTaxRateInput>;
+
+/** The list answer: the rates and the store's default percentage (the first live rate with it is «the default») */
+export interface TaxRateList {
+  items: TaxRate[];
+  defaultRateBp: number;
+  /** The rate picked as the default (told apart from another rate with the same percentage); null when not known */
+  defaultRateId?: string | null;
+}
+
 // ─── Pull sets: the rows a cashier device stores ──────────────────────────────
 
 /**
@@ -591,6 +706,14 @@ export interface ProductRow {
   brand: string | null;
   /** «الاسم العلمي»; searched on the till */
   genericName: string | null;
+  /** «التركيز» and «الشكل الدوائي»: with the generic name they tell the alternatives (round 38); older rows leave them out */
+  strength?: string | null;
+  dosageForm?: string | null;
+  /** «يحتاج وصفة» and «مراقَب» (03 › الصيدليات): the till asks for the prescription. Rows a device
+   *  pulled before these existed leave them out: read as false. */
+  requiresPrescription?: boolean;
+  controlled?: boolean;
+  requiresExpiry?: boolean;
   /** Each piece is sold by its serial number or IMEI, asked at the till */
   tracksSerial: boolean;
   /** «الكفالة» in months, printed with the numbers on the receipt */
@@ -620,6 +743,8 @@ export interface VariantRow {
   sortOrder: number;
   /** The earliest expiry of what is on the shelf (services/expiry.ts); null when none was received */
   nearestExpiry: string | null;
+  /** The batches on the shelf, nearest expiry first (services/expiry.ts); null when none was received */
+  shelfBatches?: ShelfBatch[] | null;
   /** The thumbnail shown on the till: the picture of this piece's colour, else the main one */
   imageUrl: string | null;
   archived: boolean;
@@ -658,6 +783,8 @@ export interface BarcodeRow {
   packName: string | null;
   /** In the variant's price currency */
   packPriceMinor: number | null;
+  /** The pack's wholesale price, in the variant's price currency; null: piece wholesale × packQty */
+  packWholesaleMinor?: number | null;
   version: number;
 }
 
@@ -704,6 +831,8 @@ export interface StockLevelRow {
   /** Thousandths of the base unit; may be negative */
   qty: number;
   reservedQty: number;
+  /** What is left of each batch in this branch (03 › الصيدليات); null: the item keeps no batches */
+  batches?: StockBatch[] | null;
   version: number;
 }
 
@@ -757,6 +886,14 @@ export interface SettingsRow {
   service: ServiceSettings | null;
   /** «نقاط الولاء» (contracts/store.ts LoyaltySettings); null when the store gives none */
   loyalty: LoyaltySettings | null;
+  /** «الصيدلية» (contracts/pharmacy.ts); null when the store is not a pharmacy */
+  pharmacy?: PharmacySettings | null;
+  /** «الصندوق» (contracts/till.ts): the return window and the card approval rule; null: the defaults */
+  till?: TillSettings | null;
+  /** «الأقساط» (installments.ts InstalmentSettings, stored partial): null or `enabled: false` when the store does not sell on instalments */
+  installments?: Partial<InstalmentSettings> | null;
+  /** The store's business types, from tenants (the till words return reasons by them) */
+  sectors?: SectorKey[];
   version: number;
 }
 
@@ -805,6 +942,10 @@ export interface BranchRow {
   address: string | null;
   phone: string | null;
   isActive: boolean;
+  /** store | van; a cache from before vans has none, which is a store */
+  kind?: 'store' | 'van';
+  parentBranchId?: string | null;
+  vehiclePlate?: string | null;
   version: number;
 }
 
@@ -841,6 +982,7 @@ export interface PullSetRows {
   promotions: PromotionRow;
   vouchers: VoucherRow;
   online_orders: OnlineOrderRow;
+  serials: SerialStockRow;
 }
 
 // ─── Product pictures (03 › الألبسة: صور القطع) ───────────────────────────────
@@ -929,6 +1071,8 @@ export type BulkPriceInput = z.input<typeof bulkPriceInput>;
 
 export interface BulkPriceResult {
   applied: boolean;
+  /** The id to give «تراجع» (POST /v1/prices/bulk/{id}/undo); null when nothing was applied */
+  changeId?: string | null;
   items: {
     productId: string;
     variantId: string;
@@ -939,4 +1083,48 @@ export interface BulkPriceResult {
     /** The price printed struck through after the change; null: none */
     wasMinor: number | null;
   }[];
+}
+
+// ─── Opening stock and cost from the product card (round 44) ──────────────────
+
+/**
+ * POST /v1/products/{id}/opening-stock   catalog.manage + inventory.adjust (in that branch)
+ * The first quantity of a piece that never moved in the branch, with what one unit cost: the same
+ * posting as an imported opening balance (Dr 1300 المخزون / Cr 3900 الأرصدة الافتتاحية).
+ * GET /v1/products/{id}/costs            cost.view → { items: [{ variantId, qty, unitCostMinor|null }] }
+ */
+export const productOpeningInput = z.object({
+  /** The business day of the opening document */
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  branchId: uuidSchema,
+  lines: z
+    .array(
+      z.object({
+        variantId: uuidSchema,
+        /** Thousandths of the base unit, above zero */
+        qty: z.int().min(1).max(1_000_000_000),
+        /** What one whole unit cost, in the base currency's minor units */
+        unitCostMinor: z.int().min(0).max(1_000_000_000_000),
+      }),
+    )
+    .min(1)
+    .max(500),
+  /** A piece with no cost enters the stock at a value of zero: said on purpose, never by leaving the cost empty */
+  zeroCostOk: z.boolean().optional(),
+});
+export type ProductOpeningInput = z.input<typeof productOpeningInput>;
+
+/**
+ * GET /v1/products/{id}/archive-impact   catalog reader → what archiving this product leaves behind
+ * (the stock still on the shelf, the dishes whose recipe uses it as an ingredient)
+ */
+export interface ArchiveImpactResponse {
+  /** Thousandths of the base unit still on hand over all branches (may be negative) */
+  stockQty: number;
+  /** Names of the dishes whose recipe takes this product (up to ten) */
+  usedInRecipes: string[];
+}
+
+export interface ProductCostsResponse {
+  items: { variantId: string; qty: number; unitCostMinor: number | null }[];
 }

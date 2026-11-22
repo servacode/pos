@@ -6,40 +6,35 @@ import {
   Card,
   EmptyState,
   LockIcon,
+  PageHeader,
   RetryIcon,
   Select,
   SkeletonText,
-  TextField,
 } from '@serva/ui';
+import { DateField } from '../../lib/DateField';
 import { AppShell } from '../../layout/AppShell';
 import { holdsAny, type AccessRule } from './access';
 
-/** The page title row (kit .page-head): the path, the title and its line, the page's actions. */
+/** The page title row: the one h1 with its line, an icon tile and the page's actions (PageHeader). */
 export function PageHead({
-  crumbs,
   title,
   subtitle,
+  icon,
   actions,
 }: {
-  crumbs?: readonly string[];
   title: string;
   subtitle?: ReactNode;
+  icon?: ReactNode;
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 print:hidden">
-      <div className="flex min-w-0 flex-col gap-1">
-        {crumbs && crumbs.length > 0 ? (
-          <nav aria-label="المسار" className="text-sm text-ink-muted">
-            {crumbs.join(' / ')}
-          </nav>
-        ) : null}
-        <h1 className="text-2xl font-bold text-ink">{title}</h1>
-        {subtitle ? <p className="text-ink-muted">{subtitle}</p> : null}
-      </div>
-      {actions ? <div className="flex flex-wrap items-center gap-3">{actions}</div> : null}
-    </div>
+    <PageHeader className="print:hidden" title={title} description={subtitle} icon={icon} actions={actions} />
   );
+}
+
+/** The date, branch and device controls of a report, in one calm card above the numbers. */
+export function ReportFilters({ children }: { children: ReactNode }) {
+  return <Card className="flex flex-wrap items-end gap-x-4 gap-y-3 !p-4 print:hidden">{children}</Card>;
 }
 
 /** A report screen inside the admin shell, or «ليست لك» for whoever lacks its key. */
@@ -57,7 +52,7 @@ export function ReportScreen({
   const allowed = typeof access === 'function' ? access(me) : holdsAny(me, access);
   return (
     <AppShell>
-      <title>{`${title} · Serva POS`}</title>
+      <title>{`${title} · SERVA`}</title>
       {allowed ? (
         <div className="flex flex-col gap-6">{children}</div>
       ) : (
@@ -95,15 +90,19 @@ export function ReportError({ message, onRetry }: { message: string; onRetry: ()
 }
 
 /** The branches this user may pick: every branch with «كل الفروع» when no role ties them to one. */
-export function branchChoices(me: MeResponse): { all: boolean; branches: MeResponse['branches'] } {
+export function branchChoices(
+  me: MeResponse,
+  /** The books' reports offer «كل الفروع» even to a one-branch store: entries with no branch show there */
+  alwaysAll = false,
+): { all: boolean; branches: MeResponse['branches'] } {
   const tied = me.user.roles.map((role) => role.branchId);
   const all = tied.length === 0 || tied.includes(null);
   const branches = all ? me.branches : me.branches.filter((branch) => tied.includes(branch.id));
-  return { all: all && branches.length > 1, branches };
+  return { all: all && (alwaysAll || branches.length > 1), branches };
 }
 
-export function defaultBranch(me: MeResponse): string | null {
-  const { all, branches } = branchChoices(me);
+export function defaultBranch(me: MeResponse, alwaysAll = false): string | null {
+  const { all, branches } = branchChoices(me, alwaysAll);
   return all ? null : (branches[0]?.id ?? null);
 }
 
@@ -111,18 +110,26 @@ export function BranchSelect({
   me,
   value,
   onChange,
+  alwaysAll = false,
+  hideLabel = false,
+  className,
 }: {
   me: MeResponse;
   value: string | null;
   onChange: (branchId: string | null) => void;
+  alwaysAll?: boolean;
+  /** The label for screen readers only (a bar whose place already says «الفرع») */
+  hideLabel?: boolean;
+  className?: string;
 }) {
-  const { all, branches } = branchChoices(me);
+  const { all, branches } = branchChoices(me, alwaysAll);
   return (
     <Select
       label="الفرع"
+      hideLabel={hideLabel}
       value={value ?? ''}
       onChange={(event) => onChange(event.target.value || null)}
-      className="min-w-48"
+      className={className ?? 'min-w-48'}
     >
       {all ? <option value="">كل الفروع</option> : null}
       {branches.map((branch) => (
@@ -147,16 +154,13 @@ export function DayField({
   max?: string;
 }) {
   return (
-    <TextField
+    <DateField
       label={label}
-      type="date"
       value={value}
       max={max}
-      dir="ltr"
-      onChange={(event) => {
-        if (event.target.value) onChange(event.target.value);
-      }}
-      className="min-w-44"
+      required
+      onChange={onChange}
+      className="min-w-40 max-w-full"
     />
   );
 }

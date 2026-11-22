@@ -180,6 +180,11 @@ describe('the online shop', () => {
         wasPriceMinor: null,
         offer: null,
         available: true,
+        createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        options: [
+          { name: 'المقاس', values: ['L'] },
+          { name: 'اللون', values: ['أبيض'] },
+        ],
       },
     ]);
     expect(JSON.stringify(home)).not.toMatch(/cost|qty|stock|phone/i);
@@ -205,6 +210,40 @@ describe('the online shop', () => {
       [m, false],
       [l, true],
     ]);
+  });
+
+  it('never shows an item priced at 0 (an alteration service), and cannot be ordered', async () => {
+    const store = await openStore(app);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: as(store),
+      payload: {
+        nameAr: 'تقصير',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 0 } }],
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const paid = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: as(store),
+      payload: {
+        nameAr: 'خياطة',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 50_000 } }],
+      },
+    });
+    expect(paid.statusCode, paid.body).toBe(201);
+    await openShop(store);
+    const home = (await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion' })).json<ShopHome>();
+    expect(home.products.map((p) => p.name)).toEqual(['خياطة']);
+    const free = made.json<ProductDetail>();
+    const page = await app.inject({ method: 'GET', url: `/v1/shop/nour-fashion/products/${free.id}` });
+    expect(page.statusCode).toBe(404);
+    const tried = await order('nour-fashion', [{ variantId: free.variants[0]!.id, qty: 1 }]);
+    expect(tried.statusCode).toBe(400);
   });
 
   it('saves an order at the server’s prices, writes it for WhatsApp, and the shop follows it', async () => {
@@ -275,6 +314,36 @@ describe('the online shop', () => {
       payload: { status: 'done', version: first.version },
     });
     expect(stale.statusCode).toBe(409);
+  });
+
+  it('caps an order at what is on the shelf, tells the page the most it can hold, and says how many are left', async () => {
+    const store = await openStore(app);
+    const { l, m, shirt } = await goods(store);
+    await openShop(store);
+    const page = await app.inject({
+      method: 'GET',
+      url: `/v1/shop/nour-fashion/products/${shirt.id}`,
+    });
+    expect(page.statusCode, page.body).toBe(200);
+    const variants = page.json<ShopProduct>().variants;
+    // 5 on the shelf for L; M ran out and can hold none
+    expect(variants.find((v) => v.id === l)?.maxQty).toBe(5);
+    expect(variants.find((v) => v.id === m)?.maxQty ?? 0).toBe(0);
+
+    const tooMany = await order('nour-fashion', [{ variantId: l, qty: 6 }]);
+    expect(tooMany.statusCode).toBe(400);
+    expect(tooMany.json()).toMatchObject({
+      error: { fields: { 'lines.0': expect.stringContaining('المتوفر') } },
+    });
+    expect(tooMany.json().error.fields['lines.0']).toContain('5 فقط');
+    // Two lines of the same piece count together
+    const split = await order('nour-fashion', [
+      { variantId: l, qty: 3 },
+      { variantId: l, qty: 3 },
+    ]);
+    expect(split.statusCode).toBe(400);
+    // Exactly what is there is fine
+    expect((await order('nour-fashion', [{ variantId: l, qty: 5 }])).statusCode).toBe(201);
   });
 
   it('keeps each store’s shop and orders to itself', async () => {

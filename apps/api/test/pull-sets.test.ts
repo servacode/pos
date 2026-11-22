@@ -18,6 +18,10 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'categoryId',
     'brand',
     'genericName',
+    'strength',
+    'dosageForm',
+    'requiresPrescription',
+    'controlled',
     'tracksSerial',
     'warrantyMonths',
     'type',
@@ -37,6 +41,7 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'attributes',
     'sortOrder',
     'nearestExpiry',
+    'shelfBatches',
     'imageUrl',
     'archived',
     'version',
@@ -51,11 +56,21 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'priceChangedAt',
     'version',
   ],
-  barcodes: ['id', 'variantId', 'code', 'kind', 'packQty', 'packName', 'packPriceMinor', 'version'],
+  barcodes: [
+    'id',
+    'variantId',
+    'code',
+    'kind',
+    'packQty',
+    'packName',
+    'packPriceMinor',
+    'packWholesaleMinor',
+    'version',
+  ],
   categories: ['id', 'name', 'parentId', 'sortOrder', 'archived', 'version'],
   units: ['id', 'name', 'symbol', 'allowsFraction', 'version'],
   tax_rates: ['id', 'name', 'rateBp', 'kind', 'showOnReceipt', 'archived', 'version'],
-  stock_levels: ['id', 'branchId', 'variantId', 'qty', 'reservedQty', 'version'],
+  stock_levels: ['id', 'branchId', 'variantId', 'qty', 'reservedQty', 'batches', 'version'],
   exchange_rates: [
     'id',
     'unit',
@@ -85,14 +100,47 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'scaleBarcode',
     'service',
     'loyalty',
+    'installments',
+    'pharmacy',
+    'till',
+    'sectors',
     'version',
   ],
   users: ['id', 'fullName', 'status', 'pinLength', 'pinVersion', 'version'],
   roles: ['id', 'key', 'name', 'permissions', 'maxDiscountBp', 'version'],
   user_roles: ['id', 'userId', 'roleId', 'branchId', 'version'],
-  branches: ['id', 'code', 'name', 'address', 'phone', 'isActive', 'version'],
-  customers: ['id', 'name', 'phone', 'creditLimitMinor', 'priceTier', 'loyaltyPoints', 'archived', 'version'],
+  branches: [
+    'id',
+    'code',
+    'name',
+    'address',
+    'phone',
+    'isActive',
+    'kind',
+    'parentBranchId',
+    'vehiclePlate',
+    'version',
+  ],
+  customers: [
+    'id',
+    'name',
+    'phone',
+    'creditLimitMinor',
+    'priceTier',
+    'loyaltyPoints',
+    'regionId',
+    'approvalStatus',
+    'lat',
+    'lng',
+    'kind',
+    'groupId',
+    'groupName',
+    'groupDiscountBps',
+    'archived',
+    'version',
+  ],
   vouchers: ['id', 'code', 'currency', 'amountMinor', 'redeemedMinor', 'version'],
+  serials: ['id', 'variantId', 'serial', 'status', 'saleNumber', 'version'],
   online_orders: [
     'id',
     'number',
@@ -108,6 +156,9 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'depositCode',
     'deliveryFeeMinor',
     'deliveryArea',
+    'couponRule',
+    'branchId',
+    'reservedUntil',
     'version',
   ],
   promotions: [
@@ -125,6 +176,13 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'daysOfWeek',
     'fromTime',
     'toTime',
+    'tiers',
+    'freeVariantId',
+    'freeQty',
+    'customerKinds',
+    'priceTiers',
+    'repOnly',
+    'couponCode',
     'archived',
     'version',
   ],
@@ -176,7 +234,12 @@ describe('catalog pull sets', () => {
                                  currency, total_minor, lines, decided_at)
       values (${body.tenant.id}, 1, 'ONL-000001', 'accepted', 'shop', 'ريم', '+963944555666', 'pickup',
               'SYP', 900000, '[]'::jsonb, now())`;
-    const page = await pullAll((await createDevice(body.tenant.id)).authorization);
+    const till = await createDevice(body.tenant.id);
+    // A piece in stock in the till's branch
+    await ownerDb()`
+      insert into serials (tenant_id, variant_id, serial, status, branch_id)
+      select ${body.tenant.id}, v.id, 'SN-0001', 'in_stock', ${till.branchId} from variants v limit 1`;
+    const page = await pullAll(till.authorization);
     expect(Object.keys(page.sets).sort()).toEqual(Object.keys(FIELDS).sort());
     for (const [set, fields] of Object.entries(FIELDS)) {
       const rows = page.sets[set]!.upserts;
@@ -253,7 +316,7 @@ describe('catalog pull sets', () => {
       headers: { authorization: `Bearer ${body.accessToken}` },
       payload: {
         version: tea.version,
-        variants: [{ id: tea.variants[0]!.id, price: { currency: 'SYP', priceMinor: 1 } }],
+        variants: [{ id: tea.variants[0]!.id, price: { currency: 'SYP', priceMinor: 4_600_000 } }],
       },
     });
     await ownerDb()`update tenants set name = 'سوبرماركت الفرات' where id = ${body.tenant.id}`;
@@ -264,7 +327,7 @@ describe('catalog pull sets', () => {
       headers: { authorization: device.authorization },
     });
     const next = res.json<PullResponse>();
-    expect(next.sets.prices!.upserts.map((p) => p.priceMinor)).toEqual([1]);
+    expect(next.sets.prices!.upserts.map((p) => p.priceMinor)).toEqual([4_600_000]);
     expect(next.sets.variants!.upserts).toEqual([]);
     expect(next.sets.barcodes!.upserts).toEqual([]);
     expect(next.sets.settings!.upserts.map((s) => s.storeName)).toEqual(['سوبرماركت الفرات']);

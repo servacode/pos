@@ -11,14 +11,18 @@
     "./pricing": "./src/pricing.ts",
     "./sale": "./src/sale.ts",
     "./sale-return": "./src/sale-return.ts",
+    "./pharmacy": "./src/pharmacy.ts",
     "./costing": "./src/costing.ts",
     "./scale": "./src/scale.ts",
+    "./rentals": "./src/rentals.ts",
+    "./installments": "./src/installments.ts",
     "./promotions": "./src/promotions.ts",
     "./currencies": "./src/currencies.ts",
     "./text": "./src/text.ts",
     "./phone": "./src/phone.ts",
     "./sectors": "./src/sectors.ts",
     "./permissions": "./src/permissions.ts",
+    "./distribution": "./src/distribution.ts",
     "./contracts/*": "./src/contracts/*.ts"
   },
   "scripts": {

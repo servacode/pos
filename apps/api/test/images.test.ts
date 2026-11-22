@@ -177,6 +177,33 @@ describe('product pictures', () => {
     expect((await pull()).get(red)).toBe(main.thumbUrl);
   });
 
+  it('never sends a piece the picture of another product', async () => {
+    const store = await openStore(app);
+    const make = async (nameAr: string) =>
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/v1/products',
+          headers: as(store),
+          payload: { nameAr, variants: [{ price: { currency: 'SYP', priceMinor: 100_000 } }] },
+        })
+      ).json<ProductDetail>();
+    const withPicture = await make('فستان');
+    const without = await make('قميص');
+    const pic = (await add(store, withPicture.id, body(20))).json<ProductImage>();
+    await settled();
+    const page = await app.inject({
+      method: 'GET',
+      url: '/v1/sync/pull',
+      headers: { authorization: store.device.authorization },
+    });
+    const rows = (page.json<PullResponse>().sets as unknown as { variants: { upserts: VariantRow[] } })
+      .variants.upserts;
+    const at = (p: ProductDetail) => rows.find((v) => v.id === p.variants[0]!.id)!.imageUrl;
+    expect(at(withPicture)).toBe(pic.thumbUrl);
+    expect(at(without)).toBeNull();
+  });
+
   it('knows a picture by its first bytes', () => {
     expect(sniffImage(Uint8Array.from(JPEG))).toBe('image/jpeg');
     expect(sniffImage(Uint8Array.from(PNG))).toBe('image/png');

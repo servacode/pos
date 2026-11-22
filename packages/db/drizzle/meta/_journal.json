@@ -267,6 +267,447 @@
       "when": 1793770634275,
       "tag": "0037_broadcasts",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794432604542,
+      "tag": "0038_platform_2fa_password_reset",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794432767428,
+      "tag": "0039_expenses",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794445264607,
+      "tag": "0040_sync_inbox_quarantined",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794480667521,
+      "tag": "0041_hall_open_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794480807826,
+      "tag": "0042_pharmacy_sale_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794551576163,
+      "tag": "0043_online_store_show_prices",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794558234257,
+      "tag": "0044_platform_legal_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794566899903,
+      "tag": "0045_till_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1794567012298,
+      "tag": "0046_online_order_cancel_requested",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1794569095250,
+      "tag": "0047_alteration_deposit",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794571253929,
+      "tag": "0048_accountant_storekeeper_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794573133881,
+      "tag": "0049_devices_repull_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794583202004,
+      "tag": "0050_clothing_options",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1794583291852,
+      "tag": "0051_shop_growth",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1794583566609,
+      "tag": "0052_warranty_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1794584646341,
+      "tag": "0053_online_order_coupon_rule",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1794586011459,
+      "tag": "0054_recipes",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1794592524123,
+      "tag": "0055_product_texts_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1794602737934,
+      "tag": "0056_pack_wholesale_cheque_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1794602811011,
+      "tag": "0057_serial_tracking",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1794602976311,
+      "tag": "0058_rentals_maintenance_contract_prices",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1794603088395,
+      "tag": "0059_batch_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794603312816,
+      "tag": "0060_quotations",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1794605380776,
+      "tag": "0061_serial_returned_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1794642310481,
+      "tag": "0062_medical_batch_defaults",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1794686054958,
+      "tag": "0063_invoice_commission_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1794696051248,
+      "tag": "0064_no_batch_row_in_till_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794696473041,
+      "tag": "0065_resend_variant_pictures",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794745802439,
+      "tag": "0066_device_hidden_from_list",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794746048691,
+      "tag": "0067_device_hidden_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794749648691,
+      "tag": "0068_deposit_doc_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794857166346,
+      "tag": "0069_purchase_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1794875141468,
+      "tag": "0070_installments",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1794880541967,
+      "tag": "0071_installment_plan_id_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794888976197,
+      "tag": "0072_agents_program",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794947899864,
+      "tag": "0073_distribution",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794967785347,
+      "tag": "0074_rep_van_count_settlement_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794968873696,
+      "tag": "0075_rep_resync_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794990000000,
+      "tag": "0076_supervisor_cash_stock",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1794997093907,
+      "tag": "0077_damaged_stock",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794997125584,
+      "tag": "0078_rep_debt",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1795006745946,
+      "tag": "0079_purchase_usd",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1795006772907,
+      "tag": "0080_purchase_reversals",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1795006800000,
+      "tag": "0081_hold_reservation",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1795100000000,
+      "tag": "0083_transit_transfers",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1795100001000,
+      "tag": "0084_period_close",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1795100002000,
+      "tag": "0085_agent_login_code_platform_rate",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1795100003000,
+      "tag": "0086_agent_remembered_devices",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1795100004000,
+      "tag": "0087_pharmacy_alternatives_shortages",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1795100005000,
+      "tag": "0088_shortage_id_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1795165963887,
+      "tag": "0089_invoices_list_order_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1795165964887,
+      "tag": "0090_products_list_order_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1795165965887,
+      "tag": "0091_purchases_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1795165966887,
+      "tag": "0092_inventory_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1795165967887,
+      "tag": "0093_supplier_cheque_payable",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1795165968887,
+      "tag": "0094_promotions_coupon_live",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1795165969887,
+      "tag": "0095_customers_round48",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1795165970887,
+      "tag": "0096_customers_round50",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1795165971887,
+      "tag": "0097_products_round52",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1795165972887,
+      "tag": "0098_shop_free_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1795165973887,
+      "tag": "0099_customers_balance_covering",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1795314748111,
+      "tag": "0100_purchases_round62",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1795326330618,
+      "tag": "0101_purchases_round64",
+      "breakpoints": true
     }
   ]
 }

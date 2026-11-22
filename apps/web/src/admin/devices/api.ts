@@ -4,6 +4,7 @@ import type {
   DeviceSummary,
   PairingCodeResponse,
   RenameDeviceInput,
+  VanRow,
 } from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
@@ -21,7 +22,7 @@ export function createPairingCode(input: CreatePairingCodeInput) {
   });
 }
 
-export type DeviceDecision = 'approve' | 'reject' | 'revoke';
+export type DeviceDecision = 'approve' | 'reject' | 'revoke' | 'hide';
 
 export function decideDevice(id: string, decision: DeviceDecision) {
   return apiFetch<DeviceSummary>(`/v1/devices/${encodeURIComponent(id)}/${decision}`, {
@@ -36,4 +37,9 @@ export function renameDevice(id: string, input: RenameDeviceInput) {
     body: input,
     auth: true,
   });
+}
+
+/** The vans a rep's phone can be linked to (a van is a branch of kind van) */
+export function listVansForPairing() {
+  return apiFetch<VanRow[]>('/v1/vans', { auth: true });
 }

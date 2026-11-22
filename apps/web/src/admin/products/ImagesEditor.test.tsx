@@ -114,14 +114,33 @@ describe('«الصور» on the product card', () => {
     expect(requestsTo('PATCH', `${base}/img-1`)[1]!.body).toEqual({ version: 2, optionValue: null });
   });
 
-  it('asks to save a new product before its pictures', async () => {
-    mockFetch({
+  it('takes pictures in the new-product form and sends them right after the first save', async () => {
+    const saved = product({ nameAr: 'قميص كتان', version: 1 });
+    const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': { status: 200, body: catalogMe() },
       ...lookupRoutes,
+      'POST /v1/products': { status: 201, body: saved },
+      [`GET /v1/products/${saved.id}`]: { status: 200, body: saved },
+      [`GET /v1/products/${saved.id}/images`]: { status: 200, body: { items: [] } },
+      [`POST /v1/products/${saved.id}/images`]: () => ({ status: 201, body: image(0) }),
     });
-    renderApp('/products/new');
-    expect(await screen.findByText('احفظ المنتج أولاً، ثم أضف صوره هنا.')).toBeInTheDocument();
+    const { user } = renderApp('/products/new');
+    const section = await screen.findByRole('heading', { name: 'الصور' });
+    expect(section).toBeInTheDocument();
+    const file = new File(['x'], 'shirt.jpg', { type: 'image/jpeg' });
+    await user.upload(await screen.findByLabelText('اختر صوراً'), file);
+    expect(await screen.findByAltText('الصورة الرئيسية')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('اسم المنتج'), 'قميص كتان');
+    await user.selectOptions(screen.getByLabelText('التصنيف'), ids.dairy);
+    await user.selectOptions(screen.getByLabelText('الضريبة'), ids.tax);
+    await user.type(screen.getByLabelText('سعر البيع'), '120');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await vi.waitFor(() => expect(requestsTo('POST', `/v1/products/${saved.id}/images`)).toHaveLength(1));
+    expect(requestsTo('POST', `/v1/products/${saved.id}/images`)[0]!.body).toMatchObject({
+      contentType: 'image/jpeg',
+      optionValue: null,
+    });
   });
 
   it('fits a picture within its long side, never enlarging it', () => {

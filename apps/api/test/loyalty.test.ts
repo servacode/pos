@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import type { CustomerRow, StoreResponse } from '@serva/core';
+import { buildReturnPayload, type CustomerRow, type StoreResponse } from '@serva/core';
 import { createDb, withTenant } from '@serva/db';
 import type { PullResponse } from '@serva/sync';
 import { checkIntegrity } from '../src/services/integrity';
@@ -159,5 +159,51 @@ describe('loyalty points', () => {
       payload: { loyalty: { earnEveryMinor: 0, pointValueMinor: 1_000 } },
     });
     expect(bad.statusCode).toBe(400);
+  });
+});
+
+describe('a return takes the points back', () => {
+  it('claws back what the returned part earned, never below zero, and only once', async () => {
+    const store = await openStore(app);
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/store/loyalty',
+      headers: as(store),
+      payload: { loyalty: { earnEveryMinor: 100_000, pointValueMinor: 1_000 } },
+    });
+    const c = (
+      await app.inject({ method: 'POST', url: '/v1/customers', headers: as(store), payload: { name: 'ريم' } })
+    ).json<{ id: string }>();
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const soldPayload = sale(store, open.id, {
+      customerId: c.id,
+      customerName: 'ريم',
+      lines: [cartLine(1, 450_000)],
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 450_000 }],
+    });
+    const sold = doc('sale', soldPayload);
+    await push(app, store.device, [open, sold]);
+    expect(await customerPoints(store, c.id)).toBe(4);
+
+    const ret = doc(
+      'return',
+      buildReturnPayload({
+        sale: soldPayload,
+        saleId: sold.id,
+        saleNumber: sold.number!,
+        shiftId: open.id,
+        cashierId: store.userId,
+        reason: 'المقاس صغير',
+        picks: [{ saleLineNo: 1, qty: 1000 }],
+        refundMethod: 'cash',
+      }),
+    );
+    const res = await push(app, store.device, [ret]);
+    expect(res.results[0]!.status).toBe('accepted');
+    expect(await customerPoints(store, c.id)).toBe(0);
+    // The same document sent again changes nothing
+    await push(app, store.device, [ret]);
+    expect(await customerPoints(store, c.id)).toBe(0);
   });
 });

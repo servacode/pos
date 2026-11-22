@@ -1,10 +1,23 @@
 import { useMemo, useState } from 'react';
 import { normalizeArabic } from '@serva/core';
-import { Badge, Button, Card, cn, EmptyState, ExpandIcon, ReportsIcon, SearchField } from '@serva/ui';
+import {
+  Badge,
+  Button,
+  cn,
+  DataTable,
+  EmptyState,
+  ExpandIcon,
+  IconButton,
+  InfoIcon,
+  ReportsIcon,
+  SearchField,
+  SearchIcon,
+  type DataColumn,
+} from '@serva/ui';
 import { listAccounts } from '../reports/api';
 import type { AccountRow } from '../reports/contracts';
 import { ACCOUNT_TYPE_LABEL, currencyName, normalSide } from '../reports/labels';
-import { ReportError, ReportLoading } from '../reports/parts';
+import { ReportError } from '../reports/parts';
 import { useReport } from '../reports/useReport';
 import { AccountingLayout } from './AccountingLayout';
 
@@ -73,6 +86,86 @@ function groupCodes(roots: AccountNode[]): string[] {
   return codes;
 }
 
+/** A secondary column's words: the type, the side, the currency. */
+function Muted({ children }: { children: string }) {
+  return <span className="whitespace-nowrap text-ink-muted">{children}</span>;
+}
+
+const plural = new Intl.PluralRules('ar');
+
+/** «حساب واحد», «حسابان», «5 حسابات», «30 حساباً», «100 حساب». */
+function AccountsCount({ count }: { count: number }) {
+  const number = <bdi className="num font-semibold text-ink">{count}</bdi>;
+  switch (plural.select(count)) {
+    case 'one':
+      return <>حساب واحد</>;
+    case 'two':
+      return <>حسابان</>;
+    case 'few':
+      return <>{number} حسابات</>;
+    case 'many':
+      return <>{number} حساباً</>;
+    default:
+      return <>{number} حساب</>;
+  }
+}
+
+/** Each level of the tree steps in by this much (rem), so a child sits under its parent's name. */
+const INDENT = 1.75;
+
+/**
+ * The account cell of the tree (هوية 4 › DataTable): stepped in by its depth, a chevron that opens
+ * and closes a group (a leaf keeps its place), the code in equal-width digits, then the name. A main
+ * group is bold, a sub-group semibold, an account plain, so the levels read at a glance.
+ */
+function AccountCell({ row, onToggle }: { row: VisibleRow; onToggle: (code: string) => void }) {
+  const { node, depth, expanded } = row;
+  const { account } = node;
+  const group = node.children.length > 0;
+  return (
+    <div className="flex items-center gap-2" style={{ paddingInlineStart: `${depth * INDENT}rem` }}>
+      {group ? (
+        <IconButton
+          label={`${account.code} ${account.name}`}
+          aria-expanded={expanded}
+          size="xs"
+          onClick={() => onToggle(account.code)}
+          icon={
+            <ExpandIcon
+              size={16}
+              className={cn(
+                'motion-safe:transition-transform motion-safe:duration-120',
+                !expanded && 'rotate-90',
+              )}
+            />
+          }
+        />
+      ) : (
+        // As wide as the chevron button beside a group (IconButton xs), so names line up.
+        <span aria-hidden="true" className="size-8 shrink-0 pointer-coarse:size-12" />
+      )}
+      <bdi className="num min-w-10 text-ink-subtle">{account.code}</bdi>
+      <span
+        className={cn(
+          'text-ink',
+          depth === 0 && (account.isGroup || group)
+            ? 'font-bold'
+            : account.isGroup || group
+              ? 'font-semibold'
+              : null,
+        )}
+      >
+        {account.name}
+      </span>
+      {account.isSystem ? (
+        <Badge dot={false} className="max-sm:hidden">
+          من النظام
+        </Badge>
+      ) : null}
+    </div>
+  );
+}
+
 function AccountTree({ accounts }: { accounts: AccountRow[] }) {
   const roots = useMemo(() => accountTree(accounts), [accounts]);
   const [open, setOpen] = useState<ReadonlySet<string>>(
@@ -90,17 +183,52 @@ function AccountTree({ accounts }: { accounts: AccountRow[] }) {
       return next;
     });
 
+  const columns: DataColumn<VisibleRow>[] = [
+    {
+      key: 'account',
+      header: 'الحساب',
+      cell: (row) => <AccountCell row={row} onToggle={toggle} />,
+    },
+    {
+      key: 'type',
+      header: 'النوع',
+      // The tree already says it on a phone: each account sits under its type.
+      className: 'hidden md:table-cell',
+      cell: ({ node }) => <Muted>{ACCOUNT_TYPE_LABEL[node.account.type]}</Muted>,
+    },
+    {
+      key: 'side',
+      header: 'الطبيعة',
+      cell: ({ node }) => (
+        <Muted>
+          {node.account.isGroup ? 'تجميعي' : normalSide(node.account.type) === 'debit' ? 'مدين' : 'دائن'}
+        </Muted>
+      ),
+    },
+    {
+      key: 'currency',
+      header: 'العملة',
+      className: 'hidden sm:table-cell',
+      cell: ({ node }) => (
+        <Muted>{node.account.currency ? currencyName(node.account.currency) : 'كل العملات'}</Muted>
+      ),
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SearchField
           label="ابحث في الحسابات"
           placeholder="ابحث بالرمز أو الاسم"
           value={search}
           onValueChange={setSearch}
-          className="w-full max-w-sm"
+          className="min-w-0 flex-1 basis-64 sm:max-w-md"
         />
-        <div className="flex gap-2">
+        <p className="text-sm text-ink-muted max-sm:hidden">
+          <AccountsCount count={accounts.length} /> في الدليل
+        </p>
+        <div className="ms-auto flex gap-1">
           <Button variant="ghost" size="sm" onClick={() => setOpen(new Set(groupCodes(roots)))}>
             وسّع الكل
           </Button>
@@ -109,96 +237,56 @@ function AccountTree({ accounts }: { accounts: AccountRow[] }) {
           </Button>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-card border border-line bg-surface">
-        <table aria-label="شجرة الحسابات" className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="h-11 border-b border-line bg-surface-muted text-[0.8125rem] text-ink-muted">
-              <th scope="col" className="px-3 text-start font-semibold">
-                الحساب
-              </th>
-              <th scope="col" className="px-3 text-start font-semibold">
-                النوع
-              </th>
-              <th scope="col" className="px-3 text-start font-semibold">
-                الطبيعة
-              </th>
-              <th scope="col" className="px-3 text-start font-semibold">
-                العملة
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-6 py-10 text-center text-ink-muted">
-                  لا حساب بهذا الاسم أو الرمز.
-                </td>
-              </tr>
-            ) : null}
-            {rows.map(({ node, depth, expanded }) => {
-              const { account } = node;
-              const group = node.children.length > 0;
-              return (
-                <tr key={account.id} className="h-11 border-b border-line last:border-0 hover:bg-canvas">
-                  <td className="px-3">
-                    <div
-                      className="flex items-center gap-2"
-                      style={{ paddingInlineStart: `${depth * 1.5}rem` }}
-                    >
-                      {group ? (
-                        <button
-                          type="button"
-                          onClick={() => toggle(account.code)}
-                          aria-expanded={expanded}
-                          aria-label={`${account.code} ${account.name}`}
-                          className="-my-1 grid size-9 place-items-center rounded-control text-ink-muted hover:bg-surface-muted"
-                        >
-                          <ExpandIcon
-                            size={16}
-                            className={cn('transition-transform', !expanded && 'rotate-90')}
-                          />
-                        </button>
-                      ) : (
-                        <span className="size-9" aria-hidden="true" />
-                      )}
-                      <bdi className="num font-semibold text-ink-muted">{account.code}</bdi>
-                      <span className={cn('text-ink', (account.isGroup || group) && 'font-bold')}>
-                        {account.name}
-                      </span>
-                      {account.isSystem ? <Badge>من النظام</Badge> : null}
-                    </div>
-                  </td>
-                  <td className="px-3 text-ink-muted">{ACCOUNT_TYPE_LABEL[account.type]}</td>
-                  <td className="px-3 text-ink-muted">
-                    {account.isGroup ? 'تجميعي' : normalSide(account.type) === 'debit' ? 'مدين' : 'دائن'}
-                  </td>
-                  <td className="px-3 text-ink-muted">
-                    {account.currency ? currencyName(account.currency) : 'كل العملات'}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-sm text-ink-muted">
+      <DataTable
+        caption="شجرة الحسابات"
+        columns={columns}
+        rows={rows}
+        rowKey={({ node }) => node.account.id}
+        empty={
+          <EmptyState
+            icon={SearchIcon}
+            title="لا حساب بهذا الاسم أو الرمز."
+            description="جرّب جزءاً من الاسم، أو أول أرقام الرمز."
+          />
+        }
+      />
+      <p className="flex items-start gap-2 text-sm text-ink-muted">
+        <InfoIcon size={16} className="mt-0.5" />
         الدليل الافتراضي من سجل الترقيم، وأرقامه ثابتة. حسابات النظام تتحرك من المستندات وحدها.
       </p>
     </div>
   );
 }
 
+/** The tree's columns while the chart loads: the same heads over grey lines. */
+const LOADING_COLUMNS: DataColumn<never>[] = [
+  { key: 'account', header: 'الحساب' },
+  { key: 'type', header: 'النوع' },
+  { key: 'side', header: 'الطبيعة' },
+  { key: 'currency', header: 'العملة' },
+];
+
 /** «دليل الحسابات» (10 › دليل الحسابات الافتراضي; admin/ChartJournal › شجرة الحسابات). */
 export function ChartOfAccountsPage() {
   const { data, error, loading, retry } = useReport('accounts', listAccounts);
   return (
     <AccountingLayout title="دليل الحسابات">
-      {loading ? <ReportLoading label="نحمّل دليل الحسابات…" /> : null}
+      {loading ? (
+        <DataTable
+          caption="نحمّل دليل الحسابات…"
+          columns={LOADING_COLUMNS}
+          rows={[]}
+          rowKey={() => ''}
+          loading
+        />
+      ) : null}
       {error ? <ReportError message={error} onRetry={retry} /> : null}
       {data && data.items.length === 0 ? (
-        <Card>
-          <EmptyState icon={ReportsIcon} title="لا حسابات في الدليل بعد." />
-        </Card>
+        <EmptyState
+          icon={ReportsIcon}
+          title="لا حسابات في الدليل بعد."
+          description="يظهر هنا دليل الحسابات حين يُفعَّل وضع المحاسبة."
+        />
       ) : null}
       {data && data.items.length > 0 ? <AccountTree accounts={data.items} /> : null}
     </AccountingLayout>

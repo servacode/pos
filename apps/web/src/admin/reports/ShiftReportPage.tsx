@@ -1,76 +1,79 @@
-import type { ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import type { CurrencyCode, MeResponse } from '@serva/core';
+import type { MeResponse } from '@serva/core';
 import {
   BackIcon,
   Button,
   Card,
+  CheckIcon,
+  ClockIcon,
+  EmptyState,
+  EyeIcon,
   cn,
-  DataTable,
   displayNumber,
+  InfoIcon,
   Money,
   PrintIcon,
+  WarningIcon,
   useDigits,
-  type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { ApiError } from '../../lib/api';
 import { zonedClock, zonedDateTime } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
+import { Amt, BarList, PageTop, Panel, SalesPage, share, SERIES, Stack, type BarItem } from '../sales/ui';
 import { seesDifference, SHIFTS_ACCESS } from './access';
 import { getShift } from './api';
-import type { ShiftCurrencyRow, ShiftMovement, ShiftReport } from './contracts';
+import type { ShiftCurrencyRow, ShiftReport } from './contracts';
 import { currencyName, methodLabel, MOVEMENT_LABEL } from './labels';
-import { PageHead, ReportError, ReportLoading, ReportScreen, Section } from './parts';
-import { ShiftStatus } from './ShiftsPage';
+import { ReportError, ReportLoading, ReportScreen } from './parts';
+import { Difference, ShiftStatus } from './ShiftsPage';
 import { useReport } from './useReport';
-
-/** «عجز 1,500 ل.س», «زيادة 500 ل.س», «لا فرق» (print/ShiftReport › الفرق). */
-export function Difference({ minor, currency }: { minor: number; currency: CurrencyCode }) {
-  if (minor === 0) return <span className="text-ink-muted">لا فرق</span>;
-  return (
-    <span className={cn('font-semibold', minor < 0 ? 'text-danger-ink' : 'text-ink')}>
-      {minor < 0 ? 'عجز' : 'زيادة'} <Money minor={minor} currency={currency} signDisplay="never" />
-    </span>
-  );
-}
 
 interface CashLine {
   key: string;
   label: string;
   value: (row: ShiftCurrencyRow) => ReactNode;
   strong?: boolean;
+  /**
+   * A term of the drawer that may not have happened: its amount in a currency. A line whose amount is
+   * zero in every currency folds away on the screen behind «اعرض الصفوف الصفرية».
+   */
+  amount?: (row: ShiftCurrencyRow) => number;
 }
 
 /** The drawer's cash, one column per currency, as the Z report lays it out. */
 function cashLines(withDifference: boolean): CashLine[] {
-  const money = (pick: (row: ShiftCurrencyRow) => number, sign = 1) =>
-    function value(row: ShiftCurrencyRow) {
-      return <Money minor={sign * pick(row)} currency={row.currency} />;
-    };
+  // A term that did not happen in the shift shows as a dash, not as a row of zeros
+  const term = (key: string, label: string, pick: (row: ShiftCurrencyRow) => number, sign = 1): CashLine => ({
+    key,
+    label,
+    amount: pick,
+    value: (row) => <Amt minor={sign * pick(row)} currency={row.currency} zero="dash" />,
+  });
   const lines: CashLine[] = [
-    { key: 'opening', label: 'الرصيد الافتتاحي', value: money((r) => r.openingMinor) },
-    { key: 'sales', label: 'المبيعات نقداً', value: money((r) => r.cashSalesMinor) },
-    { key: 'change', label: 'الباقي المعطى', value: money((r) => r.changeGivenMinor, -1) },
-    { key: 'refunds', label: 'المرتجعات نقداً', value: money((r) => r.refundsMinor, -1) },
-    { key: 'receipts', label: 'دفعات الزبائن نقداً', value: money((r) => r.receiptsMinor) },
-    { key: 'payIn', label: 'الإيداع في الدرج', value: money((r) => r.payInMinor) },
-    { key: 'payOut', label: 'السحب من الدرج', value: money((r) => r.payOutMinor, -1) },
-    { key: 'drops', label: 'إلى الخزنة', value: money((r) => r.dropsMinor, -1) },
+    term('opening', 'الرصيد الافتتاحي', (r) => r.openingMinor),
+    term('sales', 'المبيعات نقداً', (r) => r.cashSalesMinor),
+    term('change', 'الباقي المعطى', (r) => r.changeGivenMinor, -1),
+    term('refunds', 'المرتجعات نقداً', (r) => r.refundsMinor, -1),
+    term('receipts', 'دفعات الزبائن نقداً (وعربون التأجير)', (r) => r.receiptsMinor),
+    term('payIn', 'الإيداع في الدرج', (r) => r.payInMinor),
+    term('payOut', 'السحب من الدرج', (r) => r.payOutMinor, -1),
+    term('drops', 'إلى الخزنة', (r) => r.dropsMinor, -1),
   ];
   if (withDifference) {
     lines.push({
       key: 'expected',
       label: 'النقد المتوقع',
       strong: true,
-      value: (r) =>
-        r.expectedMinor === null ? '—' : <Money minor={r.expectedMinor} currency={r.currency} />,
+      value: (r) => (r.expectedMinor === null ? '—' : <Amt minor={r.expectedMinor} currency={r.currency} />),
     });
   }
   lines.push({
     key: 'counted',
     label: 'المعدود',
     strong: !withDifference,
-    value: (r) => (r.countedMinor === null ? '—' : <Money minor={r.countedMinor} currency={r.currency} />),
+    value: (r) => (r.countedMinor === null ? '—' : <Amt minor={r.countedMinor} currency={r.currency} />),
   });
   if (withDifference) {
     lines.push({
@@ -92,6 +95,179 @@ function showsDifference(me: MeResponse, report: ShiftReport): boolean {
   );
 }
 
+/**
+ * The cash result first, in one band: per currency what the drawer should hold, what was counted and
+ * the difference, with one sentence under it saying what to do. An open shift says it is still open;
+ * without the key to see the difference only the count shows.
+ */
+function CashBand({ report, withDifference }: { report: ShiftReport; withDifference: boolean }) {
+  const rows = report.byCurrency;
+  if (rows.length === 0) return null;
+  const counted = rows.filter((row) => row.countedMinor !== null);
+  const shorts = rows.filter((row) => (row.differenceMinor ?? 0) < 0);
+  const overs = rows.filter((row) => (row.differenceMinor ?? 0) > 0);
+  const list = (items: ShiftCurrencyRow[]) =>
+    items.map((row, i) => (
+      <span key={row.currency}>
+        {i > 0 ? ' و' : ''}
+        {currencyName(row.currency)}{' '}
+        <Amt minor={row.differenceMinor ?? 0} currency={row.currency} signDisplay="never" exact />
+      </span>
+    ));
+  let verdict: ReactNode = null;
+  if (counted.length === 0) {
+    verdict = (
+      <p className="sx-verdict info">
+        <ClockIcon size={20} />
+        <span>الوردية مفتوحة ولم يُعدّ النقد بعد.</span>
+      </p>
+    );
+  } else if (withDifference) {
+    verdict =
+      shorts.length > 0 ? (
+        <p className="sx-verdict bad">
+          <WarningIcon size={20} />
+          <span>فيه عجز بالصندوق: {list(shorts)}. اسأل الكاشير عنه قبل إقفال اليوم.</span>
+        </p>
+      ) : overs.length > 0 ? (
+        <p className="sx-verdict warn">
+          <WarningIcon size={20} />
+          <span>فيه زيادة بالصندوق: {list(overs)}. راجع العدّ قبل إقفال اليوم.</span>
+        </p>
+      ) : (
+        <p className="sx-verdict good">
+          <CheckIcon size={20} />
+          <span>الصندوق مطابق في كل العملات.</span>
+        </p>
+      );
+  }
+  const cell = (row: ShiftCurrencyRow, index: number, node: ReactNode) => (
+    <div key={row.currency} className={cn('cur', index > 0 && 'sec')}>
+      <span className="v">{node}</span>
+      {rows.length > 1 ? <span className="cn">{currencyName(row.currency)}</span> : null}
+    </div>
+  );
+  return (
+    <section aria-label="نتيجة الصندوق" className="sx-card">
+      <div className="sx-band" style={{ '--cols': withDifference ? 3 : 1 } as CSSProperties}>
+        {withDifference ? (
+          <div>
+            <span className="sx-eyebrow">المتوقع في الدرج</span>
+            {rows.map((row, i) =>
+              cell(
+                row,
+                i,
+                row.expectedMinor === null ? (
+                  <span className="sx-z">—</span>
+                ) : (
+                  <Amt minor={row.expectedMinor} currency={row.currency} />
+                ),
+              ),
+            )}
+          </div>
+        ) : null}
+        <div>
+          <span className="sx-eyebrow">المعدود فعلاً</span>
+          {rows.map((row, i) =>
+            cell(
+              row,
+              i,
+              row.countedMinor === null ? (
+                <span className="sx-z">—</span>
+              ) : (
+                <Amt minor={row.countedMinor} currency={row.currency} />
+              ),
+            ),
+          )}
+        </div>
+        {withDifference ? (
+          <div>
+            <span className="sx-eyebrow">الفرق</span>
+            {rows.map((row, i) => {
+              const diff = row.differenceMinor;
+              return (
+                <div key={row.currency} className={cn('cur', i > 0 && 'sec')}>
+                  {diff === null ? (
+                    <span className="v sx-z">—</span>
+                  ) : diff === 0 ? (
+                    <span className="res">
+                      <CheckIcon size={20} />
+                      مطابق
+                    </span>
+                  ) : (
+                    <span className={cn('res', diff < 0 && 'bad')}>
+                      <WarningIcon size={20} />
+                      {diff < 0 ? 'عجز' : 'زيادة'}{' '}
+                      <Amt minor={diff} currency={row.currency} signDisplay="never" exact />
+                    </span>
+                  )}
+                  {rows.length > 1 ? <span className="cn">{currencyName(row.currency)}</span> : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+      {verdict ? <div className="sx-band-note">{verdict}</div> : null}
+    </section>
+  );
+}
+
+/** The cash of the drawer by currency on the screen: the terms that happened, the rest one tap away */
+function CashMatrix({ report, withDifference }: { report: ShiftReport; withDifference: boolean }) {
+  const [all, setAll] = useState(false);
+  const lines = cashLines(withDifference);
+  const folded = lines.filter(
+    (line) => line.amount && report.byCurrency.every((row) => line.amount!(row) === 0),
+  );
+  const shown = all ? lines : lines.filter((line) => !folded.includes(line));
+  return (
+    <>
+      <table className="sx-mx">
+        <caption className="sr-only">النقد لكل عملة</caption>
+        <thead>
+          <tr>
+            <th scope="col">البند</th>
+            {report.byCurrency.map((row) => (
+              <th key={row.currency} scope="col" className="e">
+                {currencyName(row.currency)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((line) => {
+            const short =
+              line.key === 'difference' && report.byCurrency.some((row) => (row.differenceMinor ?? 0) < 0);
+            return (
+              <tr key={line.key} className={cn(line.strong && 'sum', short && 'd')}>
+                <th scope="row">{line.label}</th>
+                {report.byCurrency.map((row) => (
+                  <td key={row.currency} className="e sx-n">
+                    {line.value(row)}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {folded.length > 0 ? (
+        <button type="button" className="sx-zero" aria-expanded={all} onClick={() => setAll(!all)}>
+          <EyeIcon size={16} />
+          {all
+            ? 'أخفِ الصفوف الصفرية'
+            : `اعرض ${displayNumber(String(folded.length), 'latn')} صفوف صفرية (${folded
+                .slice(0, 3)
+                .map((line) => line.label.replace(/ \(.*\)$/, ''))
+                .join('، ')}…)`}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+/** The A4 print's cash table: every line, as the Z report lays it out. */
 function CashTable({ report, withDifference }: { report: ShiftReport; withDifference: boolean }) {
   return (
     <div className="overflow-x-auto rounded-card border border-line">
@@ -130,36 +306,6 @@ function CashTable({ report, withDifference }: { report: ShiftReport; withDiffer
           ))}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-type MethodRow = ShiftReport['byMethod'][number];
-
-function movementColumns(me: MeResponse, digits: 'latn' | 'arab'): DataColumn<ShiftMovement>[] {
-  return [
-    {
-      key: 'kind',
-      header: 'الحركة',
-      cell: (row) => <span className="font-semibold">{MOVEMENT_LABEL[row.kind]}</span>,
-    },
-    { key: 'reason', header: 'السبب', cell: (row) => row.reason ?? '—' },
-    {
-      key: 'amount',
-      header: 'المبلغ',
-      numeric: true,
-      cell: (row) => <Money minor={row.amountMinor} currency={row.currency} />,
-    },
-    { key: 'approvedBy', header: 'وافق عليه', cell: (row) => row.approvedBy?.fullName ?? '—' },
-    { key: 'at', header: 'الوقت', cell: (row) => zonedClock(row.at, me.tenant.timezone, digits) },
-  ];
-}
-
-function MetaItem({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <dt className="text-sm text-ink-muted">{label}</dt>
-      <dd className="font-semibold text-ink">{children}</dd>
     </div>
   );
 }
@@ -347,35 +493,52 @@ function ShiftA4({
   );
 }
 
+/** A shift's sales by method, each as its share of its own currency's sales (a pound and a dollar do not add up) */
+function methodItems(
+  report: ShiftReport,
+  base: ShiftReport['byMethod'][number]['currency'],
+  digits: 'latn' | 'arab',
+) {
+  const totals = new Map<string, number>();
+  for (const row of report.byMethod)
+    totals.set(row.currency, (totals.get(row.currency) ?? 0) + row.amountMinor);
+  return report.byMethod.map((row, index): BarItem => {
+    const total = totals.get(row.currency) ?? 0;
+    const w = share(row.amountMinor, total);
+    return {
+      key: `${row.method}-${row.currency}`,
+      name: methodLabel(row.method, row.currency, base),
+      small: `${displayNumber(String(row.count), digits)} دفعة`,
+      value: <Amt minor={row.amountMinor} currency={row.currency} />,
+      extra: `${displayNumber(String(Math.round(w)), digits)}%`,
+      w,
+      color: SERIES[index] ?? SERIES[3],
+    };
+  });
+}
+
 function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }) {
   const digits = useDigits();
   const base = me.settings.baseCurrency;
   const tz = me.tenant.timezone;
   const withDifference = showsDifference(me, report);
   const { paper, print } = usePrint();
-  const methodColumns: DataColumn<MethodRow>[] = [
-    {
-      key: 'method',
-      header: 'الطريقة',
-      cell: (row) => <span className="font-semibold">{methodLabel(row.method, row.currency, base)}</span>,
-    },
-    { key: 'count', header: 'الدفعات', numeric: true, cell: (row) => row.count },
-    {
-      key: 'amount',
-      header: 'المبلغ',
-      numeric: true,
-      cell: (row) => <Money minor={row.amountMinor} currency={row.currency} />,
-    },
-  ];
+  const items = methodItems(report, base, digits);
+  const stackTotal = report.byMethod.reduce((sum, row) => sum + row.amountMinor, 0);
 
   return (
     <>
-      <PageHead
-        crumbs={['البيع', 'الورديات']}
+      <PageTop
+        back={
+          <Link to="/shifts" className="sx-back">
+            <BackIcon size={16} />
+            كل الورديات
+          </Link>
+        }
         title={report.status === 'closed' ? 'تقرير إغلاق الوردية' : 'تقرير الوردية'}
         subtitle={
           <>
-            <bdi dir="ltr" className="num">
+            <bdi dir="ltr" className="sx-n">
               {report.number}
             </bdi>{' '}
             · {report.openedBy?.fullName ?? 'غير معروف'}
@@ -383,66 +546,109 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
         }
         actions={
           <>
+            <Button variant="ghost" icon={<PrintIcon />} onClick={() => print('A4')}>
+              اطبع A4
+            </Button>
             <Button variant="secondary" icon={<PrintIcon />} onClick={() => print('80mm')}>
               اطبع 80 مم
-            </Button>
-            <Button variant="secondary" icon={<PrintIcon />} onClick={() => print('A4')}>
-              اطبع A4
             </Button>
           </>
         }
       />
 
-      <Card>
-        <dl className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          <MetaItem label="الحالة">
-            <ShiftStatus status={report.status} />
-          </MetaItem>
-          <MetaItem label="الجهاز">
-            <bdi className="num">{report.deviceCode}</bdi>
-          </MetaItem>
-          <MetaItem label="فُتحت">
-            {report.openedAt ? zonedDateTime(report.openedAt, tz, digits) : '—'}
-          </MetaItem>
-          <MetaItem label="أُغلقت">
+      <p className="sx-metarow print:hidden">
+        <ShiftStatus status={report.status} />
+        <span>
+          الكاشير <b>{report.openedBy?.fullName ?? 'غير معروف'}</b>
+        </span>
+        <span>
+          الجهاز <b className="sx-n">{report.deviceCode}</b>
+        </span>
+        <span>
+          من <b className="sx-n">{report.openedAt ? zonedDateTime(report.openedAt, tz, digits) : '—'}</b> إلى{' '}
+          <b className="sx-n">
             {report.closedAt ? zonedDateTime(report.closedAt, tz, digits) : 'ما زالت مفتوحة'}
-          </MetaItem>
-          <MetaItem label="الفواتير">{displayNumber(String(report.salesCount), digits)}</MetaItem>
-          <MetaItem label="المبيعات">
-            <Money minor={report.salesTotalMinor} currency={base} />
-          </MetaItem>
-        </dl>
-      </Card>
+          </b>
+        </span>
+        <span>
+          <b className="sx-n">{displayNumber(String(report.salesCount), digits)}</b> فواتير ·{' '}
+          <Amt minor={report.salesTotalMinor} currency={base} exact />
+        </span>
+      </p>
 
-      <Section title="النقد لكل عملة">
-        <CashTable report={report} withDifference={withDifference} />
-        {withDifference ? null : (
-          <p className="text-sm text-ink-muted">
-            النقد المتوقع والفرق يظهران لمن يملك صلاحية رؤية فرق الصندوق.
+      <CashBand report={report} withDifference={withDifference} />
+
+      <div className="sx-grid">
+        <Panel title="النقد لكل عملة" className="sx-c7" flush>
+          <CashMatrix report={report} withDifference={withDifference} />
+          <div className="sx-padb">
+            <p className="sx-note">
+              <InfoIcon size={16} />
+              <span>
+                عربون التأجير المقبوض نقداً يُحسب هنا مع دفعات الزبائن. وإذا رُدّ العربون في وردية غير التي
+                قُبض فيها، ينقص من نقد وردية الرد، فيظهر نقدها المتوقع أقل.
+              </span>
+            </p>
+            {withDifference ? null : (
+              <p className="sx-note tight">
+                <InfoIcon size={16} />
+                <span>النقد المتوقع والفرق يظهران لمن يملك صلاحية رؤية فرق الصندوق.</span>
+              </p>
+            )}
+          </div>
+        </Panel>
+        <Panel title="المبيعات حسب الطريقة والعملة" className="sx-c5" fill>
+          {stackTotal > 0 &&
+          report.byMethod.length > 1 &&
+          new Set(report.byMethod.map((r) => r.currency)).size === 1 ? (
+            <Stack
+              label="حصة طرق الدفع من مبيعات الوردية"
+              parts={items.map((item) => ({ key: item.key, w: item.w, color: item.color ?? SERIES[0]! }))}
+            />
+          ) : null}
+          <BarList items={items} label="المبيعات حسب الطريقة والعملة" />
+          <p className="sx-note tight">
+            <InfoIcon size={16} />
+            <span>البطاقة وشام كاش تُطابقان لاحقاً مع الكشف، لا من الدرج.</span>
           </p>
-        )}
-      </Section>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="المبيعات حسب الطريقة والعملة">
-          <DataTable
-            caption="المبيعات حسب الطريقة والعملة"
-            columns={methodColumns}
-            rows={report.byMethod}
-            rowKey={(row) => `${row.method}-${row.currency}`}
-          />
-          <p className="text-sm text-ink-muted">البطاقة وشام كاش تُطابقان لاحقاً مع الكشف، لا من الدرج.</p>
-        </Section>
-        <Section title="الإيداع والسحب من الدرج">
-          <DataTable
-            caption="الإيداع والسحب من الدرج"
-            columns={movementColumns(me, digits)}
-            rows={report.movements}
-            rowKey={(row) => row.id}
-            empty={<p className="px-6 py-8 text-center text-ink-muted">لا إيداع ولا سحب في هذه الوردية.</p>}
-          />
-        </Section>
+        </Panel>
       </div>
+
+      {report.movements.length > 0 ? (
+        <Panel title="الإيداع والسحب من الدرج" flush>
+          <table className="sx-mx">
+            <caption className="sr-only">الإيداع والسحب من الدرج</caption>
+            <thead>
+              <tr>
+                <th scope="col">الحركة</th>
+                <th scope="col">السبب</th>
+                <th scope="col" className="e">
+                  المبلغ
+                </th>
+                <th scope="col">وافق عليه</th>
+                <th scope="col">الوقت</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.movements.map((row) => (
+                <tr key={row.id}>
+                  <td className="font-semibold">{MOVEMENT_LABEL[row.kind]}</td>
+                  <td>{row.reason ?? '—'}</td>
+                  <td className="e sx-n">
+                    <Amt minor={row.amountMinor} currency={row.currency} />
+                  </td>
+                  <td>{row.approvedBy?.fullName ?? '—'}</td>
+                  <td className="sx-n">{zonedClock(row.at, tz, digits)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      ) : (
+        <Panel title="الإيداع والسحب من الدرج">
+          <p className="sx-wait">لا إيداع ولا سحب في هذه الوردية.</p>
+        </Panel>
+      )}
 
       {paper ? (
         <PrintSheet paper={paper}>
@@ -466,20 +672,40 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
 export function ShiftReportPage() {
   const me = useMe();
   const { id = '' } = useParams();
-  const { data, error, loading, retry } = useReport(id, () => getShift(id));
+  // A shift that does not exist (an old link, a mistyped number) is an answer, not a failure to retry
+  const { data, error, loading, retry } = useReport<ShiftReport | 'missing'>(id, () =>
+    getShift(id).catch((cause: unknown) => {
+      if (cause instanceof ApiError && cause.status === 404) return 'missing' as const;
+      throw cause;
+    }),
+  );
+  const ready = data && data !== 'missing' ? data : null;
 
   return (
     <ReportScreen me={me} access={SHIFTS_ACCESS} title="تقرير الوردية">
-      <Link
-        to="/shifts"
-        className="inline-flex min-h-11 items-center gap-2 self-start font-semibold text-brand-ink print:hidden"
-      >
-        <BackIcon size={16} />
-        كل الورديات
-      </Link>
-      {loading ? <ReportLoading label="نحمّل تقرير الوردية…" /> : null}
-      {error ? <ReportError message={error} onRetry={retry} /> : null}
-      {data ? <ShiftReportBody report={data} me={me} /> : null}
+      <SalesPage>
+        {ready ? (
+          <ShiftReportBody report={ready} me={me} />
+        ) : (
+          <>
+            <Link to="/shifts" className="sx-back print:hidden">
+              <BackIcon size={16} />
+              كل الورديات
+            </Link>
+            {loading ? <ReportLoading label="نحمّل تقرير الوردية…" /> : null}
+            {error ? <ReportError message={error} onRetry={retry} /> : null}
+            {data === 'missing' ? (
+              <Card>
+                <EmptyState
+                  icon={ClockIcon}
+                  title="الوردية غير موجودة"
+                  description="الرابط قديم أو الرقم غير صحيح. ارجع إلى قائمة الورديات واختر منها."
+                />
+              </Card>
+            ) : null}
+          </>
+        )}
+      </SalesPage>
     </ReportScreen>
   );
 }

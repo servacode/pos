@@ -29,11 +29,12 @@ export {
 } from './Button';
 export { TextLink, textLinkClass } from './TextLink';
 
-export { TextField, type TextFieldProps } from './TextField';
+export { TextField, FieldButton, type TextFieldProps, type FieldButtonProps } from './TextField';
 export { PasswordField } from './PasswordField';
 export {
   canonicalNumber,
   displayNumber,
+  isolateNegative,
   MoneyField,
   NumberField,
   type MoneyFieldProps,
@@ -60,20 +61,61 @@ export { Badge, ConnectionPill, StatusChip, STATUSES, type BadgeTone, type Statu
 export { Alert } from './Alert';
 export { Banner, type BannerProps, type BannerTone } from './Banner';
 export { TestModeRibbon, type TestModeRibbonProps } from './TestModeRibbon';
-export { Card, CardHeader, IconChip, StatTile, type CardProps, type StatTileProps } from './Card';
+export { Card, CardHeader, IconChip, KpiStrip, StatTile, type CardProps, type StatTileProps } from './Card';
+export { PageHeader, type PageHeaderProps } from './PageHeader';
 export { DataTable, type DataColumn, type DataTableProps } from './DataTable';
 export { Tabs, type TabItem, type TabsProps } from './Tabs';
+export { ScrollStrip, SnapDots, SnapRow } from './Scroller';
 export { Dialog, Sheet, type DialogProps, type SheetProps } from './Dialog';
 export { TOAST_DURATION_MS, ToastProvider, useToast, type ToastOptions, type ToastTone } from './Toast';
+export { Tooltip, type FloatingSide, type TooltipProps } from './Tooltip';
+export {
+  Menu,
+  MenuGroup,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  type MenuGroupProps,
+  type MenuItemProps,
+  type MenuItemRenderProps,
+  type MenuProps,
+} from './Menu';
+export {
+  applyThemePreference,
+  readThemePreference,
+  THEME_STORAGE_KEY,
+  useThemePreference,
+  useThemeSync,
+  type ThemePreference,
+} from './themePreference';
+export { ThemeToggle, type ThemeToggleProps } from './ThemeToggle';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { Skeleton, SkeletonText } from './Skeleton';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Avatar, initialsOf, type AvatarProps } from './Avatar';
-export { Money, type MoneyProps } from './Money';
+export { Money, exactDecimals, type MoneyProps } from './Money';
 export { Balance, type BalanceProps } from './Balance';
+
+export {
+  AreaChart,
+  BarChart,
+  compactNumber,
+  formatShare,
+  LineChart,
+  ShareBar,
+  Sparkline,
+  type BarChartProps,
+  type ChartSeries,
+  type ChartTone,
+  type ShareBarProps,
+  type SharePart,
+  type SparklineProps,
+  type TrendChartProps,
+} from './charts';
 
 export { CartLine, formatQuantity, type CartLineProps } from './cashier/CartLine';
 export { ItemTile, type ItemTileProps } from './cashier/ItemTile';
+export { NameText } from './cashier/NameText';
 export { Keypad, type KeypadProps } from './cashier/Keypad';
 export { TotalPanel, type TotalPanelProps } from './cashier/TotalPanel';
 

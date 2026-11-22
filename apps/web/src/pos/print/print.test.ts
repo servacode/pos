@@ -78,6 +78,35 @@ describe('the receipt as printer lines', () => {
     expect(text).not.toMatch(/[⁦-⁩]/);
   });
 
+  it('says «مجاناً» and the promotion on a free line, and prints nothing extra on an ordinary one', () => {
+    const withFree = buildSalePayload({
+      currency: 'SYP',
+      taxInclusive: true,
+      exchangeRates: [],
+      shiftId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a03',
+      cashierId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a04',
+      cashSteps: {},
+      lines: [
+        { ...sale.lines[0]!, discount: null },
+        {
+          lineNo: 2,
+          productId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a05',
+          variantId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a06',
+          name: 'كولا',
+          qty: 1000,
+          priceCurrency: 'SYP',
+          priceMinor: 0,
+          taxRateBp: 0,
+          discount: { type: 'amount', minor: 0, source: 'promotion', reason: 'هدية الكولا', approval: null },
+        },
+      ],
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 50_000 }],
+    });
+    const lines = receiptLines({ ...data, doc: { ...data.doc, payload: withFree as never } });
+    expect(lines).toContainEqual({ kind: 'text', text: 'مجاناً · هدية الكولا' });
+    expect(JSON.stringify(receiptLines(data))).not.toContain('مجاناً');
+  });
+
   it('marks a reprint as a copy', () => {
     expect(receiptLines(data, true)[0]).toEqual({ kind: 'center', text: '— نسخة —', bold: true });
   });
@@ -110,5 +139,91 @@ describe('the receipt as printer lines', () => {
       },
     } as never);
     expect(cash.some((l) => l.kind === 'barcode')).toBe(false);
+  });
+
+  it('prints the cash rounding of a cash refund and what the drawer paid (round 21)', () => {
+    const rounded = receiptLines({
+      ...data,
+      kind: 'return',
+      doc: {
+        ...data.doc,
+        number: 'SRT-001-002-0000005',
+        payload: {
+          saleNumber: 'INV-001-002-0000007',
+          currency: 'SYP',
+          reason: 'تالف',
+          lines: [{ name: 'جاكيت', qty: 1000, refund: { totalMinor: 71_250 } }],
+          totals: { totalMinor: 71_250, taxMinor: 0 },
+          refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 71_000, roundingMinor: -250 }],
+        } as never,
+      },
+    } as never);
+    expect(rounded).toContainEqual(expect.objectContaining({ kind: 'pair', start: 'تقريب النقد' }));
+    expect(rounded).toContainEqual(
+      expect.objectContaining({ kind: 'pair', start: 'رُدّ نقداً', end: '710 ل.س', bold: true }),
+    );
+  });
+
+  describe('a pharmacy receipt as printer lines', () => {
+    const withRx = (prescription: unknown, batch = true) => ({
+      ...data,
+      doc: {
+        ...data.doc,
+        payload: {
+          ...sale,
+          prescription,
+          lines: sale.lines.map((l) => ({
+            ...l,
+            ...(batch ? { batchNo: 'B-07', batchExpiry: '2027-01-01' } : {}),
+          })),
+        } as never,
+      },
+    });
+
+    it('prints the batch of a line, and the prescription number, doctor and patient (not the ID)', () => {
+      const lines = receiptLines(
+        withRx({ ref: 'RX-77', doctor: 'د. سامر', patientName: 'ليلى', patientId: '01020304' }),
+      );
+      const text = JSON.stringify(lines);
+      expect(text).toContain('دفعة B-07 · تنتهي 01/01/2027');
+      expect(lines).toContainEqual({ kind: 'pair', start: 'رقم الوصفة', end: 'RX-77' });
+      expect(lines).toContainEqual({ kind: 'pair', start: 'الطبيب', end: 'د. سامر' });
+      expect(lines).toContainEqual({ kind: 'pair', start: 'المريض', end: 'ليلى' });
+      expect(text).not.toContain('01020304');
+    });
+
+    it('prints each batch a line was split over, with what it took from it', () => {
+      const split = withRx(null, false);
+      (split.doc.payload as { lines: { batches?: object[] }[] }).lines[0]!.batches = [
+        { batchNo: 'G-OLD', expiry: '2027-01-01', qty: 2000 },
+        { batchNo: null, expiry: null, qty: 1000 },
+      ];
+      const text = JSON.stringify(receiptLines(split));
+      expect(text).toContain('دفعة G-OLD · تنتهي 01/01/2027 ×');
+      expect(text).toContain('دفعة — ×');
+    });
+
+    it('prints a batch without a date, and nothing when the prescription is empty', () => {
+      const noDate = withRx(null);
+      (noDate.doc.payload as { lines: { batchExpiry?: string | null }[] }).lines[0]!.batchExpiry = null;
+      const lines = receiptLines(noDate);
+      expect(JSON.stringify(lines)).toContain('دفعة B-07');
+      expect(JSON.stringify(lines)).not.toContain('تنتهي');
+      expect(JSON.stringify(lines)).not.toContain('رقم الوصفة');
+      const empty = receiptLines(
+        withRx({ ref: null, doctor: null, patientName: null, patientId: null }, false),
+      );
+      expect(JSON.stringify(empty)).not.toContain('رقم الوصفة');
+      expect(JSON.stringify(empty)).not.toContain('دفعة');
+    });
+
+    it('prints the doctor alone, without a number or a patient', () => {
+      const lines = receiptLines(
+        withRx({ ref: null, doctor: 'د. هالة', patientName: null, patientId: null }),
+      );
+      expect(lines).toContainEqual({ kind: 'pair', start: 'الطبيب', end: 'د. هالة' });
+      expect(JSON.stringify(lines)).not.toContain('رقم الوصفة');
+      expect(JSON.stringify(lines)).not.toContain('المريض');
+    });
   });
 });

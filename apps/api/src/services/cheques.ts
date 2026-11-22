@@ -7,7 +7,9 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
+import { assertDateOpen } from './period-close';
 import { postEntry } from './posting';
+import { branchOf } from './purchases';
 
 /**
  * Cheques (packages/core › contracts/cheques.ts). A cheque is a payment with method `cheque` of a
@@ -19,7 +21,7 @@ import { postEntry } from './posting';
 const newId = createUuidV7();
 
 type Row = {
-  source_type: 'sale' | 'receipt';
+  source_type: 'sale' | 'receipt' | 'supplier_payment';
   source_id: string;
   payment_no: number;
   number: string;
@@ -33,22 +35,39 @@ type Row = {
   action: 'cleared' | 'bounced' | null;
   action_date: string | null;
   note: string | null;
+  cheque: { bank?: string; number?: string; dueDate?: string; drawer?: string | null } | null;
+  supplier_name: string | null;
+  supplier_id: string | null;
+  payable: boolean;
 };
 
-const all = sql`
+/** Every cheque payment of the store, one row each (also what the top bar's search reads) */
+export const chequeSource = sql`
   select 'sale' as source_type, i.id as source_id, p.payment_no, i.number, i.business_date::text as date,
          i.branch_id, i.customer_id, coalesce(c.name, i.customer_name) as customer_name, p.reference,
-         p.amount_minor::text as amount, p.currency
+         p.amount_minor::text as amount, p.currency,
+         (select e->'cheque' from jsonb_array_elements(i.payload->'payments') e
+           where (e->>'paymentNo')::int = p.payment_no limit 1) as cheque,
+         null::text as supplier_name, null::uuid as supplier_id, false as payable
   from invoice_payments p
   join invoices i on i.tenant_id = p.tenant_id and i.id = p.invoice_id
   left join customers c on c.tenant_id = i.tenant_id and c.id = i.customer_id
   where p.method = 'cheque'
   union all
   select 'receipt', r.id, 1, r.number, r.business_date::text, r.branch_id, r.customer_id,
-         coalesce(c.name, r.payload->>'customerName'), r.reference, r.amount_minor::text, r.currency
+         coalesce(c.name, r.payload->>'customerName'), r.reference, r.amount_minor::text, r.currency,
+         r.payload->'cheque', null::text, null::uuid, false
   from receipts r
   left join customers c on c.tenant_id = r.tenant_id and c.id = r.customer_id
-  where r.method = 'cheque'`;
+  where r.method = 'cheque'
+  union all
+  select 'supplier_payment', sp.id, 1, sp.number, sp.business_date::text,
+         (select id from branches where kind = 'store' order by id limit 1), null::uuid, null::text,
+         sp.cheque->>'number', sp.amount_minor::text, (select base_currency from tenant_settings limit 1),
+         sp.cheque, s.name, sp.supplier_id, sp.cheque_payable
+  from supplier_payments sp
+  join suppliers s on s.tenant_id = sp.tenant_id and s.id = sp.supplier_id
+  where sp.cheque is not null`;
 
 const view = (r: Row): Cheque => ({
   sourceType: r.source_type,
@@ -64,12 +83,19 @@ const view = (r: Row): Cheque => ({
   status: r.action ?? 'pending',
   actionDate: r.action_date,
   note: r.note,
+  direction: r.source_type === 'supplier_payment' ? 'out' : 'in',
+  bank: r.cheque?.bank ?? null,
+  dueDate: r.cheque?.dueDate ?? null,
+  drawer: r.cheque?.drawer ?? null,
+  number: r.cheque?.number ?? null,
+  supplierName: r.supplier_name,
+  ...(r.payable ? { payable: true } : {}),
 });
 
 async function rows(tx: Transaction, where = sql`true`): Promise<Row[]> {
   return tx.execute<Row>(sql`
     select x.*, a.action, a.action_date::text as action_date, a.note
-    from (${all}) x
+    from (${chequeSource}) x
     left join cheque_actions a
       on a.source_type = x.source_type and a.source_id = x.source_id and a.payment_no = x.payment_no
     where ${where}
@@ -93,7 +119,7 @@ export function actOnCheque(
   db: Database,
   auth: AccessClaims,
   input: {
-    sourceType: 'sale' | 'receipt';
+    sourceType: 'sale' | 'receipt' | 'supplier_payment';
     sourceId: string;
     paymentNo: number;
     action: 'cleared' | 'bounced';
@@ -103,13 +129,17 @@ export function actOnCheque(
   meta: RequestMeta,
 ): Promise<Cheque> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'customers.manage');
+    // Round 47: a supplier's cheque held in 2150 is the purchasing manager's, not the customers'
+    const supplierSide = input.sourceType === 'supplier_payment';
+    await requirePermission(tx, auth.userId, supplierSide ? 'purchases.manage' : 'customers.manage');
     const [row] = await rows(
       tx,
       sql`x.source_type = ${input.sourceType} and x.source_id = ${input.sourceId}
           and x.payment_no = ${input.paymentNo}`,
     );
-    if (!row) throw new AppError(404, 'not_found', 'هذا الشيك غير موجود.');
+    if (!row || (row.source_type === 'supplier_payment') !== supplierSide || (supplierSide && !row.payable)) {
+      throw new AppError(404, 'not_found', 'هذا الشيك غير موجود.');
+    }
     if (row.action) {
       throw new AppError(409, 'conflict', 'سُجّل هذا الشيك من قبل، ولا يُسجّل مرتين.');
     }
@@ -117,6 +147,14 @@ export function actOnCheque(
       throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
         date: 'التاريخ قبل يوم استلام الشيك',
       });
+    }
+    if (supplierSide) {
+      await assertDateOpen(tx, auth.tenantId, input.date);
+      if (input.action === 'cleared' && row.cheque?.dueDate && input.date < row.cheque.dueDate) {
+        throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
+          date: `لم يحن موعد الصرف بعد (${row.cheque.dueDate})`,
+        });
+      }
     }
     const id = newId();
     await tx.insert(chequeActions).values({
@@ -131,6 +169,68 @@ export function actOnCheque(
       createdBy: auth.userId,
     });
     const amount = Number(row.amount);
+    if (supplierSide) {
+      // Cleared: the cheque left the bank (Dr 2150 / Cr 1130). Cancelled or returned before that: the
+      // supplier is owed again (Dr 2150 / Cr 2100 for the supplier)
+      const supplier = { type: 'supplier' as const, id: row.supplier_id! };
+      const memo = `شيك ${row.reference ?? ''} إلى ${row.supplier_name ?? 'مورد'}`.replace(/\s+/g, ' ');
+      const entryId = await postEntry(tx, {
+        tenantId: auth.tenantId,
+        branchId: await branchOf(tx, undefined),
+        date: input.date,
+        sourceType: 'cheque',
+        sourceId: id,
+        sourceNumber: row.number,
+        memo: `${input.action === 'cleared' ? 'صرف' : 'إلغاء'} ${memo}`,
+        baseCurrency: row.currency,
+        lines: [
+          {
+            account: { code: '2150' },
+            baseMinor: amount,
+            currency: row.currency,
+            amountMinor: amount,
+            rate: null,
+            memo,
+          },
+          input.action === 'cleared'
+            ? {
+                account: { code: '1130' },
+                baseMinor: -amount,
+                currency: row.currency,
+                amountMinor: -amount,
+                rate: null,
+                memo,
+              }
+            : {
+                account: { code: '2100' },
+                baseMinor: -amount,
+                currency: row.currency,
+                amountMinor: -amount,
+                rate: null,
+                party: supplier,
+                memo,
+              },
+        ],
+      });
+      await tx.execute(sql`update cheque_actions set entry_id = ${entryId} where id = ${id}`);
+      await audit(
+        tx,
+        {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          action: `supplier_cheque.${input.action}`,
+          entity: 'cheque',
+          entityId: id,
+          data: { sourceId: input.sourceId, amount },
+        },
+        meta,
+      );
+      const [after] = await rows(
+        tx,
+        sql`x.source_type = 'supplier_payment' and x.source_id = ${input.sourceId}`,
+      );
+      return view(after!);
+    }
     const party = row.customer_id ? { type: 'customer' as const, id: row.customer_id } : null;
     const memo = `شيك ${row.reference ?? ''} من ${row.customer_name ?? 'زبون'}`.replace(/\s+/g, ' ');
     const entryId = await postEntry(tx, {

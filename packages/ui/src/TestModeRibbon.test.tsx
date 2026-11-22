@@ -8,7 +8,8 @@ describe('TestModeRibbon', () => {
 
     const ribbon = screen.getByRole('note');
     expect(ribbon).toHaveTextContent('نسخة تجربة على الخادم المحلي');
-    expect(ribbon).toHaveClass('bg-warning-soft', 'text-warning-ink');
+    expect(ribbon).toHaveClass('bg-warning-soft', 'text-warning-ink', 'border-warning/25');
+    expect(ribbon.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByRole('button')).toBeNull();
   });
 });

@@ -112,6 +112,19 @@ services:
       # SERVA_OTP_DELIVERY=gateway: the WhatsApp bot (or SMS provider) that sends the codes
       OTP_GATEWAY_URL: ${SERVA_OTP_GATEWAY_URL:-}
       OTP_GATEWAY_TOKEN: ${SERVA_OTP_GATEWAY_TOKEN:-}
+      # SERVA_OTP_DELIVERY=sms: any HTTP SMS provider, described by these settings; with
+      # SERVA_OTP_FALLBACK=gateway (or sms) a second channel is tried when the first fails.
+      OTP_FALLBACK: ${SERVA_OTP_FALLBACK:-}
+      SMS_GATEWAY_URL: ${SERVA_SMS_GATEWAY_URL:-}
+      SMS_GATEWAY_METHOD: ${SERVA_SMS_GATEWAY_METHOD:-}
+      SMS_GATEWAY_AUTH_HEADER: ${SERVA_SMS_GATEWAY_AUTH_HEADER:-}
+      SMS_GATEWAY_CONTENT_TYPE: ${SERVA_SMS_GATEWAY_CONTENT_TYPE:-}
+      SMS_GATEWAY_BODY: ${SERVA_SMS_GATEWAY_BODY:-}
+      SMS_ALLOW_BROADCASTS: ${SERVA_SMS_ALLOW_BROADCASTS:-false}
+      # Error reports (Sentry protocol, e.g. a self-hosted GlitchTip). Off while empty.
+      SENTRY_DSN: ${SERVA_SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SERVA_SENTRY_ENVIRONMENT:-}
+      SENTRY_RELEASE: ${SERVA_SENTRY_RELEASE:-}
       LOG_LEVEL: info
     depends_on:
       postgres:

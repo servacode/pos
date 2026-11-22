@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { assertRepsEnabled, assertWithinPlanLimit } from './subscription-gate';
 import { and, asc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import {
   PAIRING_CODE_ALPHABET,
@@ -110,10 +111,62 @@ async function reserveCode(tx: Transaction, branchId: string): Promise<string> {
 
 async function activeBranch(tx: Transaction, branchId: string) {
   const [branch] = await tx
-    .select({ id: branches.id, code: branches.code, name: branches.name })
+    .select({ id: branches.id, code: branches.code, name: branches.name, kind: branches.kind })
     .from(branches)
     .where(and(eq(branches.id, branchId), eq(branches.isActive, true)));
   return branch ?? null;
+}
+
+/**
+ * A van (a branch of kind van) takes the rep's phone and nothing else, and a rep's phone belongs on a
+ * van: its sales and its stock are the van's. Everything else links to a store branch.
+ */
+function assertKindFitsBranch(branchKind: string, deviceKind: string | undefined): void {
+  const isRepPhone = deviceKind === 'rep_phone';
+  if (branchKind === 'van' && !isRepPhone) {
+    throw wrongState('هذه سيارة مندوب: لا يُربط بها إلا جوال المندوب.');
+  }
+  if (branchKind !== 'van' && isRepPhone) {
+    throw wrongState('جوال المندوب يُربط بسيارته، لا بفرع.');
+  }
+}
+
+/**
+ * Who may sign in on a rep's phone (round 35 › D3): the rep of its van, a manager and the owner. The
+ * server decides, whatever the phone shows. Any other device kind is not asked (this does nothing
+ * for it), and the answer for a refusal says why in plain Arabic.
+ * `roleKeys` are the keys of the roles the person holds for this device's branch.
+ */
+export const REP_PHONE_REFUSAL = 'هذا جوال مندوب. يدخل عليه مندوب سيارته أو المدير أو المالك فقط.';
+
+export async function mayUseRepPhone(
+  tx: Transaction,
+  device: { deviceId: string; branchId: string },
+  userId: string,
+  roleKeys: readonly string[],
+): Promise<boolean> {
+  const [row] = await tx.select({ kind: devices.kind }).from(devices).where(eq(devices.id, device.deviceId));
+  if (row?.kind !== 'rep_phone') return true;
+  if (roleKeys.includes('owner') || roleKeys.includes('manager')) return true;
+  const [rep] = await tx.execute<{ id: string }>(sql`
+    select id from sales_reps
+    where user_id = ${userId} and status = 'active'
+      and (van_branch_id = ${device.branchId} or device_id = ${device.deviceId})
+    limit 1`);
+  return Boolean(rep);
+}
+
+/**
+ * A rep phone lists only the people the server lets in (sync-pull › staffOfDevice). A person who becomes (or stops
+ * being) a van's rep, or a manager, is a row that starts (or stops) matching a phone's scope without changing, so
+ * the pull never says «add» or «delete»: every rep phone of the store is told to download the two staff sets again
+ * (devices.resync_sets, read by the next pull as `commands.resync`).
+ */
+export async function resyncRepPhoneStaff(tx: Transaction): Promise<void> {
+  await tx.execute(sql`
+    update devices
+    set resync_sets = (select coalesce(array_agg(distinct s), '{}') from unnest(resync_sets || array['users', 'user_roles']::text[]) s)
+    where kind = 'rep_phone' and revoked_at is null`);
 }
 
 /** A branch of this store the user may link devices to: 403 without the permission, else 404. */
@@ -166,12 +219,14 @@ const deviceFields = (data: ActivateDeviceData) => ({
 export async function createPairingCode(
   db: Database,
   auth: AccessClaims,
-  input: { branchId: CreatePairingCodeInput['branchId'] },
+  input: { branchId: CreatePairingCodeInput['branchId']; kind?: CreatePairingCodeInput['kind'] },
   { now, webOrigin }: { now: Date; webOrigin: string },
   meta: RequestMeta,
 ): Promise<PairingCodeResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const branch = await branchToManage(tx, auth, input.branchId);
+    assertKindFitsBranch(branch.kind, input.kind);
+    if (input.kind === 'rep_phone') await assertRepsEnabled(tx);
     const [tenant] = await tx.select({ storeCode: tenants.storeCode }).from(tenants).limit(1);
 
     const qrToken = newQrToken();
@@ -204,7 +259,8 @@ export async function createPairingCode(
       pairingId: pairing!.id,
       branchId: branch.id,
       branchName: branch.name,
-      qrPayload: `${webOrigin}/link#${qrToken}`,
+      // A hall device's link carries its kind so the page it opens is its own (kitchen, waiter)
+      qrPayload: `${webOrigin}/link${input.kind && input.kind !== 'cashier' ? `?kind=${input.kind}` : ''}#${qrToken}`,
       qrToken,
       manualCode,
       storeCode: tenant!.storeCode,
@@ -238,6 +294,7 @@ async function claimPairing(
   if (pairing.usedAt || pairing.expiresAt.getTime() <= now.getTime()) return { error: 'expired' };
   const branch = await activeBranch(tx, pairing.branchId);
   if (!branch) return { error: 'expired' };
+  assertKindFitsBranch(branch.kind, data.kind);
   const [claimed] = await tx
     .update(devicePairings)
     .set({ usedAt: now })
@@ -375,6 +432,8 @@ export async function activateByOwner(
 ): Promise<{ status: 'active'; device: ActivatedDevice }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const branch = await branchToManage(tx, auth, data.branchId);
+    assertKindFitsBranch(branch.kind, data.kind);
+    await assertWithinPlanLimit(tx, 'registers', data.kind);
     const code = await reserveCode(tx, branch.id);
     const token = newDeviceToken();
     const [device] = await tx
@@ -511,7 +570,7 @@ async function summaries(tx: Transaction, now: Date, deviceId?: string): Promise
   const missing = await missingDocuments(tx, deviceId);
   const announced = new Set(missing.keys());
   return rows
-    .filter(({ device }) => deviceId !== undefined || isListed(device, now))
+    .filter(({ device }) => deviceId !== undefined || (isListed(device, now) && !device.hiddenAt))
     .map(({ device, branchName }) => ({
       id: device.id,
       name: device.name,
@@ -616,6 +675,7 @@ export async function approveDevice(
     if (device.activationExpiresAt!.getTime() <= now.getTime()) {
       throw wrongState('انتهت مهلة طلب الربط. اربط الجهاز من جديد.');
     }
+    await assertWithinPlanLimit(tx, 'registers', device.kind);
     const code = await reserveCode(tx, device.branchId);
     await tx
       .update(devices)
@@ -660,6 +720,37 @@ export async function rejectDevice(
       },
       meta,
     );
+    return summaryOf(tx, id, now);
+  });
+}
+
+/**
+ * POST /v1/devices/{id}/hide («احذف من القائمة»): a stopped device leaves the list. Only hidden: the
+ * row stays, so every document it made keeps its device.
+ */
+export async function hideDevice(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+  { now, meta }: ManageContext,
+): Promise<DeviceSummary> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const device = await deviceToManage(tx, auth, id);
+    if (device.status !== 'revoked') throw wrongState('يُحذف من القائمة الجهاز الموقوف فقط.');
+    if (!device.hiddenAt) {
+      await tx.update(devices).set({ hiddenAt: now }).where(eq(devices.id, id));
+      await audit(
+        tx,
+        {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          action: 'device.hidden',
+          entity: 'device',
+          entityId: id,
+        },
+        meta,
+      );
+    }
     return summaryOf(tx, id, now);
   });
 }

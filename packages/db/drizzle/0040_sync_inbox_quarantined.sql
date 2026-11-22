@@ -1,0 +1,1 @@
+CREATE INDEX "sync_inbox_quarantined_idx" ON "sync_inbox" USING btree ("tenant_id","device_id","device_seq") WHERE "sync_inbox"."status" = 'quarantined';

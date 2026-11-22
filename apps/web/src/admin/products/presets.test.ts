@@ -15,6 +15,27 @@ describe('built-in option values', () => {
     expect(presetGroups('النمرة').flatMap((g) => g.values)).toContain('42');
     expect(presetGroups('العمر')[1]!.values.slice(0, 3)).toEqual(['سنتان', '3 سنوات', '4 سنوات']);
     expect(presetGroups('القماش')).toEqual([]);
-    expect(SIZE_KINDS.map((k) => k.name)).toEqual(['المقاس', 'النمرة', 'العمر']);
+    expect(SIZE_KINDS.map((k) => k.name)).toEqual(['المقاس', 'النمرة', 'العمر', 'الحجم']);
+    expect(presetGroups('الحجم')[0]!.values).toContain('100 مل');
+  });
+});
+
+describe('two-number sizes (trousers, jackets)', () => {
+  it('knows the waist and the length as options of their own, in reading order', async () => {
+    const { PAIR_KINDS, presetGroups } = await import('./presets');
+    const { orderValues } = await import('../../lib/optionOrder');
+    expect(PAIR_KINDS.map((k) => [k.name, k.second.name])).toEqual([
+      ['الخصر', 'الطول'],
+      ['الصدر', 'الطول'],
+    ]);
+    expect(presetGroups('الخصر')[0]!.values).toContain('32');
+    expect(presetGroups('الطول').flatMap((g) => g.values)).toContain('طويل');
+    expect(orderValues('الخصر', ['34', '30', '32']).map((o) => o.value)).toEqual(['30', '32', '34']);
+    expect(orderValues('الطول', ['طويل', '32', 'قصير', '30']).map((o) => o.value)).toEqual([
+      '30',
+      '32',
+      'قصير',
+      'طويل',
+    ]);
   });
 });

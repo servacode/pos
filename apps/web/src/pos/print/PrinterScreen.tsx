@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Alert, BackIcon, Button, cn, PrintIcon } from '@serva/ui';
+import { Alert, Button, InfoIcon, MonitorIcon, PrintIcon, SalesIcon, Switch } from '@serva/ui';
+import { ChoiceGroup, FlowHeader, OptionTile } from '../FlowParts';
 import type { PaperWidth } from '../receipt/Receipt';
 import { pickPrinter, usbSupported } from './usb';
 
@@ -46,77 +47,73 @@ export function PrinterScreen({
     }
   }
 
-  const choice = (active: boolean) =>
-    cn(
-      'flex min-h-16 flex-col items-start justify-center rounded-control border-2 px-4 text-start',
-      active ? 'border-brand bg-brand-soft text-brand-ink' : 'border-line bg-surface text-ink',
-    );
-
   return (
-    <div className="flex w-full max-w-3xl flex-col gap-4">
-      <div className="flex items-center gap-4">
-        <Button variant="secondary" icon={<BackIcon />} onClick={onBack}>
-          ارجع للبيع
-        </Button>
-        <h1 className="text-3xl font-bold text-ink">الطابعة</h1>
-      </div>
-      <section className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5">
-        <div role="group" aria-label="طريقة الطباعة" className="grid gap-2 md:grid-cols-2">
-          <button
-            type="button"
-            aria-pressed={setting.mode === 'browser'}
-            onClick={() => onChange({ ...setting, mode: 'browser' })}
-            className={choice(setting.mode === 'browser')}
-          >
-            <span className="font-bold">من المتصفح</span>
-            <span className="text-xs text-ink-muted">أي طابعة، مع نافذة الطباعة</span>
-          </button>
-          <button
-            type="button"
-            aria-pressed={setting.mode === 'usb'}
-            onClick={() => (setting.name ? onChange({ ...setting, mode: 'usb' }) : void connect())}
-            disabled={!supported}
-            className={choice(setting.mode === 'usb')}
-          >
-            <span className="font-bold">طابعة حرارية USB مباشرة</span>
-            <span className="text-xs text-ink-muted">
-              {supported ? (setting.name ?? 'دون نافذة، أسرع') : 'تحتاج متصفح كروم أو إيدج على هذا الجهاز'}
-            </span>
-          </button>
-        </div>
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        {supported ? (
-          <Button variant="secondary" onClick={() => void connect()}>
-            {setting.name ? 'غيّر الطابعة' : 'اختر الطابعة'}
-          </Button>
-        ) : null}
-        <div role="group" aria-label="عرض الورق" className="flex gap-2">
-          {([80, 58] as const).map((w) => (
-            <button
-              key={w}
-              type="button"
-              aria-pressed={paper === w}
-              onClick={() => onPaper(w)}
-              className={choice(paper === w)}
-            >
-              <span className="font-bold">{w} مم</span>
-            </button>
-          ))}
-        </div>
-        {setting.mode === 'usb' ? (
-          <label className="flex items-center gap-2 text-ink">
-            <input
-              type="checkbox"
-              checked={setting.drawer}
-              onChange={(e) => onChange({ ...setting, drawer: e.target.checked })}
+    <div className="flex w-full max-w-4xl flex-col gap-6">
+      <FlowHeader
+        onBack={onBack}
+        icon={<PrintIcon size={24} />}
+        title="الطابعة"
+        description="طريقة طباعة الإيصال على هذا الجهاز، وعرض الورق."
+      />
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,18rem)]">
+        <section className="flex flex-col gap-6 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6">
+          <ChoiceGroup label="طريقة الطباعة" className="grid gap-3 md:grid-cols-2">
+            <OptionTile
+              selected={setting.mode === 'browser'}
+              onClick={() => onChange({ ...setting, mode: 'browser' })}
+              icon={<MonitorIcon />}
+              title="من المتصفح"
+              description="أي طابعة، مع نافذة الطباعة"
             />
-            افتح درج النقد بعد كل دفعة نقدية
-          </label>
-        ) : null}
-        <Button icon={<PrintIcon />} onClick={onTest}>
-          اطبع إيصال تجربة
-        </Button>
-      </section>
+            <OptionTile
+              selected={setting.mode === 'usb'}
+              onClick={() => (setting.name ? onChange({ ...setting, mode: 'usb' }) : void connect())}
+              disabled={!supported}
+              icon={<PrintIcon />}
+              title="طابعة حرارية USB مباشرة"
+              description={
+                supported ? (setting.name ?? 'دون نافذة، أسرع') : 'تحتاج متصفح كروم أو إيدج على هذا الجهاز'
+              }
+            />
+          </ChoiceGroup>
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          {supported ? (
+            <Button variant="secondary" className="self-start" onClick={() => void connect()}>
+              {setting.name ? 'غيّر الطابعة' : 'اختر الطابعة'}
+            </Button>
+          ) : null}
+          <ChoiceGroup label="عرض الورق" className="grid grid-cols-2 gap-3">
+            {([80, 58] as const).map((w) => (
+              <OptionTile
+                key={w}
+                selected={paper === w}
+                onClick={() => onPaper(w)}
+                icon={<SalesIcon />}
+                title={`${w} مم`}
+              />
+            ))}
+          </ChoiceGroup>
+          {setting.mode === 'usb' ? (
+            <div className="border-t border-line pt-4">
+              <Switch
+                label="افتح درج النقد بعد كل دفعة نقدية"
+                description="لدرج موصول بمنفذ الطابعة."
+                checked={setting.drawer}
+                onCheckedChange={(drawer) => onChange({ ...setting, drawer })}
+              />
+            </div>
+          ) : null}
+        </section>
+        <aside className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1">
+          <p className="flex items-start gap-2.5 text-sm text-ink-muted">
+            <InfoIcon size={20} className="shrink-0 text-ink-subtle" />
+            اطبع إيصالاً لتتأكد من الطابعة والورق. يُطبع آخر إيصال إن وُجد.
+          </p>
+          <Button size="lg" fullWidth icon={<PrintIcon />} onClick={onTest}>
+            اطبع إيصال تجربة
+          </Button>
+        </aside>
+      </div>
     </div>
   );
 }

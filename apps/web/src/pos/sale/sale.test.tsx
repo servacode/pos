@@ -47,7 +47,7 @@ describe('sale screen', () => {
     await user.keyboard('9');
     await user.click(within(pay).getByRole('button', { name: 'أضف الجزء' }));
     shows(within(pay).getByRole('list', { name: 'الأجزاء المدفوعة' }), '9.00 $');
-    expect(within(pay).getByRole('status')).toHaveTextContent('ناقص من الزبون');
+    expect(within(pay).getByRole('status')).toHaveTextContent('المتبقي');
     shows(within(pay).getByRole('status'), '120 ل.س');
 
     await user.click(within(pay).getByRole('button', { name: 'نقد بالليرة' }));
@@ -118,7 +118,7 @@ describe('sale screen', () => {
 
   it('finds names however they are spelled, and Enter adds the only result', async () => {
     const { user } = await saleScreen();
-    await user.type(screen.getByPlaceholderText('ابحث باسم الصنف أو امسح الباركود'), 'شاى احمر');
+    await user.type(screen.getByPlaceholderText('ابحث أو امسح الباركود'), 'شاى احمر');
     const items = screen.getByRole('list', { name: 'الأصناف' });
     expect(within(items).getAllByRole('button')).toHaveLength(1);
     await user.keyboard('{Enter}');
@@ -179,7 +179,7 @@ describe('sale screen', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await user.keyboard(PINS[ids.maryam]!);
     expect(await screen.findByRole('list', { name: 'الأصناف' })).toBeInTheDocument();
-    shows(due(), '593 ل.س');
+    shows(due(), '592.50 ل.س');
 
     await user.keyboard('{F12}');
     const pay = await screen.findByRole('region', { name: 'الدفع' });
@@ -249,7 +249,7 @@ describe('sale screen', () => {
     await scan(user, PRODUCTS.tea.barcode!.code);
     await user.keyboard('{F4}');
     expect(screen.getByText('السلة فارغة')).toBeInTheDocument();
-    expect(screen.getByText('فاتورة معلّقة')).toBeInTheDocument();
+    expect(screen.getByText('1 معلّقة')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'استرجع المعلّقة' }));
     expect(cartLines()).toHaveTextContent('شاي أحمر');
   });
@@ -275,6 +275,7 @@ describe('sale screen', () => {
     );
     await user.keyboard('{Enter}');
     await screen.findByRole('region', { name: 'تمت البيعة' });
+    await user.click(screen.getByRole('button', { name: 'حالة الاتصال والإرسال' }));
     await user.click(screen.getByRole('button', { name: 'إيصال آخر فاتورة' }));
     expect(print).toHaveBeenCalledTimes(2);
     const printed = document.querySelector('[data-print-receipt]')!;

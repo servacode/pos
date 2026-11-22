@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { screen, within } from '@testing-library/react';
+import { cleanup, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { validateDocumentPayload, type SalePayload } from '@serva/core/contracts/documents';
 import { verifySalePayload } from '@serva/core/sale';
@@ -34,6 +34,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // Unmount first: the till keeps reading the device database, which reset closes.
+  cleanup();
   vi.restoreAllMocks();
   await resetDeviceStore();
 });
@@ -46,10 +48,18 @@ describe('a sale end to end, through the real device database (@serva/sync Dexie
     await user.keyboard(PINS[ids.samer]!);
 
     await user.click(await screen.findByRole('button', { name: 'افتح الوردية' }));
-    await screen.findByRole('list', { name: 'الأصناف' });
+    const tiles = await screen.findByRole('list', { name: 'الأصناف' });
+    // The real device database loads the catalogue after the list appears; a scan before it finds nothing.
+    await within(tiles).findByText(PRODUCTS.milk.product.nameAr);
     for (const p of [PRODUCTS.milk, PRODUCTS.sugar]) {
       (document.activeElement as HTMLElement | null)?.blur();
       await user.keyboard(`${p.barcode!.code}{Enter}`);
+      // A scan resolves against the device database; wait for its line before the next one.
+      await within(screen.getByRole('complementary', { name: 'السلة' })).findByText(
+        p.product.nameAr,
+        {},
+        { timeout: 5000 },
+      );
     }
     await user.keyboard('{F12}');
     const pay = await screen.findByRole('region', { name: 'الدفع' });

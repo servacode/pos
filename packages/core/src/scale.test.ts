@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SCALE_BARCODE,
+  diagnoseScaleBarcode,
   ean13CheckDigit,
+  eanCheckDigit,
   parseScaleBarcode,
   qtyForPrice,
   scaleBarcodeSchema,
+  scaleHasCheck,
+  scaleLabelLength,
+  scaleValueDigits,
   type ScaleBarcodeConfig,
 } from './scale';
 
@@ -95,5 +100,76 @@ describe('scaleBarcodeSchema', () => {
       scaleBarcodeSchema.safeParse({ ...DEFAULT_SCALE_BARCODE, valueKind: 'price', valueDecimals: 3 })
         .success,
     ).toBe(false);
+  });
+});
+
+describe('the format editor (round 38): value length and the check digit', () => {
+  it('keeps the default exactly as it was: 13 digits, five-digit value, EAN check digit', () => {
+    expect(scaleLabelLength(DEFAULT_SCALE_BARCODE)).toBe(13);
+    expect(scaleValueDigits(DEFAULT_SCALE_BARCODE)).toBe(5);
+    expect(scaleHasCheck(DEFAULT_SCALE_BARCODE)).toBe(true);
+  });
+
+  it('reads a label with no check digit and a longer value', () => {
+    const config: ScaleBarcodeConfig = {
+      ...DEFAULT_SCALE_BARCODE,
+      itemDigits: 4,
+      checkDigit: false,
+      valueDigits: 7,
+      valueDecimals: 3,
+    };
+    // 13 digits: 21 + 0042 + 0001250 (no check digit)
+    expect(parseScaleBarcode('2100420001250', config)).toEqual({
+      itemCode: '0042',
+      kind: 'weight',
+      qty: 1250,
+    });
+    // a check digit is not demanded, so a code with a wrong last digit is still read as the value
+    expect(parseScaleBarcode('210042000125', config)).toBeNull();
+  });
+
+  it('reads a shorter label (twelve digits with a check digit) by the same rule', () => {
+    const config: ScaleBarcodeConfig = { ...DEFAULT_SCALE_BARCODE, valueDigits: 4, valueDecimals: 2 };
+    expect(scaleLabelLength(config)).toBe(12);
+    const first = '21001230125';
+    const code = `${first}${eanCheckDigit(first)}`;
+    expect(parseScaleBarcode(code, config)).toEqual({ itemCode: '00123', kind: 'weight', qty: 1250 });
+    expect(parseScaleBarcode(`${first}${(eanCheckDigit(first) + 1) % 10}`, config)).toBeNull();
+  });
+
+  it('tells why a code is not a label, for the live test box', () => {
+    const c = DEFAULT_SCALE_BARCODE;
+    expect(diagnoseScaleBarcode('123', c)).toEqual({ ok: false, miss: 'length', expectedLength: 13 });
+    expect(diagnoseScaleBarcode('21001230125a0', c)).toMatchObject({ ok: false, miss: 'letters' });
+    expect(diagnoseScaleBarcode(label('300012301250'), c)).toMatchObject({ ok: false, miss: 'prefix' });
+    const good13 = label('210012301250');
+    expect(diagnoseScaleBarcode(`${good13.slice(0, 12)}${(Number(good13[12]) + 1) % 10}`, c)).toMatchObject({
+      ok: false,
+      miss: 'check',
+    });
+    expect(diagnoseScaleBarcode(label('210012300000'), c)).toMatchObject({ ok: false, miss: 'zero' });
+    const good = diagnoseScaleBarcode(label('210012301250'), c);
+    expect(good).toMatchObject({ ok: true, prefix: '21', itemCode: '00123', valueText: '01250' });
+  });
+
+  it('refuses a format that cannot fit: decimals beyond the value, or a label too long', () => {
+    expect(
+      scaleBarcodeSchema.safeParse({ ...DEFAULT_SCALE_BARCODE, valueDigits: 2, valueDecimals: 3 }).success,
+    ).toBe(false);
+    expect(
+      scaleBarcodeSchema.safeParse({
+        ...DEFAULT_SCALE_BARCODE,
+        itemDigits: 6,
+        valueDigits: 8,
+        valueDecimals: 0,
+      }).success,
+    ).toBe(true);
+    expect(scaleBarcodeSchema.safeParse({ ...DEFAULT_SCALE_BARCODE, valueDigits: 1 }).success).toBe(false);
+    expect(
+      scaleBarcodeSchema.parse({ ...DEFAULT_SCALE_BARCODE, checkDigit: false, valueDigits: 6 }),
+    ).toMatchObject({
+      checkDigit: false,
+      valueDigits: 6,
+    });
   });
 });

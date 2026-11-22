@@ -1,31 +1,55 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import type { Category, ProductListItem, ProductListQuery } from '@serva/core';
+import type {
+  Category,
+  OptionValuesResponse,
+  ProductListItem,
+  ProductListQuery,
+  ProductListResponse,
+  ProductListTotals,
+} from '@serva/core';
+import { COUNT_NOUNS, countNoun, getCurrency } from '@serva/core';
 import {
   AddIcon,
   Alert,
   Badge,
-  BarcodeIcon,
   Button,
+  CameraIcon,
+  Checkbox,
+  CloseIcon,
   DataTable,
   EditIcon,
-  EmptyState,
+  ExpandIcon,
   IconButton,
+  IconChip,
+  Menu,
+  MenuItem,
   Money,
   MoneyField,
+  MoreIcon,
+  PackageOpenIcon,
+  PrintIcon,
   ProductsIcon,
   SearchField,
   SegmentedControl,
   Select,
+  Sheet,
   cn,
+  isolateNegative,
   formatQuantity,
   textLinkClass,
   type DataColumn,
 } from '@serva/ui';
+import { PageTop, SalesPage, StatusPill } from '../sales/ui';
+import { marginPercent } from './margin';
 import { useMe } from '../../auth/useAuth';
+import { dayText, isoDay } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
-import { ApiError, errorMessage } from '../../lib/api';
+import { ApiError, apiFetch, errorMessage } from '../../lib/api';
+import { CatalogGate } from './CatalogGate';
+import { Pager, useCursorPages } from '../pager';
 import { listCategories, listProducts, lookupBarcode, updateProduct } from '../catalog/api';
+import { LiraCaption } from '../../lib/LiraCaption';
 import {
   barcodeOf,
   canManageCatalog,
@@ -35,11 +59,25 @@ import {
   searchTerm,
 } from '../catalog/catalog';
 import { useBarcodeScanner } from '../catalog/useBarcodeScanner';
+import { downloadCsv, TextCell } from '../exportCsv';
+import { useIsPhone } from '../../lib/useIsPhone';
+import { formatNumber } from '../../lib/format';
+import { placeholderIconFor } from '../../lib/productPlaceholder';
+import { BulkPhotos } from './BulkPhotos';
+import { countWord } from '../../lib/plural';
+import { negativePieces, soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
+import { SlimKpis } from '../SlimKpis';
+import { negativeNote } from '../../lib/stockCounts';
+import { CategorizeDialog, type CategorizeItem } from './CategorizeDialog';
+import { ButtonLink } from './parts';
+import { EmptyState } from './shared';
 
 /** Typing pauses this long before the list is asked again. */
 export const SEARCH_DEBOUNCE_MS = 250;
 /** One page of the list (17 › القوائم: up to 200). */
 export const PRODUCTS_PAGE_SIZE = 50;
+/** The most rows «صدّر الجدول» writes; a bigger catalogue is cut and told so */
+const EXPORT_CAP = 50_000;
 
 type ListStatus = 'active' | 'temporary' | 'archived';
 
@@ -49,13 +87,35 @@ const STATUS_OPTIONS: { value: ListStatus; label: string }[] = [
   { value: 'archived', label: 'المؤرشفة' },
 ];
 
+const EMPTY_STATUS_TITLE: Record<ListStatus, string> = {
+  active: 'لا منتجات بعد.',
+  temporary: 'لا منتجات أُضيفت من الكاشير.',
+  archived: 'لا منتجات مؤرشفة.',
+};
+
 interface Filters {
   q: string;
   categoryId: string;
+  /** «الموسم/التشكيلة»; "" = all */
+  season: string;
   status: ListStatus;
+  /** «ينتهي قريباً» (30 days) or «منتهية»; "" = all */
+  expiry: '' | 'soon' | 'expired';
+  /** «نفد»: only what ran out */
+  stock: '' | 'out';
+  /** The order of the list */
+  sort: 'name' | 'stock';
 }
 
-const NO_FILTERS: Filters = { q: '', categoryId: '', status: 'active' };
+const NO_FILTERS: Filters = {
+  q: '',
+  categoryId: '',
+  season: '',
+  status: 'active',
+  expiry: '',
+  stock: '',
+  sort: 'name',
+};
 
 function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -66,13 +126,111 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced;
 }
 
+/** What the rows on screen add up to, for the tiles over the list. */
+type ListSummary = ProductListTotals;
+
+/**
+ * The tiles count the whole store (the server's `totals`), whatever the search shows. Only an older
+ * server, which sends no totals, falls back to adding up the rows on screen.
+ */
+function summaryOf(items: readonly ProductListItem[]): ListSummary {
+  const stocked = items.filter((item) => item.type === 'stock');
+  let lowest: ProductListItem | null = null;
+  for (const item of stocked) if (!lowest || item.stockQty < lowest.stockQty) lowest = item;
+  return {
+    products: items.length,
+    variants: stocked.reduce((sum, item) => sum + item.variantCount, 0),
+    pieces: stocked.reduce((sum, item) => sum + Math.max(0, item.stockQty), 0),
+    negative: stocked.filter((item) => item.stockQty < 0).length,
+    runOut: stocked.filter((item) => item.stockQty <= 0).length,
+    lowest: lowest ? { nameAr: lowest.nameAr, qty: lowest.stockQty } : null,
+  };
+}
+
+/**
+ * The one stock number of a product: what is available (all branches, a combination below zero adds nothing),
+ * the same as the inventory grid. The gap to the plain sum is told once below it: «سالب 8» (sold more than
+ * recorded: count it), or the total on the shelf when expired or blocked batches hold some back.
+ */
+export function availableOf(item: Pick<ProductListItem, 'stockQty' | 'sellableQty'>): number {
+  return item.sellableQty ?? item.stockQty;
+}
+
+/** «سالب 8 قطع»: the pieces some combination sold beyond what was recorded (empty when the figure itself is below zero) */
+function negativeWords(item: Pick<ProductListItem, 'stockQty' | 'sellableQty'>, digits: 'latn' | 'arab') {
+  const gap = (item.sellableQty ?? item.stockQty) - item.stockQty;
+  return gap > 0 ? negativePieces(gap / 1000, formatQuantity(gap, digits)) : null;
+}
+
+function StockCell({ item, digits }: { item: ProductListItem; digits: 'latn' | 'arab' }) {
+  // The real count on the shelf (what the books say, a minus kept) is the big number; what the till can
+  // still sell is told under it only when it differs
+  const net = item.stockQty;
+  const avail = availableOf(item);
+  return (
+    <span className="flex flex-col items-end">
+      <span className={cn('font-semibold', net < 0 && 'text-danger-ink', net === 0 && 'text-warning-ink')}>
+        {net < 0 ? isolateNegative(`-${formatQuantity(-net, digits)}`) : formatQuantity(net, digits)}
+        {net > 0 ? (
+          <span className="font-normal text-ink-muted"> {countWord(net, { one: 'قطعة', few: 'قطع' })}</span>
+        ) : null}
+      </span>
+      {avail !== net ? (
+        <span className="text-xs whitespace-nowrap text-ink-muted">
+          متوفر للبيع <bdi className="num">{formatQuantity(avail, digits)}</bdi>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * The profit on the shelf price: «32٪» in green, a warning in red when the price is under the cost.
+ * Shown only when the cost is known and in the price's own currency.
+ */
+function MarginCell({ item, base }: { item: ProductListItem; base: string }) {
+  const cost = item.costMinor;
+  if (!item.price || cost === null || cost === undefined || item.price.currency !== base) {
+    return <span className="text-ink-subtle">—</span>;
+  }
+  // Both sides averaged over the same stocked units; a model with no priced stock falls back to its lowest price
+  const margin = marginPercent(item.costPriceMinor ?? item.price.minMinor, cost);
+  if (margin === null) return <span className="text-ink-subtle">—</span>;
+  if (margin < 0) {
+    return (
+      <StatusPill kind="danger">
+        السعر أقل من التكلفة <bdi className="num">({isolateNegative(`-${String(-margin)}`)}٪)</bdi>
+      </StatusPill>
+    );
+  }
+  return (
+    <span className={cn('font-semibold', margin < 10 && 'text-warning-ink')}>
+      <bdi className="num">{margin}</bdi>٪
+    </span>
+  );
+}
+
 function PriceCell({ item }: { item: ProductListItem }) {
   if (!item.price) return <span className="text-ink-muted">بعدة عملات</span>;
   const { currency, minMinor, maxMinor } = item.price;
-  if (minMinor === maxMinor) return <Money minor={minMinor} currency={currency} />;
+  // A service has no shelf price: the fee is typed at the till
+  if (item.type === 'service' && minMinor === 0 && maxMinor === 0) {
+    return <Badge tone="info">خدمة · السعر عند البيع</Badge>;
+  }
+  const amount =
+    minMinor === maxMinor ? (
+      <Money minor={minMinor} currency={currency} />
+    ) : (
+      <span>
+        <Money minor={minMinor} currency={currency} /> – <Money minor={maxMinor} currency={currency} />
+      </span>
+    );
+  // A dollar price carries its pound equivalent at today's rate
+  if (currency !== 'USD') return amount;
   return (
-    <span>
-      <Money minor={minMinor} currency={currency} /> – <Money minor={maxMinor} currency={currency} />
+    <span className="inline-flex flex-col items-end gap-0.5">
+      {amount}
+      <LiraCaption minor={minMinor} currency={currency} />
     </span>
   );
 }
@@ -91,26 +249,40 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
   const [editing, setEditing] = useState(false);
   const [priceMinor, setPriceMinor] = useState<number | null>(item.price?.minMinor ?? null);
   const [error, setError] = useState<string | undefined>();
+  const [freeAsked, setFreeAsked] = useState(false);
   const [saving, setSaving] = useState(false);
   const price = item.price;
   const variantId = item.singleVariantId;
 
-  if (!price || !variantId) return <PriceCell item={item} />;
+  // Every row keeps the same slot after its price, so the prices of rows with and without a pencil
+  // line up (a piece with several sizes is edited on its own page)
+  const slot = 'grid size-8 shrink-0 place-items-center max-sm:size-11';
+  if (!price || !variantId || (item.type === 'service' && price.minMinor === 0 && price.maxMinor === 0)) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <PriceCell item={item} />
+        <span className={slot} aria-hidden="true" />
+      </span>
+    );
+  }
 
   if (!editing) {
     return (
       <span className="inline-flex items-center gap-1">
         <PriceCell item={item} />
-        <IconButton
-          size="xs"
-          label={`عدّل سعر «${item.nameAr}»`}
-          icon={<EditIcon size={16} />}
-          onClick={() => {
-            setPriceMinor(price.minMinor);
-            setError(undefined);
-            setEditing(true);
-          }}
-        />
+        <span className={slot}>
+          <IconButton
+            size="xs"
+            className="max-sm:size-11 max-sm:pointer-coarse:size-11"
+            label={`عدّل سعر «${item.nameAr}»`}
+            icon={<EditIcon size={16} />}
+            onClick={() => {
+              setPriceMinor(price.minMinor);
+              setError(undefined);
+              setEditing(true);
+            }}
+          />
+        </span>
       </span>
     );
   }
@@ -120,6 +292,12 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
     if (!price || !variantId) return;
     if (priceMinor === null) {
       setError('اكتب السعر');
+      return;
+    }
+    // A zero price sells free at every till: ask once, the second press of «احفظ» confirms
+    if (priceMinor === 0 && item.type !== 'service' && !freeAsked) {
+      setFreeAsked(true);
+      setError(`سيُباع «${item.nameAr}» مجاناً. اضغط «احفظ» مرة أخرى إن كان هذا مقصوداً.`);
       return;
     }
     setSaving(true);
@@ -150,23 +328,131 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
   }
 
   return (
-    <form noValidate onSubmit={save} className="flex flex-wrap items-start justify-end gap-2 py-1">
-      <MoneyField
-        label={`السعر الجديد لـ«${item.nameAr}»`}
-        hideLabel
-        currency={price.currency}
-        valueMinor={priceMinor}
-        onValueChange={setPriceMinor}
-        error={error}
-        className="w-36"
+    <div
+      role="presentation"
+      className="contents"
+      onKeyDown={(event) => {
+        // A price is never negative: the field would drop the sign and save a positive one
+        if (event.key === '-' || event.key === '−') {
+          event.preventDefault();
+          setError('السعر لا يكون سالباً. اكتب الرقم بلا إشارة ناقص.');
+        }
+      }}
+    >
+      <form noValidate onSubmit={save} className="flex flex-wrap items-start justify-end gap-2 py-2">
+        <MoneyField
+          label={`السعر الجديد لـ«${item.nameAr}»`}
+          hideLabel
+          currency={price.currency}
+          valueMinor={priceMinor}
+          onValueChange={(value) => {
+            setPriceMinor(value);
+            setFreeAsked(false);
+            setError(undefined);
+          }}
+          error={error}
+          className="w-36"
+        />
+        <Button type="submit" loading={saving}>
+          احفظ
+        </Button>
+        <Button variant="ghost" onClick={() => setEditing(false)}>
+          تراجع
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * The product's first picture, small. One with none shows the icon of its kind (its category, else
+ * the store's business type), never a letter; to a manager that icon is the single «أضف صورة»
+ * action, and a camera shows over it when the pointer is on it.
+ */
+function Thumb({
+  item,
+  canAdd,
+  sectors,
+}: {
+  item: ProductListItem;
+  canAdd: boolean;
+  sectors: readonly string[];
+}) {
+  const [broken, setBroken] = useState(false);
+  if (item.thumbUrl && !broken) {
+    return (
+      <img
+        src={item.thumbUrl}
+        alt=""
+        loading="lazy"
+        onError={() => setBroken(true)}
+        className="size-11 shrink-0 rounded-control border border-line bg-surface-muted object-cover max-sm:size-10"
       />
-      <Button type="submit" size="sm" loading={saving}>
-        احفظ
-      </Button>
-      <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
-        تراجع
-      </Button>
-    </form>
+    );
+  }
+  const Kind = placeholderIconFor({
+    categoryName: item.categoryName,
+    name: item.nameAr,
+    sectors,
+    isService: item.type === 'service',
+  });
+  if (canAdd && item.hasImage === false) {
+    return (
+      <Link
+        to={`/products/${item.id}#images`}
+        aria-label={`أضف صورة لـ«${item.nameAr}»`}
+        title="أضف صورة"
+        className="group relative grid size-11 shrink-0 place-items-center rounded-control border border-line bg-surface-muted text-ink-subtle transition-colors duration-120 ease-standard hover:border-brand hover:bg-brand-soft hover:text-brand-ink focus-visible:border-brand max-sm:size-10"
+      >
+        <Kind size={20} aria-hidden="true" className="group-hover:hidden group-focus-visible:hidden" />
+        <CameraIcon
+          size={20}
+          aria-hidden="true"
+          className="hidden group-hover:block group-focus-visible:block"
+        />
+      </Link>
+    );
+  }
+  return (
+    <IconChip tone="neutral" className="size-11 max-sm:size-10">
+      <Kind size={20} aria-hidden="true" />
+    </IconChip>
+  );
+}
+
+/** «ينتهي قريباً» in amber, «منتهية» in red, under the date of the nearest expiry */
+function ExpiryCell({
+  item,
+  today,
+  digits,
+}: {
+  item: ProductListItem;
+  today: string;
+  digits: 'latn' | 'arab';
+}) {
+  const date = item.nearestExpiry;
+  if (!date) return <span className="text-ink-subtle">—</span>;
+  const days = Math.round((Date.parse(date) - Date.parse(today)) / 86_400_000);
+  const tone = days < 0 ? 'text-danger-ink' : days <= 30 ? 'text-warning-ink' : 'text-ink-muted';
+  return (
+    <span className="flex flex-col gap-0.5 whitespace-nowrap">
+      <span className={cn('text-sm font-semibold', tone)}>{dayText(date, digits)}</span>
+      {days < 0 ? (
+        <span className="text-xs text-danger-ink">منتهية</span>
+      ) : days <= 30 ? (
+        <span className="text-xs text-warning-ink">ينتهي قريباً</span>
+      ) : null}
+    </span>
+  );
+}
+
+/** The state of a row, as a word in its colour: archived, waiting for review, or on sale. */
+function StatusCell({ item }: { item: ProductListItem }) {
+  return (
+    <span className="flex flex-wrap gap-1.5">
+      {item.archivedAt ? <Badge>مؤرشف</Badge> : null}
+      {item.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
+    </span>
   );
 }
 
@@ -176,9 +462,29 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
  * and the in-place price edit.
  */
 export function ProductsPage() {
+  // The list keeps its state below the shell, so typing in the search never redraws the menu and
+  // the top bar.
+  return (
+    <AppShell>
+      <CatalogGate viewOnly>
+        <ProductsList />
+      </CatalogGate>
+    </AppShell>
+  );
+}
+
+function ProductsList() {
   const me = useMe();
   const navigate = useNavigate();
   const canManage = canManageCatalog(me);
+  const digits = me.settings.numberFormat;
+  const phone = useIsPhone();
+  const clothingStore = me.tenant.sectors.includes('clothing');
+  const [exporting, setExporting] = useState(false);
+  const [photosOpen, setPhotosOpen] = useState(false);
+  // A phone: the numbers and the filters fold away so the list starts high on the screen
+  const [kpiOpen, setKpiOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [params] = useSearchParams();
   // «التصنيفات» links here with ?category=
   const [filters, setFilters] = useState<Filters>(() => ({
@@ -186,66 +492,147 @@ export function ProductsPage() {
     categoryId: params.get('category') ?? '',
   }));
   const q = useDebounced(filters.q, SEARCH_DEBOUNCE_MS);
-  const [items, setItems] = useState<ProductListItem[] | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
+  // Counts over the whole store, from the server (the first page carries them)
+  const [attention, setAttention] = useState<{
+    zeroPrice: number;
+    noPhoto: number;
+    expiringSoon?: number;
+    uncategorised?: number;
+  } | null>(null);
+  // The whole store's stock numbers for the tiles: they stay while a search narrows the list
+  const [totals, setTotals] = useState<ProductListTotals | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [statusCounts, setStatusCounts] = useState<ProductListResponse['statusCounts'] | null>(null);
+  // The seasons the store's products carry (a clothing store's filter)
+  const [seasons, setSeasons] = useState<string[]>([]);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [unknownCode, setUnknownCode] = useState<string | null>(null);
-  const request = useRef(0);
 
   const queryKey = JSON.stringify({
     q: searchTerm(q) || undefined,
     categoryId: filters.categoryId || undefined,
+    season: filters.season || undefined,
     status: filters.status,
+    expiry: filters.expiry || undefined,
+    stock: filters.stock || undefined,
+    sort: filters.sort === 'name' ? undefined : filters.sort,
+    // Who sees costs also gets the margin column
+    cost: me.user.permissions.includes('cost.view') ? '1' : undefined,
   } satisfies ProductListQuery);
 
-  const load = useCallback(async () => {
-    const id = ++request.current;
-    setItems(null);
-    setLoadError(null);
-    try {
-      const page = await listProducts({
-        ...(JSON.parse(queryKey) as ProductListQuery),
-        limit: PRODUCTS_PAGE_SIZE,
-      });
-      if (id !== request.current) return;
-      setItems(page.items);
-      setNextCursor(page.nextCursor);
-    } catch (error) {
-      if (id === request.current) setLoadError(errorMessage(error));
-    }
-  }, [queryKey]);
-
+  const {
+    data: pageData,
+    error: loadError,
+    retry: load,
+    patch,
+    topRef,
+    pager,
+  } = useCursorPages(queryKey, (cursor) =>
+    listProducts({
+      ...(JSON.parse(queryKey) as ProductListQuery),
+      ...(cursor ? { cursor } : {}),
+      limit: PRODUCTS_PAGE_SIZE,
+    }),
+  );
+  const items = pageData ? pageData.items : null;
+  // The first page carries the whole store's counts; they stay while another page shows
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (pageData?.statusCounts) setStatusCounts(pageData.statusCounts);
+    if (pageData?.attention) setAttention(pageData.attention);
+    if (pageData?.totals) setTotals(pageData.totals);
+  }, [pageData]);
 
   useEffect(() => {
     listCategories()
       .then((answer) => setCategories(answer.items))
       // The filter is a convenience: the list works without it.
       .catch(() => setCategories([]));
-  }, []);
+    if (me.tenant.sectors.includes('clothing')) {
+      apiFetch<OptionValuesResponse>('/v1/products/options', { auth: true })
+        .then((answer) => setSeasons(answer.seasons ?? []))
+        .catch(() => setSeasons([]));
+    }
+  }, [me.tenant.sectors]);
 
-  async function loadMore() {
-    if (!nextCursor) return;
-    const id = request.current;
-    setLoadingMore(true);
+  /** «صدّر الجدول»: every page of the current search, not only what is on screen. */
+  async function exportAll() {
+    setExporting(true);
     try {
-      const page = await listProducts({
-        ...(JSON.parse(queryKey) as ProductListQuery),
-        cursor: nextCursor,
-        limit: PRODUCTS_PAGE_SIZE,
-      });
-      if (id !== request.current) return;
-      setItems((current) => [...(current ?? []), ...page.items]);
-      setNextCursor(page.nextCursor);
+      const all: ProductListItem[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: Awaited<ReturnType<typeof listProducts>> = await listProducts({
+          ...(JSON.parse(queryKey) as ProductListQuery),
+          ...(cursor ? { cursor } : {}),
+          limit: 200,
+          detail: '1',
+        });
+        all.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor && all.length < EXPORT_CAP);
+      // A catalogue bigger than the cap is cut: say so instead of handing over a short file unannounced
+      const cut = cursor !== null;
+      downloadCsv(
+        'products',
+        [
+          'المنتج',
+          'الباركود',
+          'التصنيف',
+          'المتغيّرات',
+          'العملة',
+          'أدنى سعر',
+          'أعلى سعر',
+          'الكمية الصافية',
+          'المتوفر للبيع',
+          'الوحدة',
+          'الموسم',
+          'الحالة',
+          'سعر الجملة (أدنى)',
+          'سعر الجملة (أعلى)',
+          ...(me.user.permissions.includes('cost.view')
+            ? [`متوسط التكلفة (${me.settings.baseCurrency})`]
+            : []),
+        ],
+        all.map((i) => [
+          i.nameAr,
+          i.barcode ? new TextCell(i.barcode) : '',
+          i.categoryName ?? '',
+          i.variantCount,
+          i.price?.currency ?? '',
+          i.price ? i.price.minMinor / 10 ** getCurrency(i.price.currency).decimals : '',
+          i.price ? i.price.maxMinor / 10 ** getCurrency(i.price.currency).decimals : '',
+          i.type === 'service' ? '' : i.stockQty / 1000,
+          i.type === 'service' ? '' : availableOf(i) / 1000,
+          i.unitName ?? '',
+          i.season ?? '',
+          i.archivedAt ? 'مؤرشف' : i.status === 'temporary' ? 'قيد المراجعة' : 'نشط',
+          ...(() => {
+            const cur = i.price?.currency ?? me.settings.baseCurrency;
+            const dec = 10 ** getCurrency(cur).decimals;
+            return [
+              i.wholesale ? i.wholesale.minMinor / dec : '',
+              i.wholesale ? i.wholesale.maxMinor / dec : '',
+            ];
+          })(),
+          ...(me.user.permissions.includes('cost.view')
+            ? [
+                i.costMinor === undefined || i.costMinor === null
+                  ? ''
+                  : i.costMinor / 10 ** getCurrency(me.settings.baseCurrency).decimals,
+              ]
+            : []),
+        ]),
+      );
+      if (cut) {
+        setNotice({
+          tone: 'error',
+          text: `الملف يحوي أول ${String(EXPORT_CAP)} منتج فقط. صفِّ القائمة بتصنيف أو بحث ثم صدّر الباقي.`,
+        });
+      }
     } catch (error) {
       setNotice({ tone: 'error', text: errorMessage(error) });
     } finally {
-      setLoadingMore(false);
+      setExporting(false);
     }
   }
 
@@ -269,37 +656,205 @@ export function ProductsPage() {
     setFilters((current) => ({ ...current, [key]: value }));
   };
 
-  const filtered = filters.q.trim() !== '' || filters.categoryId !== '' || filters.status !== 'active';
+  const filtered =
+    filters.q.trim() !== '' ||
+    filters.categoryId !== '' ||
+    filters.season !== '' ||
+    filters.status !== 'active' ||
+    filters.stock !== '' ||
+    filters.sort !== 'name' ||
+    filters.expiry !== '';
+  // A tab with nothing in it and nothing typed: the empty tab, not a failed search
+  const noSearch =
+    filters.status !== 'active' &&
+    filters.q.trim() === '' &&
+    filters.categoryId === '' &&
+    filters.season === '' &&
+    filters.stock === '' &&
+    filters.expiry === '';
+  // What the «تصفية» sheet holds that is not at its default (the search box is on the page itself)
+  const activeFilters =
+    (filters.categoryId ? 1 : 0) +
+    (filters.season ? 1 : 0) +
+    (filters.expiry ? 1 : 0) +
+    (filters.stock ? 1 : 0) +
+    (filters.sort !== 'name' ? 1 : 0) +
+    (filters.status !== 'active' ? 1 : 0);
   const tree = categoryTree(categories.filter((c) => !c.archivedAt || c.id === filters.categoryId));
+  // What the shown list needs done: a price of 0 sells for nothing, and a missing picture shows as a letter
+  const zeroPrice =
+    attention?.zeroPrice ??
+    (items ?? []).filter((i) => i.type !== 'service' && i.price !== null && i.price.minMinor === 0).length;
+  const noPhoto =
+    attention?.noPhoto ?? (items ?? []).filter((i) => i.type !== 'service' && i.hasImage === false).length;
+  // Products without a category: one press proposes a category for each from its name, then a review
+  const uncategorised =
+    attention?.uncategorised ?? (items ?? []).filter((i) => !i.categoryId && i.type !== 'service').length;
+  const [categorizing, setCategorizing] = useState<CategorizeItem[] | null>(null);
+  const [loadingAuto, setLoadingAuto] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [showWhy, setShowWhy] = useState(false);
+  // «أخفِ هذا التنبيه»: hidden until the counts grow past what was dismissed (kept on this device)
+  const [dismissed, setDismissed] = useState<{ u: number; p: number }>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('serva.products.attention') ?? 'null') as {
+        u?: number;
+        p?: number;
+      } | null;
+      return { u: saved?.u ?? -1, p: saved?.p ?? -1 };
+    } catch {
+      return { u: -1, p: -1 };
+    }
+  });
+  const dismissAttention = (value: { u: number; p: number }) => {
+    setDismissed(value);
+    try {
+      localStorage.setItem('serva.products.attention', JSON.stringify(value));
+    } catch {
+      // The dismissal then lasts until the page is left
+    }
+  };
+  const toggle = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const asItem = (i: ProductListItem): CategorizeItem => ({
+    id: i.id,
+    nameAr: i.nameAr,
+    version: i.version,
+    categoryId: i.categoryId,
+  });
+  /** «صنّف المحددة»: the rows ticked in the list */
+  function categorizeSelected() {
+    setCategorizing((items ?? []).filter((i) => selected.has(i.id)).map(asItem));
+  }
+  /** «صنّف تلقائياً»: every active product without a category, not only the page on screen */
+  async function categorizeAuto() {
+    setLoadingAuto(true);
+    try {
+      const found: CategorizeItem[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: Awaited<ReturnType<typeof listProducts>> = await listProducts({
+          status: 'active',
+          ...(cursor ? { cursor } : {}),
+          limit: 200,
+        });
+        found.push(...page.items.filter((i) => !i.categoryId && i.type !== 'service').map(asItem));
+        cursor = page.nextCursor;
+      } while (cursor && found.length < 400);
+      if (found.length === 0) setNotice({ tone: 'info', text: 'كل منتجاتك لها تصنيف.' });
+      else setCategorizing(found);
+    } catch (e) {
+      setNotice({ tone: 'error', text: errorMessage(e) });
+    } finally {
+      setLoadingAuto(false);
+    }
+  }
+  // «المؤرشفة · 4»: the count beside each status, once the server has said it
+  const statusOptions = STATUS_OPTIONS.map((o) => ({
+    ...o,
+    label: statusCounts ? `${o.label} · ${formatNumber(statusCounts[o.value], digits)}` : o.label,
+  }));
+  const summary = totals ?? (items ? summaryOf(items) : null);
+  // More pages wait behind the page buttons: the tiles count what is on this page, «+» says there is more.
+  const more = !totals && (pager.hasNext || pager.page > 1) ? '+' : '';
+  const showSummary = !loadError && (items === null || items.length > 0);
+
+  const today = isoDay(Date.now(), me.tenant.timezone);
+  // Expiry shows once any product carries a date: a clothing store never sees it
+  const showExpiry =
+    filters.expiry !== '' || (attention?.expiringSoon ?? 0) > 0 || (items ?? []).some((i) => i.nearestExpiry);
+  const expiringSoon = attention?.expiringSoon ?? 0;
+
+  const rowMenu = (item: ProductListItem) => (
+    <Menu
+      label={`إجراءات «${item.nameAr}»`}
+      align="end"
+      trigger={
+        <IconButton
+          size="sm"
+          className="max-sm:size-11 max-sm:pointer-coarse:size-11"
+          label={`إجراءات «${item.nameAr}»`}
+          icon={<MoreIcon />}
+        />
+      }
+    >
+      <MenuItem icon={<EditIcon />} render={(props) => <Link to={`/products/${item.id}`} {...props} />}>
+        افتح المنتج
+      </MenuItem>
+      {!item.archivedAt ? (
+        <MenuItem
+          icon={<PrintIcon />}
+          render={(props) => <Link to={`/labels?product=${item.id}`} {...props} />}
+        >
+          اطبع الملصقات
+        </MenuItem>
+      ) : null}
+    </Menu>
+  );
+  const pickBox = (item: ProductListItem) => (
+    <Checkbox
+      label={<span className="sr-only">{`حدّد «${item.nameAr}»`}</span>}
+      checked={selected.has(item.id)}
+      onChange={() => toggle(item.id)}
+    />
+  );
+  const allShownPicked = (items ?? []).length > 0 && (items ?? []).every((i) => selected.has(i.id));
+  // «نشط» is the normal state and says nothing: the column shows only when some row is archived or waiting
+  const showStatus = (items ?? []).some((i) => i.archivedAt || i.status === 'temporary');
 
   const columns: DataColumn<ProductListItem>[] = [
+    ...(canManage && !phone
+      ? [
+          {
+            key: 'select',
+            header: (
+              <Checkbox
+                label={<span className="sr-only">حدّد كل المنتجات المعروضة</span>}
+                checked={allShownPicked}
+                onChange={() =>
+                  setSelected(allShownPicked ? new Set() : new Set((items ?? []).map((i) => i.id)))
+                }
+              />
+            ),
+            className: 'w-10',
+            cell: (item: ProductListItem) => pickBox(item),
+          } satisfies DataColumn<ProductListItem>,
+        ]
+      : []),
     {
       key: 'name',
       header: 'المنتج',
       cell: (item) => (
-        <div className="flex min-w-56 items-center gap-3 py-2">
-          <span
-            aria-hidden="true"
-            className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft font-bold text-brand-ink"
-          >
-            {Array.from(item.nameAr.trim())[0] ?? ''}
-          </span>
+        <div className="flex min-w-0 items-center gap-3 py-2.5 sm:min-w-60">
+          <Thumb item={item} canAdd={canManage && !item.archivedAt} sectors={me.tenant.sectors} />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="flex flex-wrap items-center gap-2">
-              <Link to={`/products/${item.id}`} className="font-semibold text-ink hover:text-brand-ink">
+            <span className="flex min-w-0 items-center gap-1">
+              <Link
+                to={`/products/${item.id}`}
+                className="rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
+              >
                 {item.nameAr}
               </Link>
-              {item.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
-              {item.archivedAt ? <Badge>مؤرشف</Badge> : null}
+              {canManage && !phone ? rowMenu(item) : null}
             </span>
-            <span className="flex flex-wrap gap-2 text-[0.8125rem] text-ink-muted">
-              {item.barcode ? (
-                <bdi dir="ltr" className="num">
-                  {item.barcode}
-                </bdi>
-              ) : null}
-              {item.variantCount > 1 ? <span>{item.variantCount} متغيّرات</span> : null}
-            </span>
+            {item.variantCount > 1 || item.barcode ? (
+              <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-ink-subtle">
+                {item.variantCount > 1 ? (
+                  <span>{countNoun(item.variantCount, COUNT_NOUNS.variant)}</span>
+                ) : null}
+                {item.variantCount > 1 && item.barcode ? <span aria-hidden="true">·</span> : null}
+                {item.barcode ? (
+                  <bdi dir="ltr" className="num">
+                    {item.barcode}
+                  </bdi>
+                ) : null}
+              </span>
+            ) : null}
           </div>
         </div>
       ),
@@ -307,7 +862,17 @@ export function ProductsPage() {
     {
       key: 'category',
       header: 'التصنيف',
-      cell: (item) => item.categoryName ?? <span className="text-ink-subtle">بلا تصنيف</span>,
+      // A phone keeps the price and the stock in view; the category is on the product's card.
+      className: 'max-md:hidden',
+      cell: (item) =>
+        item.categoryName ? (
+          <span className="whitespace-nowrap text-ink-muted">{item.categoryName}</span>
+        ) : item.type === 'service' ? (
+          // A service is not shelved goods: «بلا تصنيف» would only be a chore it does not have
+          <span className="text-ink-subtle">—</span>
+        ) : (
+          <span className="whitespace-nowrap text-ink-subtle">بلا تصنيف</span>
+        ),
     },
     {
       key: 'price',
@@ -319,12 +884,12 @@ export function ProductsPage() {
             key={`${item.id}-${item.version}`}
             item={item}
             onSaved={(updated, text) => {
-              setItems((current) => current?.map((row) => (row.id === updated.id ? updated : row)) ?? null);
+              patch((p) => ({ ...p, items: p.items.map((row) => (row.id === updated.id ? updated : row)) }));
               setNotice({ tone: 'success', text });
             }}
             onConflict={(text) => {
               setNotice({ tone: 'error', text });
-              void load();
+              load();
             }}
           />
         ) : (
@@ -333,157 +898,693 @@ export function ProductsPage() {
     },
     {
       key: 'stock',
-      header: 'الكمية',
+      header: me.branches.length > 1 ? 'الكمية (كل الفروع)' : 'الكمية',
       numeric: true,
       cell: (item) =>
         item.type === 'service' ? (
           <span className="text-ink-subtle">—</span>
         ) : (
-          <span className={cn(item.stockQty < 0 && 'text-danger-ink')}>
-            {formatQuantity(item.stockQty, me.settings.numberFormat)}
-          </span>
+          <StockCell item={item} digits={digits} />
         ),
     },
+    ...(me.user.permissions.includes('cost.view') && !phone
+      ? [
+          {
+            key: 'margin',
+            header: 'الهامش',
+            numeric: true,
+            cell: (item: ProductListItem) => <MarginCell item={item} base={me.settings.baseCurrency} />,
+          } satisfies DataColumn<ProductListItem>,
+        ]
+      : []),
+    ...(showExpiry
+      ? [
+          {
+            key: 'expiry',
+            header: 'ينتهي',
+            className: 'max-md:hidden',
+            cell: (item: ProductListItem) => <ExpiryCell item={item} today={today} digits={digits} />,
+          } satisfies DataColumn<ProductListItem>,
+        ]
+      : []),
+    ...(showStatus
+      ? [
+          {
+            key: 'status',
+            header: 'الحالة',
+            cell: (item: ProductListItem) => <StatusCell item={item} />,
+          } satisfies DataColumn<ProductListItem>,
+        ]
+      : []),
   ];
 
+  // A phone gets one primary «+ منتج» and the rest behind «⋯»: the first product stays near the top
+  const addProduct = phone ? (
+    <div className="flex items-center gap-2">
+      <ButtonLink to="/products/new" variant="primary" icon={<AddIcon />} aria-label="أضف منتجاً">
+        منتج
+      </ButtonLink>
+      <Menu
+        label="المزيد من الإجراءات"
+        align="end"
+        trigger={<IconButton label="المزيد من الإجراءات" icon={<MoreIcon />} />}
+      >
+        <MenuItem onSelect={() => void exportAll()}>صدّر الجدول</MenuItem>
+        <MenuItem icon={<CameraIcon />} onSelect={() => setPhotosOpen(true)}>
+          أضف صوراً دفعة واحدة
+        </MenuItem>
+        <MenuItem
+          icon={<PackageOpenIcon />}
+          render={(props) => <Link to="/import?type=products" {...props} />}
+        >
+          استيراد من ملف
+        </MenuItem>
+      </Menu>
+    </div>
+  ) : (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button variant="secondary" loading={exporting} onClick={() => void exportAll()}>
+        صدّر الجدول
+      </Button>
+      <Button variant="secondary" icon={<CameraIcon />} onClick={() => setPhotosOpen(true)}>
+        {noPhoto > 0 && items && filters.status === 'active' ? (
+          <>
+            أضف صوراً دفعة واحدة · <bdi className="num">{noPhoto}</bdi> بلا صورة
+          </>
+        ) : (
+          'أضف صوراً دفعة واحدة'
+        )}
+      </Button>
+      <ButtonLink to="/import?type=products" icon={<PackageOpenIcon />}>
+        استيراد من ملف
+      </ButtonLink>
+      <ButtonLink to="/products/new" variant="primary" icon={<AddIcon />}>
+        أضف منتجاً
+      </ButtonLink>
+    </div>
+  );
+
   return (
-    <AppShell>
-      <title>المنتجات · Serva POS</title>
-      <div className="flex flex-col gap-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-bold text-ink">المنتجات</h1>
-            <p className="text-ink-muted">
-              ابحث بالاسم أو امسح الباركود.{' '}
-              <Link to="/categories" className={textLinkClass}>
-                التصنيفات
-              </Link>
-            </p>
-          </div>
-          {canManage ? (
-            <Link
-              to="/products/new"
-              className="inline-flex min-h-12 items-center gap-2 rounded-control bg-brand px-5 font-semibold text-on-brand hover:bg-brand-hover max-sm:w-full max-sm:justify-center"
-            >
-              <AddIcon />
-              أضف منتجاً
-            </Link>
-          ) : null}
-        </div>
-
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-          <SearchField
-            label="ابحث بالاسم أو الباركود"
-            value={filters.q}
-            onValueChange={(value) => setFilter('q', value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && looksLikeBarcode(filters.q)) {
-                event.preventDefault();
-                void openBarcode(filters.q);
-              }
-            }}
-            slashShortcut
-            className="lg:flex-1"
-          />
-          <Select
-            label="التصنيف"
-            hideLabel
-            value={filters.categoryId}
-            onChange={(event) => setFilter('categoryId', event.target.value)}
-            className="lg:w-56"
-          >
-            <option value="">كل التصنيفات</option>
-            {tree.map((node) => (
-              <option key={node.category.id} value={node.category.id}>
-                {categoryOptionLabel(node)}
-              </option>
-            ))}
-          </Select>
-          <SegmentedControl
-            label="حالة المنتج"
-            options={STATUS_OPTIONS}
-            value={filters.status}
-            onValueChange={(value) => setFilter('status', value)}
-          />
-        </div>
-
-        {notice ? <Alert tone={notice.tone}>{notice.text}</Alert> : null}
-
-        {unknownCode ? (
-          <Alert tone="info">
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>
-                لا منتج بهذا الباركود:{' '}
-                <bdi dir="ltr" className="num">
-                  {unknownCode}
-                </bdi>
-              </span>
-              {canManage ? (
-                <Link
-                  to={`/products/new?barcode=${encodeURIComponent(unknownCode)}`}
-                  className={textLinkClass}
-                >
-                  أضف منتجاً بهذا الباركود
-                </Link>
-              ) : null}
-            </span>
-          </Alert>
-        ) : null}
-
-        <DataTable
-          caption="المنتجات"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(item) => item.id}
-          loading={items === null && !loadError}
-          error={loadError ?? undefined}
-          onRetry={() => void load()}
-          empty={
-            filtered ? (
-              <EmptyState
-                icon={ProductsIcon}
-                title="لا منتجات تطابق بحثك."
-                description="جرّب كلمة أخرى أو تصنيفاً آخر."
-                action={
-                  <Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>
-                    امسح البحث والتصفية
-                  </Button>
-                }
-              />
+    <>
+      <title>المنتجات · SERVA</title>
+      <SalesPage>
+        <PageTop
+          title="المنتجات"
+          subtitle={phone ? undefined : 'ابحث بالاسم، أو امسح باركوداً في أي وقت لتفتح منتجه.'}
+          actions={
+            canManage ? (
+              addProduct
             ) : (
-              <EmptyState
-                icon={ProductsIcon}
-                title="لا منتجات بعد."
-                description="أضف منتجك الأول باسمه وسعره وباركوده، فيصل إلى أجهزة الكاشير."
-                action={
-                  canManage ? (
-                    <Link
-                      to="/products/new"
-                      className="inline-flex min-h-12 items-center gap-2 rounded-control bg-brand px-5 font-semibold text-on-brand hover:bg-brand-hover"
-                    >
-                      <AddIcon />
-                      أضف منتجاً
-                    </Link>
-                  ) : null
-                }
-              />
+              // The accountant reads the list and takes it to a sheet; he never changes it
+              <Button variant="secondary" loading={exporting} onClick={() => void exportAll()}>
+                صدّر الجدول
+              </Button>
             )
           }
         />
 
-        {nextCursor && items ? (
-          <div className="flex justify-center">
-            <Button variant="secondary" loading={loadingMore} onClick={() => void loadMore()}>
-              اعرض المزيد
-            </Button>
-          </div>
+        {showSummary && phone ? (
+          <button
+            type="button"
+            aria-expanded={kpiOpen}
+            onClick={() => setKpiOpen((v) => !v)}
+            className="flex min-h-11 items-center gap-2 rounded-card border border-line bg-surface px-3 text-start text-sm text-ink-muted shadow-e1"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {summary ? (
+                <>
+                  <bdi className="num font-semibold text-ink">{`${summary.products}${more}`}</bdi> منتج ·{' '}
+                  <bdi className="num font-semibold text-ink">{formatQuantity(summary.pieces, digits)}</bdi>{' '}
+                  {countWord(summary.pieces, { one: 'قطعة', few: 'قطع' })}
+                  {summary.runOut > 0 ? (
+                    <>
+                      {' '}
+                      · <bdi className="num font-semibold text-warning-ink">{summary.runOut}</bdi>{' '}
+                      {clothingStore ? 'مقاساً نفد' : 'نفد'}
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                'الأرقام'
+              )}
+            </span>
+            <span className="shrink-0 text-xs font-semibold text-brand-ink">
+              {kpiOpen ? 'أخفِ الأرقام' : 'الأرقام'}
+            </span>
+            <ExpandIcon size={16} className={cn('shrink-0 transition-transform', kpiOpen && 'rotate-180')} />
+          </button>
         ) : null}
+        {showSummary && (!phone || kpiOpen) ? (
+          <SlimKpis
+            label="أرقام المنتجات"
+            items={[
+              {
+                key: 'products',
+                label: 'المنتجات',
+                onSelect: () => setFilters(NO_FILTERS),
+                selectLabel: 'اعرض كل المنتجات',
+                value: summary ? <bdi className="num">{`${summary.products}${more}`}</bdi> : '…',
+                note:
+                  // Only a clothing store counts sizes and colours; elsewhere «15 منتج / 13 صنفاً» only confuses
+                  // (services have no variants), so the tile says the one number the phone summary says
+                  clothingStore &&
+                  summary &&
+                  summary.variants > 0 &&
+                  summary.variants !== summary.products ? (
+                    <>
+                      المقاسات والألوان: <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
+                    </>
+                  ) : undefined,
+              },
+              {
+                key: 'pieces',
+                label: 'القطع في المخزون',
+                onSelect: () => setFilter('sort', filters.sort === 'stock' ? 'name' : 'stock'),
+                pressed: filters.sort === 'stock',
+                selectLabel: 'رتّب الأقل مخزوناً أولاً',
+                value: summary ? (
+                  <bdi className="num">{`${formatQuantity(summary.pieces, digits)}${more}`}</bdi>
+                ) : (
+                  '…'
+                ),
+              },
+              {
+                key: 'out',
+                label: soldOutLabel(clothingStore),
+                value: summary ? <bdi className="num">{`${summary.runOut}${more}`}</bdi> : '…',
+                tone: summary && summary.runOut > 0 ? 'warning' : undefined,
+                onSelect: () => setFilter('stock', filters.stock === 'out' ? '' : 'out'),
+                pressed: filters.stock === 'out',
+                selectLabel: 'اعرض ما نفد فقط',
+                note: !summary?.lowest ? undefined : summary.runOut > 0 ? (
+                  <>
+                    {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
+                    {filters.stock !== 'out' ? (
+                      <>
+                        {' '}
+                        <button
+                          type="button"
+                          className={textLinkClass}
+                          onClick={() => setFilter('stock', 'out')}
+                        >
+                          اعرضها
+                        </button>
+                      </>
+                    ) : null}
+                    {summary.negative > 0 ? <> · {negativeNote(summary.negative)}</> : null}
+                    {summary.negative > 0 && canManage ? (
+                      <>
+                        {' '}
+                        <Link to="/inventory" className={textLinkClass}>
+                          اجرد المخزون
+                        </Link>
+                      </>
+                    ) : null}
+                  </>
+                ) : (
+                  'في كل صنف قطع على الرف'
+                ),
+              },
+              ...(showExpiry
+                ? [
+                    {
+                      key: 'expiry',
+                      label: 'ينتهي خلال 30 يوماً',
+                      onSelect: () => setFilter('expiry', filters.expiry === 'soon' ? '' : 'soon'),
+                      pressed: filters.expiry === 'soon',
+                      selectLabel: 'اعرض ما ينتهي قريباً',
+                      value: <bdi className="num">{expiringSoon}</bdi>,
+                      tone: expiringSoon > 0 ? ('warning' as const) : undefined,
+                      note:
+                        expiringSoon > 0 && filters.expiry !== 'soon' ? (
+                          <button
+                            type="button"
+                            className={textLinkClass}
+                            onClick={() => setFilter('expiry', 'soon')}
+                          >
+                            اعرضها
+                          </button>
+                        ) : undefined,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        ) : null}
+        {showSummary && !phone ? <StockDefinitions /> : null}
 
-        <p className="flex items-center gap-2 text-sm text-ink-muted">
-          <BarcodeIcon />
-          امسح باركوداً في أي وقت لتفتح منتجه.
-        </p>
-      </div>
-    </AppShell>
+        <div className="flex flex-col gap-4">
+          {phone ? (
+            <div className="flex items-center gap-2">
+              <SearchField
+                label="ابحث بالاسم أو الباركود"
+                placeholder="ابحث بالاسم أو امسح الباركود"
+                value={filters.q}
+                onValueChange={(value) => setFilter('q', value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && looksLikeBarcode(filters.q)) {
+                    event.preventDefault();
+                    void openBarcode(filters.q);
+                  }
+                }}
+                slashShortcut
+                className="min-w-0 flex-1"
+              />
+              <Button
+                variant="secondary"
+                aria-haspopup="dialog"
+                onClick={() => setFiltersOpen(true)}
+                className="shrink-0"
+              >
+                {activeFilters > 0 ? (
+                  <>
+                    تصفية <bdi className="num">({activeFilters})</bdi>
+                  </>
+                ) : (
+                  'تصفية'
+                )}
+              </Button>
+            </div>
+          ) : null}
+          {phone ? (
+            <Sheet
+              open={filtersOpen}
+              onOpenChange={setFiltersOpen}
+              side="bottom"
+              closeOnOutsideClick
+              title="تصفية المنتجات"
+              footer={
+                <div className="flex gap-2">
+                  <Button variant="primary" onClick={() => setFiltersOpen(false)} className="flex-1">
+                    اعرض النتائج
+                  </Button>
+                  {activeFilters > 0 ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => setFilters((f) => ({ ...NO_FILTERS, q: f.q }))}
+                    >
+                      امسح التصفية
+                    </Button>
+                  ) : null}
+                </div>
+              }
+            >
+              <div className="flex flex-col gap-3">
+                <Select
+                  label="التصنيف"
+
+                  value={filters.categoryId}
+                  onChange={(event) => setFilter('categoryId', event.target.value)}
+                  className="w-full"
+                >
+                  <option value="">كل التصنيفات</option>
+                  {tree.map((node) => (
+                    <option key={node.category.id} value={node.category.id}>
+                      {categoryOptionLabel(node)}
+                    </option>
+                  ))}
+                </Select>
+                {seasons.length > 0 || filters.season ? (
+                  <Select
+                    label="الموسم"
+
+                    value={filters.season}
+                    onChange={(event) => setFilter('season', event.target.value)}
+                    className="w-full"
+                  >
+                    <option value="">كل المواسم</option>
+                    {seasons.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </Select>
+                ) : null}
+                {showExpiry ? (
+                  <Select
+                    label="الصلاحية"
+
+                    value={filters.expiry}
+                    onChange={(event) => setFilter('expiry', event.target.value as Filters['expiry'])}
+                    className="w-full"
+                  >
+                    <option value="">كل الصلاحيات</option>
+                    <option value="soon">ينتهي قريباً</option>
+                    <option value="expired">منتهية</option>
+                  </Select>
+                ) : null}
+                <Select
+                  label="المخزون"
+                  value={filters.stock}
+                  onChange={(event) => setFilter('stock', event.target.value as Filters['stock'])}
+                  className="w-full"
+                >
+                  <option value="">كل المخزون</option>
+                  <option value="out">نفد فقط</option>
+                </Select>
+                <Select
+                  label="الترتيب"
+                  value={filters.sort}
+                  onChange={(event) => setFilter('sort', event.target.value as Filters['sort'])}
+                  className="w-full"
+                >
+                  <option value="name">بالاسم</option>
+                  <option value="stock">الأقل مخزوناً أولاً</option>
+                </Select>
+                <SegmentedControl
+                  label="حالة المنتج"
+                  options={statusOptions}
+                  value={filters.status}
+                  onValueChange={(value) => setFilter('status', value)}
+                  fullWidth
+                  className="max-sm:w-full"
+                />
+              </div>
+            </Sheet>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <SearchField
+                label="ابحث بالاسم أو الباركود"
+                placeholder="ابحث بالاسم أو امسح الباركود"
+                value={filters.q}
+                onValueChange={(value) => setFilter('q', value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && looksLikeBarcode(filters.q)) {
+                    event.preventDefault();
+                    void openBarcode(filters.q);
+                  }
+                }}
+                slashShortcut
+                className="min-w-0 basis-full lg:min-w-64 lg:flex-1 lg:basis-0"
+              />
+              <Select
+                label="التصنيف"
+                hideLabel
+                value={filters.categoryId}
+                onChange={(event) => setFilter('categoryId', event.target.value)}
+                className="min-w-40 flex-1 lg:w-56 lg:flex-none"
+              >
+                <option value="">كل التصنيفات</option>
+                {tree.map((node) => (
+                  <option key={node.category.id} value={node.category.id}>
+                    {categoryOptionLabel(node)}
+                  </option>
+                ))}
+              </Select>
+              {seasons.length > 0 || filters.season ? (
+                <Select
+                  label="الموسم"
+                  hideLabel
+                  value={filters.season}
+                  onChange={(event) => setFilter('season', event.target.value)}
+                  className="min-w-40 flex-1 lg:w-40 lg:flex-none"
+                >
+                  <option value="">كل المواسم</option>
+                  {seasons.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
+              {showExpiry ? (
+                <Select
+                  label="الصلاحية"
+                  hideLabel
+                  value={filters.expiry}
+                  onChange={(event) => setFilter('expiry', event.target.value as Filters['expiry'])}
+                  className="min-w-40 flex-1 lg:w-40 lg:flex-none"
+                >
+                  <option value="">كل الصلاحيات</option>
+                  <option value="soon">ينتهي قريباً</option>
+                  <option value="expired">منتهية</option>
+                </Select>
+              ) : null}
+              <Select
+                label="المخزون"
+                hideLabel
+                value={filters.stock}
+                onChange={(event) => setFilter('stock', event.target.value as Filters['stock'])}
+                className="min-w-40 flex-1 lg:w-40 lg:flex-none"
+              >
+                <option value="">كل المخزون</option>
+                <option value="out">نفد فقط</option>
+              </Select>
+              <Select
+                label="الترتيب"
+                hideLabel
+                value={filters.sort}
+                onChange={(event) => setFilter('sort', event.target.value as Filters['sort'])}
+                className="min-w-40 flex-1 lg:w-40 lg:flex-none"
+              >
+                <option value="name">بالاسم</option>
+                <option value="stock">الأقل مخزوناً أولاً</option>
+              </Select>
+              <SegmentedControl
+                label="حالة المنتج"
+                options={statusOptions}
+                value={filters.status}
+                onValueChange={(value) => setFilter('status', value)}
+                fullWidth
+                className="max-sm:w-full"
+              />
+            </div>
+          )}
+
+          {notice ? <Alert tone={notice.tone}>{notice.text}</Alert> : null}
+
+          {unknownCode ? (
+            <Alert tone="info">
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>
+                  لا منتج بهذا الباركود:{' '}
+                  <bdi dir="ltr" className="num">
+                    {unknownCode}
+                  </bdi>
+                </span>
+                {canManage ? (
+                  <Link
+                    to={`/products/new?barcode=${encodeURIComponent(unknownCode)}`}
+                    className={textLinkClass}
+                  >
+                    أضف منتجاً بهذا الباركود
+                  </Link>
+                ) : null}
+              </span>
+            </Alert>
+          ) : null}
+
+          {/* One attention line: no category, price zero, no picture; the explanations are behind the «i» */}
+          {items &&
+          filters.status === 'active' &&
+          !notice &&
+          !(zeroPrice === 0 && uncategorised <= dismissed.u && noPhoto <= dismissed.p) &&
+          ((canManage && uncategorised > 0) || zeroPrice > 0 || noPhoto > 0) ? (
+            <Alert tone={zeroPrice > 0 ? 'warning' : 'info'} className="[&>div]:flex-1">
+              <span className="flex flex-col gap-1.5" aria-label="تحتاج انتباهك">
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="min-w-0">
+                    {[
+                      canManage && uncategorised > 0 ? `${String(uncategorised)} بلا تصنيف` : null,
+                      zeroPrice > 0 ? `${String(zeroPrice)} بسعر صفر` : null,
+                      noPhoto > 0 ? `${String(noPhoto)} بلا صورة` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                  {/* The action is a button with words, on a phone too */}
+                  {(canManage && uncategorised > 0) || (canManage && noPhoto > 0) ? (
+                    <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      {canManage && noPhoto > 0 ? (
+                        <button type="button" className={textLinkClass} onClick={() => setPhotosOpen(true)}>
+                          أضف الصور
+                        </button>
+                      ) : null}
+                      {canManage && uncategorised > 0 ? (
+                        <button
+                          type="button"
+                          className={textLinkClass}
+                          disabled={loadingAuto}
+                          onClick={() => void categorizeAuto()}
+                        >
+                          صنّفها تلقائياً
+                        </button>
+                      ) : null}
+                    </span>
+                  ) : null}
+                  <span className="ms-auto flex shrink-0 items-center gap-1">
+                    {/* A word, not a second «i»: the alert already wears its own icon */}
+                    <button type="button" className={textLinkClass} onClick={() => setShowWhy((v) => !v)}>
+                      {showWhy ? 'أخفِ الشرح' : 'اشرح'}
+                    </button>
+                    {zeroPrice === 0 ? (
+                      <IconButton
+                        size="xs"
+                        label="أخفِ هذا التنبيه"
+                        icon={<CloseIcon size={16} />}
+                        onClick={() => dismissAttention({ u: uncategorised, p: noPhoto })}
+                      />
+                    ) : null}
+                  </span>
+                </span>
+                {showWhy ? (
+                  <span className="flex flex-col gap-1 text-sm">
+                    {canManage && uncategorised > 0 ? (
+                      <span>التصنيفات تُسهّل البحث والتقارير، وتُرتّب المتجر الإلكتروني.</span>
+                    ) : null}
+                    {zeroPrice > 0 ? (
+                      <span>بسعر صفر: تُباع مجاناً ولا تظهر في المتجر الإلكتروني.</span>
+                    ) : null}
+                    {noPhoto > 0 ? <span>الصورة تُظهرها على شاشة البيع وفي المتجر.</span> : null}
+                  </span>
+                ) : null}
+              </span>
+            </Alert>
+          ) : null}
+
+          <div ref={topRef}>
+            {phone && items && items.length > 0 ? (
+              <ul
+                aria-label="المنتجات"
+                className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line bg-surface shadow-e1"
+              >
+                {items.map((item) => {
+                  const cell = (key: string) => columns.find((c) => c.key === key)?.cell?.(item);
+                  return (
+                    <li key={item.id} className="flex flex-col gap-1 py-2.5 ps-3 pe-1">
+                      {/* Row 1: the name has the whole width; row 2: stock and category, then the price */}
+                      <div className="flex items-center gap-2">
+                        {canManage ? pickBox(item) : null}
+                        <Thumb
+                          item={item}
+                          canAdd={canManage && !item.archivedAt}
+                          sectors={me.tenant.sectors}
+                        />
+                        <Link
+                          to={`/products/${item.id}`}
+                          className="line-clamp-2 min-w-0 flex-1 rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
+                        >
+                          {item.nameAr}
+                        </Link>
+                        {canManage ? rowMenu(item) : null}
+                      </div>
+                      <div className="flex items-center justify-between gap-3 ps-12">
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-ink-muted">
+                          {item.type === 'service' ? (
+                            <span>خدمة</span>
+                          ) : (
+                            <>
+                              <span
+                                className={cn(
+                                  'shrink-0 font-semibold',
+                                  availableOf(item) === 0 && 'text-warning-ink',
+                                )}
+                              >
+                                {availableOf(item) === 0
+                                  ? 'نفد'
+                                  : `${formatQuantity(availableOf(item), digits)} ${countWord(availableOf(item), { one: 'قطعة', few: 'قطع' })}`}
+                              </span>
+                              {negativeWords(item, digits) ? (
+                                <span className="shrink-0 text-danger-ink">
+                                  · {negativeWords(item, digits)}
+                                </span>
+                              ) : null}
+                            </>
+                          )}
+                          {item.categoryName && item.type !== 'service' ? (
+                            <span className="min-w-0 truncate text-ink-subtle">· {item.categoryName}</span>
+                          ) : null}
+                          {item.archivedAt || item.status === 'temporary' ? cell('status') : null}
+                        </span>
+                        <span className="shrink-0 text-sm font-semibold whitespace-nowrap">
+                          {cell('price')}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <DataTable
+                caption="المنتجات"
+                columns={columns}
+                rows={items ?? []}
+                rowKey={(item) => item.id}
+                loading={items === null && !loadError}
+                error={loadError ?? undefined}
+                onRetry={load}
+                empty={
+                  filtered ? (
+                    <EmptyState
+                      icon={ProductsIcon}
+                      title={noSearch ? EMPTY_STATUS_TITLE[filters.status] : 'لا منتجات تطابق بحثك.'}
+                      description={noSearch ? undefined : 'جرّب كلمة أخرى أو تصنيفاً آخر.'}
+                      action={
+                        <Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>
+                          امسح البحث والتصفية
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <EmptyState
+                      icon={ProductsIcon}
+                      title="لا منتجات بعد."
+                      description="أضف منتجك الأول باسمه وسعره وباركوده، فيصل إلى أجهزة الكاشير."
+                      action={canManage ? addProduct : null}
+                    />
+                  )
+                }
+              />
+            )}
+          </div>
+
+          {canManage && selected.size > 0 ? (
+            <div
+              role="group"
+              aria-label="المحددة"
+              className="sticky bottom-3 z-20 flex flex-wrap items-center gap-3 rounded-card border border-brand bg-brand-soft px-4 py-2.5 shadow-e2"
+            >
+              <span className="font-semibold text-brand-ink">
+                <bdi className="num">{selected.size}</bdi> محددة
+              </span>
+              <Button variant="primary" onClick={categorizeSelected}>
+                صنّف المحددة
+              </Button>
+              <Button variant="secondary" onClick={() => setSelected(new Set())}>
+                ألغِ التحديد
+              </Button>
+            </div>
+          ) : null}
+
+          {items ? <Pager noun="المنتجات" pager={pager} /> : null}
+        </div>
+      </SalesPage>
+      {canManage ? (
+        <BulkPhotos open={photosOpen} onClose={() => setPhotosOpen(false)} onDone={() => load()} />
+      ) : null}
+      {canManage ? (
+        <CategorizeDialog
+          open={categorizing !== null}
+          onClose={() => setCategorizing(null)}
+          products={categorizing ?? []}
+          categories={categories}
+          sectors={me.tenant.sectors}
+          onDone={(changed, created) => {
+            setSelected(new Set());
+            setNotice({
+              tone: 'success',
+              text:
+                created > 0
+                  ? `صنّفنا ${countNoun(changed, COUNT_NOUNS.product)} وأضفنا ${countNoun(created, COUNT_NOUNS.category)} جديدة.`
+                  : `صنّفنا ${countNoun(changed, COUNT_NOUNS.product)}.`,
+            });
+            listCategories()
+              .then((answer) => setCategories(answer.items))
+              .catch(() => undefined);
+            load();
+          }}
+        />
+      ) : null}
+    </>
   );
 }

@@ -14,6 +14,8 @@ export const DOC_SERIES = {
   receipt: 'RCV',
   // A gift voucher sold at the till (03 › الألبسة: قسيمة هدية)
   gift_voucher: 'GFT',
+  // An alteration or order deposit (D4): the money in and owed like a gift voucher, but its own document
+  deposit: 'DEP',
   cash_movement: 'CSH',
   shift_open: 'SFT',
   shift_close: null,

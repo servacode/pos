@@ -41,6 +41,103 @@ function openProducts(routes: Routes = {}, permissions?: Permission[], path = '/
   return { ...mock, ...renderApp(path) };
 }
 
+describe('/products list on a phone and the export', () => {
+  it('shows cards instead of a table that does not fit, with price, stock and category on each', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      openProducts();
+      const cards = await screen.findByRole('list', { name: 'المنتجات' });
+      expect(screen.queryByRole('table', { name: 'المنتجات' })).not.toBeInTheDocument();
+      const first = within(cards).getAllByRole('listitem')[0]!;
+      expect(first).toHaveTextContent('حليب المراعي 1 لتر');
+      expect(first).toHaveTextContent('ألبان وأجبان');
+      expect(shownText(first)).toContain('150 ل.س');
+      // one primary «+ منتج»; the export, the photos and the import sit behind «⋯»
+      expect(screen.getAllByRole('link', { name: 'أضف منتجاً' })).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: 'صدّر الجدول' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'المزيد من الإجراءات' })).toBeInTheDocument();
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it('folds the numbers and the filters away on a phone: one search row, a «تصفية» sheet, a one-line banner', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      openProducts({
+        [list()]: {
+          status: 200,
+          body: {
+            items: [listItem(), tea],
+            nextCursor: null,
+            totals: { products: 12, variants: 30, pieces: 1_160_000, negative: 0, runOut: 2, lowest: null },
+            attention: { zeroPrice: 0, noPhoto: 5, uncategorised: 3 },
+          },
+        },
+      });
+      await screen.findByRole('list', { name: 'المنتجات' });
+      // the tiles wait behind one line
+      expect(screen.queryByText('القطع في المخزون')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /الأرقام/ }));
+      expect(await screen.findByText('القطع في المخزون')).toBeInTheDocument();
+      // the selects are not on the page until «تصفية» opens
+      expect(screen.queryByRole('combobox', { name: 'التصنيف' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'تصفية' }));
+      expect(await screen.findByRole('combobox', { name: 'التصنيف' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog')).toHaveTextContent('تصفية المنتجات');
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it('offers «صدّر الجدول» for the whole search', async () => {
+    openProducts();
+    expect(await screen.findByRole('button', { name: 'صدّر الجدول' })).toBeInTheDocument();
+  });
+});
+
+describe('/products list: attention and sellable stock', () => {
+  it('shows the shelf total as the number, with what can be sold under it, when expired or blocked batches hold some back', async () => {
+    openProducts({
+      [list()]: page([listItem({ stockQty: 319_000, sellableQty: 219_000 })]),
+    });
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    expect(await within(table).findByText(/متوفر للبيع/)).toHaveTextContent('متوفر للبيع 219');
+    expect(within(table).getByText('319', { exact: false })).toBeInTheDocument();
+  });
+
+  it('keeps the uncategorised banner to one line with the services left out, and lets «بلا صورة» be dismissed', async () => {
+    localStorage.removeItem('serva.products.attention');
+    openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [listItem({ hasImage: false })],
+          nextCursor: null,
+          attention: { zeroPrice: 0, noPhoto: 12, expiringSoon: 0, uncategorised: 0 },
+        },
+      },
+    });
+    const line = await screen.findByLabelText('تحتاج انتباهك');
+    expect(line).toHaveTextContent('12 بلا صورة');
+    expect(line).not.toHaveTextContent('بلا تصنيف');
+    fireEvent.click(screen.getByRole('button', { name: 'أخفِ هذا التنبيه' }));
+    expect(screen.queryByLabelText('تحتاج انتباهك')).not.toBeInTheDocument();
+  });
+});
+
 describe('/products list', () => {
   it('shows each product with its category, price, stock and barcode, and the menu item active', async () => {
     openProducts();
@@ -62,11 +159,85 @@ describe('/products list', () => {
     expect(shownText(rows[2])).toContain('300 ل.س – 350 ل.س');
     expect(rows[2]).toHaveTextContent('بلا تصنيف');
     expect(within(rows[2]!).queryByRole('button', { name: /عدّل سعر/ })).not.toBeInTheDocument();
-    expect(within(rows[2]!).getByText('-2.500')).toHaveClass('text-danger-ink');
+    expect(within(rows[2]!).getByText(/2\.500/)).toHaveClass('text-danger-ink');
 
     const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
     expect(within(nav).getByRole('link', { name: 'المنتجات' })).toHaveAttribute('aria-current', 'page');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
+  });
+
+  it('says in one line how many products of the whole store sell at 0 and have no photo', async () => {
+    openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [listItem({ hasImage: true })],
+          nextCursor: null,
+          attention: { zeroPrice: 7, noPhoto: 40, uncategorised: 3 },
+        },
+      },
+    });
+    const line = await screen.findByLabelText('تحتاج انتباهك');
+    expect(line).toHaveTextContent('3 بلا تصنيف · 7 بسعر صفر · 40 بلا صورة');
+    // the explanations wait behind the «i»
+    expect(screen.queryByText(/تُباع مجاناً/)).not.toBeInTheDocument();
+    fireEvent.click(within(line).getByRole('button', { name: 'اشرح' }));
+    expect(await screen.findByText(/تُباع مجاناً/)).toBeInTheDocument();
+  });
+
+  it('keeps the tiles whole-store while a search narrows the list', async () => {
+    const totals = { products: 12, variants: 30, pieces: 1_160_000, negative: 0, runOut: 2, lowest: null };
+    openProducts({
+      [list()]: { status: 200, body: { items: [listItem(), tea], nextCursor: null, totals } },
+      [list({ q: 'شاي' })]: page([tea]),
+    });
+    expect(await screen.findByText('12')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'ابحث بالاسم أو الباركود' }), {
+      target: { value: 'شاي' },
+    });
+    await screen.findByText('شاي ربيع 400 غ');
+    await vi.waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(2));
+    expect(screen.getByText('12')).toBeInTheDocument();
+    expect(screen.getByText('نفد')).toBeInTheDocument();
+  });
+
+  it('proposes a category from each name, lets the owner review, then sets them on the ticked rows', async () => {
+    const patches: unknown[] = [];
+    const glove = listItem({ id: ids.other, nameAr: 'قفازات طبية', categoryId: null, categoryName: null });
+    const medical = catalogMe();
+    openProducts({
+      'GET /v1/me': {
+        status: 200,
+        body: { ...medical, tenant: { ...medical.tenant, sectors: ['medical_supplies'] } },
+      },
+      [list()]: page([glove]),
+      [`PATCH /v1/products/${ids.other}`]: (request) => {
+        patches.push(request.body);
+        return { status: 200, body: product({ id: ids.other, version: 2 }) };
+      },
+      'POST /v1/categories': {
+        status: 201,
+        body: {
+          id: ids.milk,
+          name: 'مستهلكات',
+          parentId: null,
+          sortOrder: 0,
+          productCount: 0,
+          archivedAt: null,
+          version: 1,
+        },
+      },
+    });
+    await screen.findByText('قفازات طبية');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'حدّد «قفازات طبية»' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'صنّف المحددة' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('combobox', { name: 'تصنيف «قفازات طبية»' })).toHaveDisplayValue(
+      'مستهلكات (جديد)',
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: /طبّق على 1/ }));
+    await vi.waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0]).toMatchObject({ categoryId: ids.milk });
   });
 
   it('shows the loading rows first', async () => {
@@ -146,11 +317,17 @@ describe('/products list', () => {
     });
     await screen.findByText('حليب المراعي 1 لتر');
 
-    await user.click(screen.getByRole('button', { name: 'اعرض المزيد' }));
+    expect(screen.getByRole('button', { name: 'الصفحة السابقة' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'الصفحة التالية' }));
 
     expect(await screen.findByText('شاي ربيع 400 غ')).toBeInTheDocument();
-    expect(screen.getByText('حليب المراعي 1 لتر')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'اعرض المزيد' })).not.toBeInTheDocument();
+    expect(screen.queryByText('حليب المراعي 1 لتر')).not.toBeInTheDocument();
+    expect(screen.getByText(/صفحة/)).toHaveTextContent('صفحة 2 · المنتجات من 2 إلى 2');
+    expect(screen.getByRole('button', { name: 'الصفحة التالية' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'الصفحة السابقة' }));
+    expect(await screen.findByText('حليب المراعي 1 لتر')).toBeInTheDocument();
+    expect(screen.queryByText('شاي ربيع 400 غ')).not.toBeInTheDocument();
   });
 
   it('says there is no product yet and offers the first one', async () => {
@@ -184,7 +361,7 @@ describe('/products list', () => {
   });
 
   it('hides adding and price editing from whoever cannot change the catalog', async () => {
-    openProducts({}, ['sale.create']);
+    openProducts({}, ['accounting.view']);
 
     await screen.findByText('حليب المراعي 1 لتر');
     expect(screen.queryByRole('link', { name: 'أضف منتجاً' })).not.toBeInTheDocument();
@@ -275,6 +452,28 @@ describe('editing a price in place', () => {
     expect(shownText(screen.getByRole('table'))).toContain('175 ل.س');
   });
 
+  it('asks before a price of zero is saved from the list: the second «احفظ» confirms', async () => {
+    const { user, requestsTo } = openProducts({
+      [`PATCH /v1/products/${ids.milk}`]: {
+        status: 200,
+        body: product({ version: 4, variants: [] }),
+      },
+    });
+    await screen.findByText('حليب المراعي 1 لتر');
+
+    await user.click(screen.getByRole('button', { name: 'عدّل سعر «حليب المراعي 1 لتر»' }));
+    const field = screen.getByLabelText('السعر الجديد لـ«حليب المراعي 1 لتر»');
+    await user.clear(field);
+    await user.type(field, '0');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/سيُباع «حليب المراعي 1 لتر» مجاناً/)).toBeInTheDocument();
+    expect(requestsTo('PATCH', `/v1/products/${ids.milk}`)).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/حُفظ سعر «حليب المراعي 1 لتر»/)).toBeInTheDocument();
+    expect(requestsTo('PATCH', `/v1/products/${ids.milk}`)).toHaveLength(1);
+  });
+
   it('reloads the list when someone changed the product first', async () => {
     const { user, requestsTo } = openProducts({
       [`PATCH /v1/products/${ids.milk}`]: apiError(409, 'stale_version', 'تغيّر السجل.'),
@@ -303,5 +502,189 @@ describe('editing a price in place', () => {
 
     expect(screen.getByText('اكتب السعر')).toBeInTheDocument();
     expect(requestsTo('PATCH', `/v1/products/${ids.milk}`)).toHaveLength(0);
+  });
+});
+
+describe('/products list: photos, expiry and stock', () => {
+  it('shows each product’s first picture, and an «أضف صورة» link on one without', async () => {
+    openProducts({
+      [list()]: page([
+        listItem({ hasImage: true, thumbUrl: '/v1/images/t/u1?size=thumb' }),
+        listItem({ id: ids.other, nameAr: 'شاي', hasImage: false, thumbUrl: null }),
+      ]),
+    });
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    await within(table).findByRole('link', { name: 'أضف صورة لـ«شاي»' });
+    expect(table.querySelector('img[src^="/v1/images"]')).toHaveAttribute(
+      'src',
+      '/v1/images/t/u1?size=thumb',
+    );
+    expect(within(table).getByRole('link', { name: 'أضف صورة لـ«شاي»' })).toHaveAttribute(
+      'href',
+      `/products/${ids.other}#images`,
+    );
+  });
+
+  it('shows the net number, with what can be sold told once under it, and a kind icon where there is no photo', async () => {
+    openProducts({
+      [list()]: page([listItem({ stockQty: 14_000, sellableQty: 16_000, hasImage: false, thumbUrl: null })]),
+    });
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    expect(await within(table).findByText(/متوفر للبيع/)).toHaveTextContent('متوفر للبيع 16');
+    expect(within(table).getByText('14', { exact: false })).toBeInTheDocument();
+    // no letter box: the picture's place holds an icon
+    expect(table.querySelector('a[href$="#images"] svg')).not.toBeNull();
+  });
+
+  it('adds up only positive stock and says how many are below zero', async () => {
+    openProducts();
+    await screen.findByText('القطع في المخزون');
+    // 94 on the shelf; the −2.5 of the other product is not netted off, it is counted apart
+    // …and it is told once, inside the «نفد» tile, not as a second count beside the pieces
+    expect(await screen.findByText(/منها سالب 1/)).toBeInTheDocument();
+    expect(screen.queryByText('صنف واحد ناقص')).not.toBeInTheDocument();
+  });
+
+  it('tells a negative stock apart with «سالب» and offers the count and the receiving', async () => {
+    openProducts();
+    expect((await screen.findAllByText(/سالب|-2\.500/)).length).toBeGreaterThan(0);
+    // «سالب N» once on the «نفد» tile, with one action
+    expect(await screen.findByText(/منها سالب 1/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'اجرد المخزون' })).toHaveAttribute('href', '/inventory');
+    expect(screen.queryByRole('link', { name: 'سجّل استلاماً' })).not.toBeInTheDocument();
+  });
+
+  it('says a service has no shelf price, instead of 0', async () => {
+    openProducts({
+      [list()]: page([
+        listItem({
+          id: ids.other,
+          nameAr: 'تقصير',
+          type: 'service',
+          price: { currency: 'SYP', minMinor: 0, maxMinor: 0 },
+          stockQty: 0,
+        }),
+      ]),
+    });
+    expect(await screen.findByText('خدمة · السعر عند البيع')).toBeInTheDocument();
+  });
+
+  it('shows the nearest expiry, a «ينتهي خلال 30 يوماً» tile and the filter', async () => {
+    const { requestsTo, user } = openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [
+            listItem({ nearestExpiry: '2020-01-05' }),
+            listItem({ id: ids.other, nearestExpiry: null }),
+          ],
+          nextCursor: null,
+          attention: { zeroPrice: 0, noPhoto: 0, expiringSoon: 4 },
+        },
+      },
+      [list({ expiry: 'soon' })]: page([listItem()]),
+    });
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    expect(await within(table).findByRole('columnheader', { name: 'ينتهي' })).toBeInTheDocument();
+    expect(within(table).getAllByText('منتهية').length).toBeGreaterThan(0);
+    expect(screen.getByText('ينتهي خلال 30 يوماً')).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('الصلاحية'), 'soon');
+    await vi.waitFor(() =>
+      expect(requestsTo('GET', productsPath({ status: 'active', limit: 50, expiry: 'soon' }))).toHaveLength(
+        1,
+      ),
+    );
+  });
+});
+
+describe('/products list: photos in bulk', () => {
+  it('opens the bulk-photo window, which says how files are matched', async () => {
+    const { user } = openProducts();
+    await user.click(await screen.findByRole('button', { name: /^أضف صوراً دفعة واحدة/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/سمِّ كل ملف باسم المنتج أو باركوده/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('ملفات الصور')).toHaveAttribute('multiple');
+    expect(within(dialog).getByRole('button', { name: 'ارفع الصور' })).toBeDisabled();
+  });
+});
+
+describe('/products list: round 48', () => {
+  it('a tile applies the filter it counts', async () => {
+    const { user, requestsTo } = openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [listItem()],
+          nextCursor: null,
+          totals: { products: 3, variants: 3, pieces: 9_000, negative: 0, runOut: 2, lowest: null },
+        },
+      },
+      [list({ stock: 'out' })]: page([listItem()]),
+    });
+    await user.click(await screen.findByRole('button', { name: 'اعرض ما نفد فقط' }));
+    await vi.waitFor(() =>
+      expect(requestsTo('GET', productsPath({ status: 'active', limit: 50, stock: 'out' }))).toHaveLength(1),
+    );
+  });
+});
+
+describe('round 50: the margin column, the status counts and the accountant', () => {
+  it('shows the margin to who sees costs, and says when the price is under the cost', async () => {
+    openProducts(
+      {
+        [list({ cost: '1' })]: page([
+          listItem({ costMinor: 6_000 }),
+          listItem({ id: ids.other, nameAr: 'بضاعة خاسرة', costMinor: 99_999_000 }),
+          listItem({ id: 'no-cost', nameAr: 'بلا تكلفة', costMinor: null }),
+        ]),
+      },
+      ['catalog.manage', 'cost.view'],
+    );
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    await within(table).findByText('بضاعة خاسرة');
+    expect(within(table).getByRole('columnheader', { name: 'الهامش' })).toBeInTheDocument();
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows[1]).toHaveTextContent('السعر أقل من التكلفة');
+    expect(rows[0]).toHaveTextContent('60٪');
+    expect(rows[2]).not.toHaveTextContent('٪');
+  });
+
+  it('works the margin on the price averaged over the stocked sizes, not the cheapest size', async () => {
+    openProducts({ [list({ cost: '1' })]: page([listItem({ costMinor: 6_000, costPriceMinor: 12_000 })]) }, [
+      'catalog.manage',
+      'cost.view',
+    ]);
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    await within(table).findByText('٪');
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('50٪');
+  });
+
+  it('has no margin column for who does not see costs', async () => {
+    openProducts();
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    expect(within(table).queryByRole('columnheader', { name: 'الهامش' })).not.toBeInTheDocument();
+  });
+
+  it('writes the count beside each status', async () => {
+    openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [listItem()],
+          nextCursor: null,
+          statusCounts: { active: 38, temporary: 2, archived: 7 },
+        },
+      },
+    });
+    await screen.findByRole('table', { name: 'المنتجات' });
+    expect(await screen.findByRole('radio', { name: /المؤرشفة · 7/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /من الكاشير · 2/ })).toBeInTheDocument();
+  });
+
+  it('lets the accountant take the list to a sheet without any way to add or change a product', async () => {
+    openProducts({}, ['accounting.view']);
+    await screen.findByRole('table', { name: 'المنتجات' });
+    expect(screen.getByRole('button', { name: 'صدّر الجدول' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'أضف منتجاً' })).not.toBeInTheDocument();
   });
 });

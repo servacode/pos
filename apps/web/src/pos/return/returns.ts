@@ -1,9 +1,17 @@
+import type { InvoiceHit, InvoiceLookup } from '@serva/core/contracts/till';
 import type { ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
 import type { ReturnedLine } from '@serva/core/sale-return';
+import { returnWindowDays } from '@serva/core/contracts/till';
+import type { SettingsRow } from '@serva/core/contracts/catalog';
 import type { OutboxEntry } from '@serva/sync';
+import { APP_VERSION } from '../../offline/sync';
+import { normalizeArabic } from '@serva/core/text';
+import { EXPIRY_SECTORS, storeSells } from '../../lib/sectors';
+import { phoneKey } from '../phoneKey';
 
-/** How far back the till looks for an invoice to return from (08 › مرتجع مبيعات) */
-export const RETURN_WINDOW_DAYS = 7;
+/** The days the till looks back for an invoice to return from: the store's setting, else by business type */
+export const returnWindowOf = (settings: Pick<SettingsRow, 'till' | 'sectors'>): number =>
+  returnWindowDays(settings.till, settings.sectors);
 
 export interface ReturnableSale {
   id: string;
@@ -17,10 +25,14 @@ export interface ReturnableSale {
 /**
  * The invoices of this till within the window, newest first, each with what was returned from
  * it here. Another till's returns of the same invoice reach the server, which flags an
- * over-return; this till only knows its own.
+ * over-return; this till only knows its own (an invoice found on the server brings the count).
  */
-export function returnableSales(entries: readonly OutboxEntry[], now: number): ReturnableSale[] {
-  const since = now - RETURN_WINDOW_DAYS * 86_400_000;
+export function returnableSales(
+  entries: readonly OutboxEntry[],
+  now: number,
+  windowDays = 7,
+): ReturnableSale[] {
+  const since = now - windowDays * 86_400_000;
   const returned = new Map<string, ReturnedLine[]>();
   for (const { doc } of entries) {
     if (doc.type !== 'return') continue;
@@ -38,12 +50,139 @@ export function returnableSales(entries: readonly OutboxEntry[], now: number): R
       sale: e.doc.payload as unknown as SalePayload,
       returned: returned.get(e.doc.id) ?? [],
     }))
-    .sort((a, b) => b.deviceTime.localeCompare(a.deviceTime));
+    .sort((a, b) => Date.parse(b.deviceTime) - Date.parse(a.deviceTime));
+}
+
+/**
+ * An invoice the server found (sold on any till of the store), or null when it is outside the
+ * window. What this till returned from it in the meantime and the server has not seen yet is added.
+ */
+export function saleFromServer(
+  found: InvoiceLookup,
+  entries: readonly OutboxEntry[],
+  now: number,
+  windowDays: number,
+): ReturnableSale | null {
+  if (Date.parse(found.deviceTime) < now - windowDays * 86_400_000) return null;
+  const here = returnableSales(entries, now, 3650).find((s) => s.id === found.id);
+  // The server's count includes this till's synced returns; take the larger, never both
+  const own = here?.returned.reduce((n, r) => n + r.qty, 0) ?? 0;
+  const theirs = found.returned.reduce((n, r) => n + r.qty, 0);
+  return {
+    id: found.id,
+    number: found.number,
+    deviceTime: found.deviceTime,
+    sale: found.payload as SalePayload,
+    returned: own > theirs && here ? here.returned : found.returned,
+  };
 }
 
 /** Matches the typed number by its end, as printed on the receipt («154» finds …-0000154) */
 export function matchesNumber(number: string, typed: string): boolean {
   const digits = typed.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g, '');
   if (!digits) return true;
-  return number.replace(/\D/g, '').endsWith(digits) || number.includes(typed.trim());
+  // The end of the number, or the number typed whole or from its start («INV-001-014» finds «INV-001-014-1»)
+  return (
+    number.replace(/\D/g, '').endsWith(digits) || number.toUpperCase().includes(typed.trim().toUpperCase())
+  );
+}
+
+/**
+ * One search box for the till's own invoices: the end of the number, or part of the customer's name
+ * or phone (the phone is read from the customers the till knows).
+ */
+export function matchesInvoice(
+  sale: ReturnableSale,
+  typed: string,
+  customers: readonly { id: string; name: string; phone?: string | null }[],
+): boolean {
+  const text = typed.trim();
+  if (!text) return true;
+  const hasDigit = /[0-9٠-٩]/.test(text);
+  if (hasDigit && matchesNumber(sale.number, typed)) return true;
+  const known = customers.find((c) => c.id === sale.sale.customerId);
+  const name = normalizeArabic(sale.sale.customerName ?? known?.name ?? '');
+  if (name && name.includes(normalizeArabic(text))) return true;
+  const key = phoneKey(text);
+  return key.length >= 3 && phoneKey(known?.phone ?? '').includes(key);
+}
+
+/** The reason of a box that is broken or past its date: it cannot be «sealed and untouched» */
+export const DAMAGED_REASON = 'تالف أو منتهي الصلاحية';
+
+const FASHION_REASONS = ['المقاس غير مناسب', 'عيب في القطعة', 'لم يعجب الزبون', 'تبديل'] as const;
+
+/**
+ * Why a piece comes back, by what the store sells: a clothes shop talks about sizes and defects, a
+ * grocery about expiry. «تالف أو منتهي الصلاحية» is the default only where expiry applies; a store with no
+ * business type set gets the general list.
+ */
+export function returnReasons(sectors: SettingsRow['sectors']): string[] {
+  const fashion = sectors !== undefined && sectors.includes('clothing');
+  const expiry = storeSells(sectors, EXPIRY_SECTORS);
+  // Medicines and medical supplies: the first (default) reason is a sealed box, never «تالف»: the cashier chooses damage
+  if (!fashion && sectors?.includes('medical_supplies') && !sectors.includes('pharmacy')) {
+    return [
+      'لم يُستعمل / علبة مغلقة',
+      'تالف أو منتهي الصلاحية',
+      'الزبون غيّر رأيه',
+      'تبديل',
+      'خطأ في الفاتورة',
+    ];
+  }
+  if (!fashion) return ['تالف أو منتهي الصلاحية', 'الزبون غيّر رأيه', 'تبديل', 'خطأ في الفاتورة'];
+  return [...FASHION_REASONS, ...(expiry ? ['تالف أو منتهي الصلاحية'] : []), 'خطأ في الفاتورة'];
+}
+
+/** The reason a return starts on: never «تالف»: sellable is the default, damaged is the cashier's own choice (round 39) */
+export const defaultReason = (reasons: readonly string[]): string =>
+  reasons.find((r) => r !== DAMAGED_REASON) ?? reasons[0]!;
+
+export type InvoiceSearch = { found: InvoiceLookup } | { found: null; reason: 'missing' | 'offline' };
+
+/**
+ * GET /v1/device/invoices/lookup (`Authorization: Device <token>`): finds an invoice of any till of
+ * the store by its number or its receipt's barcode. `offline` when there is no answer at all.
+ */
+export async function searchInvoice(
+  q: string,
+  token: string,
+  fetchFn: typeof fetch = (...args) => globalThis.fetch(...args),
+): Promise<InvoiceSearch> {
+  try {
+    const res = await fetchFn(`/v1/device/invoices/lookup?q=${encodeURIComponent(q.trim())}&quiet=1`, {
+      headers: { Accept: 'application/json', Authorization: `Device ${token}`, 'X-App-Version': APP_VERSION },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (res.status === 404) return { found: null, reason: 'missing' };
+    if (!res.ok) return { found: null, reason: 'offline' };
+    const body = (await res.json()) as InvoiceLookup | { invoice: null };
+    // `quiet=1`: «not found» comes back as 200 {invoice:null}, so the console stays clean
+    if ('invoice' in body && body.invoice === null) return { found: null, reason: 'missing' };
+    return { found: body as InvoiceLookup };
+  } catch {
+    return { found: null, reason: 'offline' };
+  }
+}
+
+/**
+ * GET /v1/device/invoices/search (`Authorization: Device <token>`): the store's recent invoices of any
+ * till, found by the customer's name, phone in any form, or the end of the number. Null when offline.
+ */
+export async function searchInvoices(
+  q: string,
+  days: number,
+  token: string,
+  fetchFn: typeof fetch = (...args) => globalThis.fetch(...args),
+): Promise<InvoiceHit[] | null> {
+  try {
+    const res = await fetchFn(`/v1/device/invoices/search?q=${encodeURIComponent(q.trim())}&days=${days}`, {
+      headers: { Accept: 'application/json', Authorization: `Device ${token}`, 'X-App-Version': APP_VERSION },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { invoices: InvoiceHit[] }).invoices;
+  } catch {
+    return null;
+  }
 }

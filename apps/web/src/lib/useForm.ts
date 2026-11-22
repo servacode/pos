@@ -34,6 +34,14 @@ export function useForm<TValues extends object, TData>({
     focusFirstError(formRef.current, fieldOrder, fieldErrors);
   }
 
+  /** On leaving a field: its own message appears now, without waiting for the save (nothing is focused or cleared elsewhere) */
+  function validateField(name: keyof TValues & string) {
+    const result = validate(values);
+    if (result.success) return;
+    const message = issuesToFieldErrors(result.error.issues)[name];
+    if (message) setErrors((current) => ({ ...current, [name]: message }));
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting) return;
@@ -59,5 +67,5 @@ export function useForm<TValues extends object, TData>({
     }
   }
 
-  return { formRef, values, setValue, errors, formError, submitting, handleSubmit };
+  return { formRef, values, setValue, validateField, errors, formError, submitting, handleSubmit };
 }

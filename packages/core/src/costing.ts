@@ -105,3 +105,24 @@ export function stockOut(s: StockValue, qty: number): { costMinor: number; after
   }
   return { costMinor, after: { ...s, qty: s.qty - qty, valueMinor: s.valueMinor - costMinor } };
 }
+
+/**
+ * Goods out at a value fixed beforehand: a posted purchase turned back, which takes out what it put in
+ * (round 36, decision 12). The last pieces take all the value left, so no qirsh is stranded; the value
+ * out is returned, and the caller books any difference from `valueMinor` as a cost variance (5100).
+ */
+export function stockOutAtValue(
+  s: StockValue,
+  qty: number,
+  valueMinor: number,
+): { valueOutMinor: number; after: StockValue } {
+  assertQty(qty);
+  if (!Number.isSafeInteger(valueMinor) || valueMinor < 0) {
+    throw new RangeError(`valueMinor must be a non-negative integer, got ${valueMinor}`);
+  }
+  const valueOutMinor = s.qty > 0 && qty >= s.qty ? s.valueMinor : valueMinor;
+  return {
+    valueOutMinor,
+    after: withRef({ ...s, qty: s.qty - qty, valueMinor: s.valueMinor - valueOutMinor }),
+  };
+}

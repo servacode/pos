@@ -1,16 +1,20 @@
 import { useState } from 'react';
-import type { StoreResponse } from '@serva/core';
+import { parseDecimal, type StoreResponse } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
-import { Alert, Button, Card, Switch, TextField } from '@serva/ui';
+import { Button, Switch, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { saveLoyalty } from './api';
+import { FailedNote, SavedNote, SETTINGS_SECTIONS, SettingsCard } from './parts';
 
-/** Whole amounts in the store's currency to minor units («1000» → 100,000); null while unusable. */
+/** An amount in the store's currency to minor units («1000» → 100,000, «0.5» → 50), Arabic digits too; null while unusable. */
 function minorOf(text: string, decimals: number): number | null {
-  const clean = text.replace(/[,\s]/g, '').replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
-  if (!clean || [...clean].some((c) => c < '0' || c > '9')) return null;
-  const n = Number(clean) * 10 ** decimals;
-  return Number.isSafeInteger(n) && n > 0 ? n : null;
+  if (!text.trim()) return null;
+  try {
+    const n = Number(parseDecimal(text, decimals));
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -54,52 +58,62 @@ export function LoyaltyForm({
     }
   }
 
+  const symbol = CURRENCIES[store.baseCurrency].symbolAr;
+
   return (
-    <Card>
-      <form
-        aria-label="نقاط الولاء"
-        className="flex flex-col gap-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-      >
-        <Switch
-          label="الزبون يجمع نقاطاً"
-          description="لكل زبون مختار على الفاتورة. يصرفها على الكاشير عند الدفع من «نقاط»."
-          checked={enabled}
-          onCheckedChange={setEnabled}
-        />
-        {enabled ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField
-              label="نقطة لكل"
-              hint={`بالـ${CURRENCIES[store.baseCurrency].symbolAr} من المشتريات`}
-              dir="ltr"
-              inputMode="numeric"
-              value={every}
-              onChange={(e) => setEvery(e.target.value.slice(0, 12))}
-              error={earnEveryMinor === null ? 'اكتب مبلغاً' : undefined}
-            />
-            <TextField
-              label="قيمة النقطة"
-              hint="ما تخصمه النقطة عند الصرف"
-              dir="ltr"
-              inputMode="numeric"
-              value={value}
-              onChange={(e) => setValue(e.target.value.slice(0, 12))}
-              error={pointValueMinor === null ? 'اكتب مبلغاً' : undefined}
-            />
-          </div>
-        ) : null}
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        {saved ? <Alert tone="success">حُفظ، ويصل إلى أجهزة الكاشير مع أول اتصال.</Alert> : null}
-        <div>
-          <Button type="submit" loading={saving} disabled={enabled && (!earnEveryMinor || !pointValueMinor)}>
+    <SettingsCard
+      section={SETTINGS_SECTIONS.loyalty}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+      footer={
+        <>
+          {error ? <FailedNote>{error}</FailedNote> : null}
+          {saved ? <SavedNote>حُفظ، ويصل إلى أجهزة الكاشير مع أول اتصال.</SavedNote> : null}
+          <Button
+            type="submit"
+            loading={saving}
+            disabled={enabled && (!earnEveryMinor || !pointValueMinor)}
+            className="max-sm:w-full"
+          >
             احفظ
           </Button>
+        </>
+      }
+    >
+      <Switch
+        label="الزبون يجمع نقاطاً"
+        description="لكل زبون مختار على الفاتورة. يصرفها على الكاشير عند الدفع من «نقاط»."
+        checked={enabled}
+        onCheckedChange={setEnabled}
+      />
+      {enabled ? (
+        <div className="grid gap-5 border-t border-line pt-5 sm:grid-cols-2">
+          <TextField
+            label="نقطة لكل"
+            hint="من مشتريات الزبون"
+            dir="ltr"
+            inputMode="numeric"
+            inputClassName="num"
+            endAdornment={<span className="me-3 text-sm">{symbol}</span>}
+            value={every}
+            onChange={(e) => setEvery(e.target.value.slice(0, 12))}
+            error={earnEveryMinor === null ? 'اكتب مبلغاً' : undefined}
+          />
+          <TextField
+            label="قيمة النقطة"
+            hint="ما تخصمه النقطة عند الصرف"
+            dir="ltr"
+            inputMode="numeric"
+            inputClassName="num"
+            endAdornment={<span className="me-3 text-sm">{symbol}</span>}
+            value={value}
+            onChange={(e) => setValue(e.target.value.slice(0, 12))}
+            error={pointValueMinor === null ? 'اكتب مبلغاً' : undefined}
+          />
         </div>
-      </form>
-    </Card>
+      ) : null}
+    </SettingsCard>
   );
 }

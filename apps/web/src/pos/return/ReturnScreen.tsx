@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   REFUND_METHODS,
   type Approval,
@@ -7,29 +7,68 @@ import {
 } from '@serva/core/contracts/documents';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
-import { buildReturnPayload, defaultRefundMethod, returnableLines } from '@serva/core/sale-return';
+import { INSTALMENT_FEE_VARIANT_ID } from '@serva/core/installments';
+import {
+  buildReturnPayload,
+  defaultForeignRefund,
+  defaultRefundMethod,
+  paidForeign,
+  returnableLines,
+  withInstalmentFee,
+} from '@serva/core/sale-return';
+import { convert, toMinor } from '@serva/core/money';
 import type { OutboxEntry, SyncDocument } from '@serva/sync';
 import {
-  BackIcon,
+  AddIcon,
+  Alert,
+  Badge,
   Button,
+  CardIcon,
+  CashIcon,
   cn,
+  CustomersIcon,
   EmptyState,
   formatQuantity,
-  Money,
+  IconChip,
+  OfferIcon,
+  PhoneIcon,
   PrintIcon,
+  RemoveIcon,
+  SearchIcon,
+  SalesIcon,
+  Skeleton,
   TextField,
+  TransferIcon,
   UndoIcon,
   useDigits,
 } from '@serva/ui';
+import type { InvoiceHit, InvoiceLookup } from '@serva/core/contracts/till';
 import type { Catalog } from '../catalog';
-import { clockText, dateText } from '../format';
+import { ExactMoney } from '../ExactMoney';
+import { clockText, dateText, isolateSizes } from '../format';
+import { fetchPurchases } from '../customers/CustomerHistory';
+import { ChoiceGroup, DoneCard, FlowHeader, OptionChip, OptionTile } from '../FlowParts';
 import { usePos } from '../services';
 import { deviceDocuments, type OpenShift } from '../shift/shift';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
-import { matchesNumber, RETURN_WINDOW_DAYS, returnableSales, type ReturnableSale } from './returns';
+import { hasBlockedPick, medicineRulesOf, MedicineReturnNote, sealedConfirmed } from './medicineReturn';
+import {
+  matchesInvoice,
+  DAMAGED_REASON,
+  defaultReason,
+  returnableSales,
+  returnReasons,
+  returnWindowOf,
+  saleFromServer,
+  searchInvoice,
+  searchInvoices,
+  type ReturnableSale,
+} from './returns';
 
-const REASONS = ['تالف أو منتهي الصلاحية', 'الزبون غيّر رأيه', 'خطأ في الفاتورة'] as const;
+/** The day count as the cashier reads it: «30 يوماً» */
+const daysText = (n: number) =>
+  n === 1 ? 'يوم واحد' : n === 2 ? 'يومين' : `${n} ${n <= 10 ? 'أيام' : 'يوماً'}`;
 
 const REFUND_TEXT: Record<RefundMethod, string> = {
   cash: 'نقداً من الدرج',
@@ -37,9 +76,47 @@ const REFUND_TEXT: Record<RefundMethod, string> = {
   wallet: 'إلى شام كاش',
   transfer: 'بتحويل',
   voucher: 'على قسيمة استبدال',
+  account: 'إلى حساب الزبون',
 };
 
+const REFUND_ICON: Record<RefundMethod, ReactNode> = {
+  cash: <CashIcon />,
+  card: <CardIcon />,
+  wallet: <PhoneIcon />,
+  transfer: <TransferIcon />,
+  voucher: <OfferIcon />,
+  account: <CustomersIcon />,
+};
+
+/** A − or + of the quantity stepper: 48 square, like the cart's (هوية 4 › الكاشير). */
+const STEP =
+  'grid size-12 place-items-center text-ink-muted transition-colors duration-120 ease-standard enabled:hover:bg-surface-muted enabled:hover:text-ink enabled:active:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40';
+
 export type SavedReturn = Pick<SyncDocument, 'id' | 'number' | 'deviceTime' | 'payload'>;
+
+/** What a return on account of an instalment sale does to its plan, said before the cashier confirms */
+function instalmentReturnNote(
+  plan: { notesMode?: 'none' | 'each' | 'single' | undefined; count: number } | null | undefined,
+): string {
+  if (!plan) return '';
+  const notes =
+    plan.notesMode === 'each'
+      ? ` و${String(plan.count)} كمبيالات`
+      : plan.notesMode === 'single'
+        ? ' وكمبيالتها'
+        : '';
+  return `هذه الفاتورة بالتقسيط: تُلغى خطة التقسيط${notes}، وما دفعه الزبون يبقى رصيداً له على حسابه. إن أردت إعادته نقداً فاختر «نقداً» بدل «على الحساب». `;
+}
+
+/** Every piece of the invoice has come back (display only: the server counts what is left again) */
+const allBack = (s: Pick<ReturnableSale, 'sale' | 'returned'>): boolean =>
+  returnableLines(s.sale, s.returned).every((l) => l.remainingQty === 0);
+
+/** The invoice's piece names for its row in the list: the first two, then how many more */
+const pieceNames = (sale: ReturnableSale['sale']): string => {
+  const names = [...new Set(sale.lines.map((l) => l.name))];
+  return names.length > 2 ? `${names.slice(0, 2).join('، ')} و${names.length - 2} غيرها` : names.join('، ');
+};
 
 const savedRefund = (saved: SavedReturn): RefundMethod =>
   (saved.payload as unknown as ReturnPayload).refunds[0]?.method ?? 'cash';
@@ -61,6 +138,9 @@ export function ReturnScreen({
   onBack,
   onPrint,
   onExchange,
+  startExchange = false,
+  initialSearch = '',
+  extraInvoices = [],
 }: {
   session: StaffSession;
   catalog: Catalog;
@@ -69,24 +149,69 @@ export function ReturnScreen({
   onBack: () => void;
   onPrint: (saved: SavedReturn) => void;
   /** Back to the sale with the voucher just issued, to sell the other piece */
-  onExchange?: (voucherCode: string) => void;
+  onExchange?: (voucherCode: string | null, cashBackMinor?: number) => void;
+  /** Opened from «تبديل»: the exchange choice and its reason start picked */
+  startExchange?: boolean;
+  /** The rep opens it from a customer's page: the search starts on his name */
+  initialSearch?: string;
+  /** The rep's morning sheet: his customers' invoices of the last 60 days, found here without the server */
+  extraInvoices?: readonly InvoiceLookup[];
 }) {
   const pos = usePos();
   const digits = useDigits();
   const settings = catalog.settings!;
+  const windowDays = returnWindowOf(settings);
+  const REASONS = useMemo(() => returnReasons(settings.sectors), [settings.sectors]);
   const [entries, setEntries] = useState<OutboxEntry[] | null>(null);
   const [tick, setTick] = useState(0);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
   const [picked, setPicked] = useState<ReturnableSale | null>(null);
   const [qty, setQty] = useState<Record<number, number>>({});
-  const [reason, setReason] = useState<string>(REASONS[0]);
+  // «العلبة مغلقة»: the sealed-box tick of a medicine line (03 › الصيدليات)
+  const [sealed, setSealed] = useState<Record<number, boolean>>({});
+  const [reason, setReason] = useState<string>(
+    startExchange && REASONS.includes('تبديل') ? 'تبديل' : defaultReason(REASONS),
+  );
+  // «استبدال»: the piece goes back on a voucher and the sale of the other piece follows at once
+  const [exchange, setExchange] = useState(startExchange);
+  // «ردّ الفرق نقداً»: the piece's whole value leaves the drawer in cash and the other piece is paid in cash
+  const [exchangeCash, setExchangeCash] = useState(false);
+  const [remote, setRemote] = useState<{
+    sale: ReturnableSale | null;
+    note: string | null;
+    busy: boolean;
+    /** Invoices of the whole store that match the typed name, phone or number end */
+    hits?: readonly InvoiceHit[];
+  }>({
+    sale: null,
+    note: null,
+    busy: false,
+  });
   const [otherReason, setOtherReason] = useState('');
+  // «تالفة»: the goods do not go back on the shelf but to the damaged stock (null: it follows the reason)
+  const [brokenPicked, setBrokenPicked] = useState<boolean | null>(null);
   const [method, setMethod] = useState<RefundMethod>('cash');
   const [reference, setReference] = useState('');
+  // Round 36: what of a cash refund leaves the dollar drawer, as the cashier typed it (null: the same split the sale took)
+  const [foreignText, setForeignText] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+  // An irreversible refund (to the customer's account) waits for a second tap
+  const [confirming, setConfirming] = useState(false);
+  // What the customer owes now (the server's word, online only); null while unknown
+  const [owed, setOwed] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedReturn | null>(null);
+  // On a phone the picked invoice and the result sit under the long list: bring them to the top when they appear
+  const resultTop = useRef<HTMLDivElement>(null);
+  const pickedId = picked?.id ?? null;
+  const savedId = saved?.id ?? null;
+  useEffect(() => {
+    // Only where the result sits under the list (a phone, a narrow tablet); beside it, the page stays where it is
+    const stacked =
+      typeof window.matchMedia === 'function' ? !window.matchMedia('(min-width: 1024px)').matches : true;
+    if ((pickedId || savedId) && stacked) resultTop.current?.scrollIntoView?.({ block: 'start' });
+  }, [pickedId, savedId]);
 
   useEffect(() => {
     let alive = true;
@@ -96,17 +221,163 @@ export function ReturnScreen({
     };
   }, [pos.store, tick]);
 
-  const sales = useMemo(() => (entries ? returnableSales(entries, pos.now()) : []), [entries, pos]);
-  const shown = sales.filter((s) => matchesNumber(s.number, search)).slice(0, 30);
+  const sales = useMemo(() => {
+    if (!entries) return [];
+    const mine = returnableSales(entries, pos.now(), windowDays);
+    const known = new Set(mine.map((s) => s.id));
+    const extra = extraInvoices
+      .filter((inv) => !known.has(inv.id))
+      .map((inv) => saleFromServer(inv, entries, pos.now(), windowDays))
+      .filter((s): s is ReturnableSale => s !== null);
+    return [...mine, ...extra].sort((a, b) => Date.parse(b.deviceTime) - Date.parse(a.deviceTime));
+  }, [entries, pos, windowDays, extraInvoices]);
+  const online = pos.online();
+  const shown = sales.filter((s) => matchesInvoice(s, search, catalog.customers)).slice(0, 30);
+
+  // The store's newest invoices (other tills too), shown when the screen opens and nothing is typed
+  const [recent, setRecent] = useState<readonly InvoiceHit[]>([]);
+  useEffect(() => {
+    const token = pos.device.token;
+    if (!token || !pos.online()) return;
+    let alive = true;
+    void searchInvoices('', windowDays, token, pos.fetch).then((list) => alive && setRecent(list ?? []));
+    return () => {
+      alive = false;
+    };
+  }, [pos, windowDays, tick]);
+  const recentOther0 = recent.filter((h) => !sales.some((s) => s.number === h.number)).slice(0, 8);
+  const recentOther = search.trim() === '' ? recentOther0 : [];
+  const storeList: readonly InvoiceHit[] = remote.hits?.length ? remote.hits : recentOther;
+  // This device's invoices and the store's, one list, the newest first (a store invoice already here shows once)
+  const rows = useMemo(() => {
+    const list: (
+      { kind: 'local'; at: number; sale: ReturnableSale } | { kind: 'hit'; at: number; hit: InvoiceHit }
+    )[] = [
+      ...shown.map((sale) => ({ kind: 'local' as const, at: Date.parse(sale.deviceTime), sale })),
+      // An invoice of another till found by its number stays in the list once it is chosen
+      ...(remote.sale && !shown.some((x) => x.number === remote.sale!.number)
+        ? [{ kind: 'local' as const, at: Date.parse(remote.sale.deviceTime), sale: remote.sale }]
+        : []),
+      ...storeList
+        .filter((h) => !shown.some((x) => x.number === h.number))
+        .map((hit) => ({ kind: 'hit' as const, at: Date.parse(hit.deviceTime), hit })),
+    ];
+    // One row per invoice: the picked one (a store invoice opened from the list) is never listed twice
+    const seen = new Set<string>();
+    return list
+      .filter((row) => {
+        const number = row.kind === 'local' ? row.sale.number : row.hit.number;
+        if (seen.has(number)) return false;
+        seen.add(number);
+        return true;
+      })
+      .sort((x, y) => y.at - x.at);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown.map((x) => x.id).join(), storeList, remote.sale]);
+
+  // Nothing here matches what is typed: the whole store is searched by itself, no second tap
+  const typedNow = search.trim();
+  const searchStoreRef = useRef<() => Promise<void>>(async () => {});
+  useEffect(() => {
+    if (typedNow.length < 2 || entries === null || shown.length > 0 || !pos.online()) return;
+    const timer = setTimeout(() => void searchStoreRef.current(), 450);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typedNow, entries, shown.length]);
+
+  // Some match here: the store's other matches join the same list (newest first), without opening any
+  useEffect(() => {
+    const token = pos.device.token;
+    if (typedNow.length < 3 || shown.length === 0 || picked || !token || !pos.online()) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      void searchInvoices(typedNow, windowDays, token, pos.fetch).then((hits) => {
+        if (alive && hits && hits.length > 0) setRemote((r) => (r.busy ? r : { ...r, hits }));
+      });
+    }, 450);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [typedNow, shown.length, picked, pos, windowDays]);
 
   // The picked invoice as it is now (a return saved here a moment ago counts)
   const current = picked ? (sales.find((s) => s.id === picked.id) ?? picked) : null;
+  const isExchange = exchange && current !== null;
   const lines = current ? returnableLines(current.sale, current.returned) : [];
-  const picks = Object.entries(qty)
+  const medicineRules = useMemo(
+    () => (current ? medicineRulesOf(current.sale, catalog, settings.pharmacy) : new Map()),
+    [current, catalog, settings.pharmacy],
+  );
+  const chosen = Object.entries(qty)
     .map(([lineNo, q]) => ({ saleLineNo: Number(lineNo), qty: q }))
     .filter((p) => p.qty > 0);
+  // Decision 18: the instalment fee goes back with the goods (in full when the whole sale returns, else in proportion)
+  const picks = current ? withInstalmentFee(current.sale, chosen, current.returned) : chosen;
+  const feeLineNo =
+    current?.sale.installmentPlan !== undefined && current.sale.installmentPlan !== null
+      ? (current.sale.lines.find((l) => l.variantId === INSTALMENT_FEE_VARIANT_ID)?.lineNo ?? null)
+      : null;
   const why = reason === 'other' ? otherReason.trim() : reason;
-  const needsReference = method !== 'cash' && method !== 'voucher';
+  const broken = brokenPicked ?? reason === DAMAGED_REASON;
+  const needsReference = method !== 'cash' && method !== 'voucher' && method !== 'account';
+
+  // The foreign cash the sale took (the dollar's), and what a cash refund of these picks gives back to it by default
+  const foreignPaid = useMemo(() => (current ? paidForeign(current.sale)[0] : undefined), [current]);
+  const foreignWanted = useMemo((): number => {
+    if (!current || !foreignPaid || method !== 'cash' || picks.length === 0) return 0;
+    try {
+      const plain = buildReturnPayload({
+        sale: current.sale,
+        saleId: current.id,
+        saleNumber: current.number,
+        shiftId: shift.id,
+        cashierId: session.userId,
+        reason: '—',
+        picks,
+        returned: current.returned,
+        refundMethod: 'cash',
+      });
+      const ceiling = Math.min(
+        foreignPaid.amountMinor,
+        convert(plain.totals.totalMinor, current.sale.currency, foreignPaid.currency, foreignPaid.rate),
+      );
+      if (foreignText === null) {
+        return (
+          defaultForeignRefund(
+            current.sale,
+            plain.totals.totalMinor,
+            (settings.cashRoundingSteps[current.sale.currency] ?? 0) > 0 ? 100 : 0,
+          ).find((f) => f.currency === foreignPaid.currency)?.amountMinor ?? 0
+        );
+      }
+      let typed = 0;
+      try {
+        typed = foreignText.trim() ? toMinor(foreignText, foreignPaid.currency) : 0;
+      } catch {
+        typed = 0;
+      }
+      let amount = Math.max(0, Math.min(typed, ceiling));
+      while (
+        amount > 0 &&
+        convert(amount, foreignPaid.currency, current.sale.currency, foreignPaid.rate) >
+          plain.totals.totalMinor
+      )
+        amount -= 1;
+      return amount;
+    } catch {
+      return 0;
+    }
+  }, [
+    current,
+    foreignPaid,
+    method,
+    picks,
+    shift.id,
+    session.userId,
+    foreignText,
+    settings.cashRoundingSteps,
+  ]);
 
   const draft = useMemo((): ReturnPayload | null => {
     if (!current || picks.length === 0) return null;
@@ -122,20 +393,145 @@ export function ReturnScreen({
         returned: current.returned,
         refundMethod: method,
         reference: reference.trim() || null,
+        cashStepMinor: settings.cashRoundingSteps[current.sale.currency] ?? 0,
+        damaged: broken,
+        ...(foreignPaid && foreignWanted > 0
+          ? { foreignRefund: [{ currency: foreignPaid.currency, amountMinor: foreignWanted }] }
+          : {}),
       });
     } catch {
       return null;
     }
-  }, [current, picks, shift.id, session.userId, why, method, reference]);
+  }, [
+    current,
+    picks,
+    shift.id,
+    session.userId,
+    why,
+    method,
+    reference,
+    settings.cashRoundingSteps,
+    broken,
+    foreignPaid,
+    foreignWanted,
+  ]);
 
-  const ready = draft !== null && why.length > 0 && (!needsReference || reference.trim().length > 0);
+  // A damaged or expired box is never «sealed»: that reason does not ask for the tick
+  const damaged = reason === DAMAGED_REASON;
+  const sealedOk = damaged || sealedConfirmed(picks, medicineRules, sealed);
+  const ready =
+    draft !== null &&
+    why.length > 0 &&
+    (!needsReference || reference.trim().length > 0) &&
+    sealedOk &&
+    !hasBlockedPick(picks, medicineRules);
+  // Why the button is off, said under it
+  const notReadyBecause = ready
+    ? null
+    : picks.length === 0
+      ? 'اختر الكمية المراد إرجاعها من سطر واحد على الأقل.'
+      : hasBlockedPick(picks, medicineRules)
+        ? 'سطر محدد لا يقبله المحل مرتجعاً. أزل كميته.'
+        : why.length === 0
+          ? 'اكتب سبب الإرجاع.'
+          : !sealedOk
+            ? `أكّد أن العلبة مغلقة وسليمة، أو اختر السبب «${DAMAGED_REASON}».`
+            : needsReference && reference.trim().length === 0
+              ? 'اكتب رقم المرجع أو الموافقة.'
+              : 'راجع الأسطر والكميات.';
   const canRefund = session.permissions.has('sale.refund');
+  const accountCustomer = current?.sale.customerId ?? null;
+  useEffect(() => {
+    setConfirming(false);
+  }, [method, current?.id, draft?.totals.totalMinor]);
+  useEffect(() => {
+    setOwed(null);
+    const token = pos.device.token;
+    if (method !== 'account' || !accountCustomer || !token || !pos.online()) return;
+    let alive = true;
+    void fetchPurchases(accountCustomer, token, pos.fetch).then(
+      (got) => alive && setOwed(got?.balanceMinor ?? null),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [method, accountCustomer, pos]);
+
+  /** The invoice of another till or branch: asked of the server, by number or by the receipt's barcode */
+  async function findInStore() {
+    const typed = search.trim();
+    if (!typed) return;
+    const token = pos.device.token;
+    if (!pos.online() || !token) {
+      setRemote({ sale: null, busy: false, note: 'لا إنترنت الآن: تظهر فواتير هذا الجهاز فقط.' });
+      return;
+    }
+    setRemote({ sale: null, busy: true, note: null });
+    const result = await searchInvoice(typed, token, pos.fetch);
+    if (result.found === null) {
+      if (result.reason === 'offline') {
+        setRemote({
+          sale: null,
+          busy: false,
+          note: 'تعذّر الوصول إلى المحل الآن: تظهر فواتير هذا الجهاز فقط.',
+        });
+        return;
+      }
+      // Not a whole number: look for the customer's name, phone or the end of the number across the store
+      const hits = await searchInvoices(typed, windowDays, token, pos.fetch);
+      if (hits && hits.length > 0) {
+        setRemote({ sale: null, busy: false, note: null, hits });
+        return;
+      }
+      setRemote({
+        sale: null,
+        busy: false,
+        note:
+          hits === null
+            ? 'تعذّر الوصول إلى المحل الآن: تظهر فواتير هذا الجهاز فقط.'
+            : `لا فاتورة في المحل تطابق البحث في آخر ${daysText(windowDays)}.`,
+      });
+      return;
+    }
+    const sale = saleFromServer(result.found, entries ?? [], pos.now(), windowDays);
+    if (!sale) {
+      setRemote({
+        sale: null,
+        busy: false,
+        note: `الفاتورة أقدم من ${daysText(windowDays)}، فلا يُقبل مرتجعها.`,
+      });
+      return;
+    }
+    setRemote((r) => ({ ...r, sale, busy: false, note: null }));
+    choose(sale);
+  }
+
+  // Never once an invoice is picked: it would start the pick over
+  searchStoreRef.current = () => (picked ? Promise.resolve() : findInStore());
+
+  /** One of the store's matching invoices: the full invoice is fetched by its number, then chosen */
+  async function pickHit(hit: InvoiceHit) {
+    const token = pos.device.token;
+    if (!token) return;
+    setRemote((r) => ({ ...r, busy: true }));
+    const result = await searchInvoice(hit.number, token, pos.fetch);
+    const sale = result.found ? saleFromServer(result.found, entries ?? [], pos.now(), windowDays) : null;
+    if (!sale) {
+      setRemote({ sale: null, busy: false, note: 'تعذّر فتح هذه الفاتورة الآن. حاول مرة أخرى.' });
+      return;
+    }
+    // The list stays as it was: choosing an invoice never empties it
+    setRemote((r) => ({ ...r, sale, busy: false, note: null }));
+    choose(sale);
+  }
 
   function choose(sale: ReturnableSale) {
     setPicked(sale);
     setQty({});
-    setMethod(defaultRefundMethod(sale.sale));
+    setSealed({});
+    setMethod(exchange ? (exchangeCash ? 'cash' : 'voucher') : defaultRefundMethod(sale.sale));
     setReference('');
+    setForeignText(null);
     setError(null);
     setSaved(null);
   }
@@ -160,9 +556,17 @@ export function ReturnScreen({
         payload: entry.doc.payload,
       };
       setSaved(doc);
+      // An invoice found on the server is not in this till's list: what it just gave back is added to what it shows
+      const added = draft.lines.map((l) => ({ saleLineNo: l.saleLineNo, qty: l.qty, ...l.refund }));
+      setPicked((p) => (p && p.id === current.id ? { ...p, returned: [...p.returned, ...added] } : p));
       setQty({});
       setTick((t) => t + 1);
       onPrint(doc);
+      if (isExchange && doc.number && onExchange)
+        onExchange(
+          method === 'voucher' ? doc.number : null,
+          method === 'voucher' ? undefined : (draft.refunds[0]?.amountMinor ?? draft.totals.totalMinor),
+        );
     } catch {
       setError('لم يُسجَّل المرتجع. لم يُحفظ شيء، حاول مرة أخرى.');
     } finally {
@@ -170,275 +574,588 @@ export function ReturnScreen({
     }
   }
 
+  const refundMethods = current
+    ? [
+        'cash',
+        // What was on account (آجل) can go back to the customer's account, when the sale names them
+        ...current.sale.payments.map((p) =>
+          (p.method === 'credit' || p.method === 'cheque') && current.sale.customerId ? 'account' : p.method,
+        ),
+        'voucher',
+      ].filter(
+        (m, i, all): m is RefundMethod =>
+          (REFUND_METHODS as readonly string[]).includes(m) && all.indexOf(m) === i,
+      )
+    : [];
+
   return (
-    <div className="flex w-full max-w-6xl flex-col gap-4">
-      <div className="flex items-center gap-4">
-        <Button variant="secondary" icon={<BackIcon />} onClick={onBack}>
-          ارجع للبيع
-        </Button>
-        <div className="flex flex-col">
-          <h1 className="text-3xl font-bold text-ink">مرتجع</h1>
-          <p className="text-ink-muted">
-            اختر فاتورة من هذا الجهاز خلال آخر {RETURN_WINDOW_DAYS} أيام، ثم ما يرجع منها. المبلغ من الفاتورة
-            نفسها.
-          </p>
-        </div>
-      </div>
-      <div className="grid grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-6">
+    <div className="flex w-full max-w-7xl flex-col gap-6">
+      <FlowHeader
+        onBack={onBack}
+        icon={<UndoIcon size={24} />}
+        title={startExchange ? 'تبديل صنف' : 'مرتجع'}
+        description={`${startExchange ? 'أرجِع ما لا يناسب الزبون ثم بِعه غيره. ' : ''}اختر فاتورة من آخر ${daysText(windowDays)}، من أي جهاز في المحل، ثم ما يرجع منها. المبلغ من الفاتورة نفسها.`}
+      />
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <section
           aria-label="الفواتير"
-          className="flex flex-col gap-3 self-start rounded-card border border-line bg-surface p-4"
+          className="flex flex-col gap-3 rounded-card border border-line bg-surface p-4 shadow-e1 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto"
         >
           <TextField
             label="رقم الفاتورة"
-            hint="آخر أرقامها تكفي"
-            inputMode="numeric"
+            hint={
+              online
+                ? 'اكتب آخر أرقام الفاتورة أو اسم الزبون أو جواله، أو امسح باركود الإيصال. إن لم تظهر هنا فابحث في المحل كله.'
+                : 'اكتب آخر أرقام الفاتورة أو اسم الزبون أو جواله. بلا إنترنت: فواتير هذا الجهاز فقط'
+            }
             dir="ltr"
             value={search}
-            onChange={(e) => setSearch(e.target.value.slice(0, 40))}
+            onChange={(e) => {
+              setSearch(e.target.value.slice(0, 40));
+              setRemote({ sale: null, busy: false, note: null });
+            }}
+            onKeyDown={(e) => {
+              // A scanner types the barcode and presses Enter: the whole number goes to the store
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                // An invoice of this device that matches is never asked of the server
+                const exact = shown.find((s) => s.number.toUpperCase() === search.trim().toUpperCase());
+                if (exact) choose(exact);
+                else if (shown.length === 0) void findInStore();
+              }
+            }}
+            inputClassName="num"
+            startAdornment={<SearchIcon className="ms-4 shrink-0" />}
           />
-          {entries && shown.length === 0 ? (
-            <p className="py-4 text-center text-ink-muted">لا فواتير على هذا الجهاز تطابق البحث.</p>
+          {search.trim() && shown.length === 0 ? (
+            <Button
+              variant="secondary"
+              icon={<SearchIcon />}
+              loading={remote.busy}
+              onClick={() => void findInStore()}
+            >
+              ابحث في المحل كله
+            </Button>
           ) : null}
-          <ul className="flex max-h-[28rem] flex-col gap-1 overflow-y-auto">
-            {shown.map((s) => {
-              const at = Date.parse(s.deviceTime);
-              return (
-                <li key={s.id}>
-                  <button
-                    type="button"
-                    aria-pressed={current?.id === s.id}
-                    onClick={() => choose(s)}
-                    className={cn(
-                      'flex min-h-14 w-full items-center justify-between gap-2 rounded-control border-2 px-3 text-start',
-                      current?.id === s.id
-                        ? 'border-brand bg-brand-soft'
-                        : 'border-transparent hover:bg-surface-muted',
-                    )}
-                  >
-                    <span className="flex flex-col">
-                      <bdi dir="ltr" className="num font-semibold">
-                        {s.number}
-                      </bdi>
-                      <span className="text-xs text-ink-muted">
-                        {dateText(at, digits)} ، {clockText(at, digits)}
-                        {s.returned.length > 0 ? ' · رجع منها شيء' : ''}
-                      </span>
-                    </span>
-                    <Money
-                      minor={s.sale.totals.totalMinor}
-                      currency={s.sale.currency}
-                      className="font-bold"
-                    />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-        {!current ? (
-          <EmptyState
-            icon={UndoIcon}
-            title="اختر فاتورة"
-            description="تظهر أصنافها هنا مع الكمية التي ما زالت ترجع."
-          />
-        ) : saved ? (
-          <section
-            aria-label="سُجّل المرتجع"
-            className="flex flex-col items-start gap-4 rounded-card border border-line bg-surface p-6"
-          >
-            <h2 className="text-2xl font-bold text-ink">سُجّل المرتجع</h2>
-            <p className="text-ink">
-              <bdi dir="ltr" className="num font-semibold">
-                {saved.number}
-              </bdi>{' '}
-              · رُدّ{' '}
-              <Money
-                minor={(saved.payload as unknown as ReturnPayload).totals.totalMinor}
-                currency={(saved.payload as unknown as ReturnPayload).currency}
-                className="font-bold"
-              />{' '}
-              {REFUND_TEXT[savedRefund(saved)]}
-            </p>
-            {savedRefund(saved) === 'voucher' ? (
-              <p className="text-ink-muted">
-                القسيمة برقم المرتجع، مطبوعة على الإيصال. تُصرف على أي جهاز في المحل.
-              </p>
-            ) : null}
-            <div className="flex flex-wrap gap-3">
-              {savedRefund(saved) === 'voucher' && onExchange && saved.number ? (
-                <Button onClick={() => onExchange(saved.number!)}>بيع البديل بالقسيمة</Button>
-              ) : null}
-              <Button variant="secondary" icon={<PrintIcon />} onClick={() => onPrint(saved)}>
-                اطبع الإيصال مرة أخرى
-              </Button>
-              <Button variant="secondary" onClick={() => setSaved(null)}>
-                مرتجع آخر من نفس الفاتورة
-              </Button>
-              <Button variant="secondary" onClick={onBack}>
-                ارجع للبيع
-              </Button>
+          {remote.note ? <Alert tone="info">{remote.note}</Alert> : null}
+          {entries === null ? (
+            <div aria-hidden="true" className="flex flex-col gap-2 py-1">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-14 w-full rounded-control" />
+              ))}
             </div>
-          </section>
-        ) : (
-          <section
-            aria-label="ما يرجع"
-            className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
-          >
-            <h2 className="text-xl font-bold text-ink">
-              الفاتورة{' '}
-              <bdi dir="ltr" className="num">
-                {current.number}
-              </bdi>
-            </h2>
-            <ul className="flex flex-col divide-y divide-line">
-              {lines.map((line) => {
-                const q = qty[line.saleLineNo] ?? 0;
-                const set = (next: number) =>
-                  setQty((all) => ({
-                    ...all,
-                    [line.saleLineNo]: Math.max(0, Math.min(line.remainingQty, next)),
-                  }));
+          ) : null}
+          {entries &&
+          shown.length === 0 &&
+          !current &&
+          !remote.note &&
+          !remote.busy &&
+          storeList.length === 0 &&
+          !(remote.hits && remote.hits.length > 0) ? (
+            <p className="py-6 text-center text-sm text-ink-muted">لا فواتير على هذا الجهاز تطابق البحث.</p>
+          ) : null}
+          {rows.length > 0 ? (
+            <ul aria-label="فواتير المحل" className="-mx-1 flex flex-col gap-1 px-1 pb-4 pt-0.5">
+              {rows.map((row) => {
+                if (row.kind === 'hit') {
+                  const h = row.hit;
+                  return (
+                    <li key={h.id}>
+                      <button
+                        type="button"
+                        disabled={remote.busy}
+                        onClick={() => void pickHit(h)}
+                        className="flex min-h-14 w-full items-center justify-between gap-3 rounded-control border border-transparent px-3 py-2 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                      >
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
+                            {h.number}
+                          </bdi>
+                          <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
+                            <span className="num">
+                              {dateText(row.at, digits)} ، {clockText(row.at, digits)}
+                            </span>
+                            {h.customerName ? <bdi>{h.customerName}</bdi> : null}
+                          </span>
+                        </span>
+                        <ExactMoney
+                          minor={h.totalMinor}
+                          currency={h.currency}
+                          className="shrink-0 font-bold text-ink"
+                        />
+                      </button>
+                    </li>
+                  );
+                }
+                const s = row.sale;
+                const at = row.at;
+                const selected = current?.id === s.id;
                 return (
-                  <li key={line.saleLineNo} className="flex items-center justify-between gap-3 py-3">
-                    <span className="flex min-w-0 flex-col">
-                      <span className="font-semibold text-ink">{line.name}</span>
-                      <span className="text-sm text-ink-muted">
-                        بيع {formatQuantity(line.soldQty, digits)}
-                        {line.returnedQty > 0 ? ` · رجع ${formatQuantity(line.returnedQty, digits)}` : ''}
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => choose(s)}
+                      className={cn(
+                        'flex min-h-14 w-full items-center justify-between gap-3 rounded-control border px-3 py-2 text-start transition-colors duration-120 ease-standard',
+                        selected
+                          ? 'border-brand bg-brand-soft/60 ring-4 ring-brand/10'
+                          : 'border-transparent hover:bg-surface-muted',
+                      )}
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
+                          {s.number}
+                        </bdi>
+                        <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
+                          <span className="num">
+                            {dateText(at, digits)} ، {clockText(at, digits)}
+                          </span>
+                          {(() => {
+                            // The customer of an invoice made on this device: the name it carries, or the one the till knows
+                            const name =
+                              s.sale.customerName ??
+                              catalog.customers.find((c) => c.id === s.sale.customerId)?.name;
+                            return name ? <bdi className="font-semibold text-ink">{name}</bdi> : null;
+                          })()}
+                          {s.returned.length > 0 ? (
+                            <span className="text-warning-ink">
+                              · {allBack(s) ? 'رجعت كلها' : 'رجع منها شيء'}
+                            </span>
+                          ) : (
+                            ''
+                          )}
+                        </span>
+                        {/* The pieces, so «الفستان الأزرق» can be found without opening each invoice */}
+                        <span className="truncate text-xs text-ink-muted">
+                          <bdi>{pieceNames(s.sale)}</bdi>
+                        </span>
                       </span>
-                    </span>
-                    {line.remainingQty === 0 ? (
-                      <span className="text-sm text-ink-muted">رجع كله</span>
-                    ) : (
-                      <span className="flex items-center gap-2" role="group" aria-label={`كمية ${line.name}`}>
-                        <Button
-                          variant="secondary"
-                          aria-label={`أنقص ${line.name}`}
-                          onClick={() => set(q - 1000)}
-                          disabled={q === 0}
-                        >
-                          −
-                        </Button>
-                        <output className="num min-w-12 text-center text-lg font-bold" aria-live="polite">
-                          {formatQuantity(q, digits)}
-                        </output>
-                        <Button
-                          variant="secondary"
-                          aria-label={`زد ${line.name}`}
-                          onClick={() => set(q + 1000 > line.remainingQty ? line.remainingQty : q + 1000)}
-                          disabled={q >= line.remainingQty}
-                        >
-                          +
-                        </Button>
-                        <Button variant="ghost" onClick={() => set(line.remainingQty)}>
-                          الكل
-                        </Button>
-                      </span>
-                    )}
+                      <ExactMoney
+                        minor={s.sale.totals.totalMinor}
+                        currency={s.sale.currency}
+                        className="shrink-0 font-bold text-ink"
+                      />
+                    </button>
                   </li>
                 );
               })}
             </ul>
-            <div role="group" aria-label="السبب" className="flex flex-wrap gap-2">
-              {[...REASONS, 'other' as const].map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  aria-pressed={reason === r}
-                  onClick={() => setReason(r)}
-                  className={cn(
-                    'min-h-11 rounded-full border-2 px-4 font-semibold',
-                    reason === r
-                      ? 'border-brand bg-brand-soft text-brand-ink'
-                      : 'border-line bg-surface text-ink',
-                  )}
-                >
-                  {r === 'other' ? 'سبب آخر' : r}
-                </button>
-              ))}
-            </div>
-            {reason === 'other' ? (
-              <TextField
-                label="السبب"
-                value={otherReason}
-                onChange={(e) => setOtherReason(e.target.value.slice(0, 200))}
-              />
-            ) : null}
-            <div role="group" aria-label="طريقة الرد" className="flex flex-wrap gap-2">
-              {['cash', ...current.sale.payments.map((p) => p.method), 'voucher']
-                .filter(
-                  (m, i, all): m is RefundMethod =>
-                    (REFUND_METHODS as readonly string[]).includes(m) && all.indexOf(m) === i,
-                )
-                .map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    aria-pressed={method === m}
-                    onClick={() => setMethod(m)}
-                    className={cn(
-                      'min-h-11 rounded-control border-2 px-4 font-semibold',
-                      method === m
-                        ? 'border-brand bg-brand-soft text-brand-ink'
-                        : 'border-line bg-surface text-ink',
-                    )}
-                  >
-                    {REFUND_TEXT[m]}
-                  </button>
-                ))}
-            </div>
-            {needsReference ? (
-              <TextField
-                label="رقم العملية"
-                hint="من جهاز البطاقة أو من التطبيق"
-                dir="ltr"
-                value={reference}
-                onChange={(e) => setReference(e.target.value.slice(0, 64))}
-              />
-            ) : null}
-            <div
-              role="status"
-              aria-label="المبلغ المردود"
-              className="flex items-center justify-between rounded-card bg-surface-total p-4"
+          ) : null}
+        </section>
+        {/* The result's own box carries the mark: a hidden span in the grid sat at the page's top, above the list */}
+        <div ref={resultTop} className="min-w-0 scroll-mt-4">
+          {!current ? (
+            <EmptyState
+              icon={UndoIcon}
+              title="اختر فاتورة"
+              description="تظهر أصنافها هنا مع الكمية التي ما زالت ترجع."
+              className="min-h-80 justify-center"
+            />
+          ) : saved ? (
+            <DoneCard
+              label="سُجّل المرتجع"
+              title="سُجّل المرتجع"
+              actions={
+                <>
+                  {savedRefund(saved) === 'voucher' && onExchange && saved.number ? (
+                    <Button onClick={() => onExchange(saved.number!)}>بيع البديل بالقسيمة</Button>
+                  ) : null}
+                  {savedRefund(saved) === 'cash' && saved.payload.reason === 'تبديل' && onExchange ? (
+                    <Button onClick={() => onExchange(null)}>بيع البديل نقداً</Button>
+                  ) : null}
+                  <Button variant="secondary" icon={<PrintIcon />} onClick={() => onPrint(saved)}>
+                    اطبع الإيصال مرة أخرى
+                  </Button>
+                  {/* Nothing left to take back from this invoice: no offer of another return */}
+                  {lines.some(
+                    (l) => l.remainingQty > 0 && medicineRules.get(l.saleLineNo)?.kind !== 'blocked',
+                  ) ? (
+                    <Button variant="secondary" onClick={() => setSaved(null)}>
+                      مرتجع آخر من نفس الفاتورة
+                    </Button>
+                  ) : null}
+                  <Button variant="ghost" onClick={onBack}>
+                    ارجع للبيع
+                  </Button>
+                </>
+              }
             >
-              <span className="font-semibold text-ink-muted">
-                {method === 'voucher' ? 'مبلغ القسيمة' : 'المبلغ المردود'}
-              </span>
-              <Money
-                minor={draft?.totals.totalMinor ?? 0}
-                currency={current.sale.currency}
-                className="text-3xl font-bold text-ink"
-              />
-            </div>
-            {error ? (
-              <p role="alert" className="font-semibold text-danger-ink">
-                {error}
+              <p className="text-lg text-ink">
+                <bdi dir="ltr" className="num font-semibold">
+                  {saved.number}
+                </bdi>{' '}
+                · رُدّ{' '}
+                <ExactMoney
+                  minor={
+                    (saved.payload as unknown as ReturnPayload).refunds[0]?.amountMinor ??
+                    (saved.payload as unknown as ReturnPayload).totals.totalMinor
+                  }
+                  currency={(saved.payload as unknown as ReturnPayload).currency}
+                  className="font-bold"
+                />{' '}
+                {REFUND_TEXT[savedRefund(saved)]}
               </p>
-            ) : null}
-            {approving ? (
-              <ManagerCode
-                staff={staff}
-                permission="sale.refund"
-                reason={
-                  method === 'voucher'
-                    ? 'المرتجع يُصدر قسيمة بمبلغه، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                    : 'المرتجع يُخرج مالاً، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                }
-                onApproved={(approval) => void record(approval)}
-                onCancel={() => setApproving(false)}
-              />
-            ) : (
-              <Button
-                size="lg"
-                disabled={!ready || saving}
-                onClick={() => (canRefund ? void record(null) : setApproving(true))}
-              >
-                سجّل المرتجع
-              </Button>
-            )}
-          </section>
-        )}
+              {(saved.payload as unknown as ReturnPayload).refunds[0]?.roundingMinor ? (
+                <p className="text-ink-muted">
+                  قيمة البضاعة{' '}
+                  <ExactMoney
+                    minor={(saved.payload as unknown as ReturnPayload).totals.totalMinor}
+                    currency={(saved.payload as unknown as ReturnPayload).currency}
+                  />{' '}
+                  والفرق تقريب النقد
+                </p>
+              ) : null}
+              {((saved.payload as unknown as ReturnPayload).refunds[0]?.foreign ?? []).map((f) => (
+                <p key={f.currency} className="text-ink-muted">
+                  منها من درج الدولار <ExactMoney minor={f.amountMinor} currency={f.currency} />
+                </p>
+              ))}
+              {savedRefund(saved) === 'voucher' ? (
+                <p className="max-w-md text-ink-muted">
+                  القسيمة برقم المرتجع، مطبوعة على الإيصال. تُصرف على أي جهاز في المحل.
+                </p>
+              ) : null}
+            </DoneCard>
+          ) : (
+            <section
+              aria-label="ما يرجع"
+              className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
+            >
+              <div className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1">
+                <div className="flex flex-wrap items-center gap-3">
+                  <IconChip>
+                    <SalesIcon />
+                  </IconChip>
+                  <h2 className="min-w-0 flex-1 text-lg font-semibold wrap-anywhere text-ink">
+                    الفاتورة{' '}
+                    <bdi dir="ltr" className="num">
+                      {current.number}
+                    </bdi>
+                  </h2>
+                  {allBack(current) ? <Badge>رجعت كلها</Badge> : null}
+                  <ExactMoney
+                    minor={current.sale.totals.totalMinor}
+                    currency={current.sale.currency}
+                    className="text-sm font-semibold text-ink-muted"
+                  />
+                </div>
+                <ul className="flex flex-col divide-y divide-line border-t border-line">
+                  {lines.map((line) => {
+                    const q = qty[line.saleLineNo] ?? 0;
+                    const isFee = feeLineNo !== null && line.saleLineNo === feeLineNo;
+                    const set = (next: number) =>
+                      setQty((all) => ({
+                        ...all,
+                        [line.saleLineNo]: Math.max(0, Math.min(line.remainingQty, next)),
+                      }));
+                    return (
+                      <li
+                        key={line.saleLineNo}
+                        className="flex flex-wrap items-center justify-between gap-3 py-3"
+                      >
+                        <span className="flex min-w-40 flex-1 flex-col gap-0.5">
+                          <span className="font-semibold text-ink">{isolateSizes(line.name)}</span>
+                          <span className="num text-sm text-ink-muted">
+                            بيع {formatQuantity(line.soldQty, digits)}
+                            {line.returnedQty > 0 ? ` · رجع ${formatQuantity(line.returnedQty, digits)}` : ''}
+                          </span>
+                        </span>
+                        {isFee && line.remainingQty > 0 ? (
+                          <span className="text-sm text-ink-muted">
+                            {picks.some((p) => p.saleLineNo === line.saleLineNo)
+                              ? 'يُرجَع مع البضاعة'
+                              : 'يُرجَع مع إرجاع البضاعة'}
+                          </span>
+                        ) : line.remainingQty === 0 ||
+                          medicineRules.get(line.saleLineNo)?.kind === 'blocked' ? (
+                          <Badge>{line.remainingQty === 0 ? 'رجع كله' : 'لا يُرجَع'}</Badge>
+                        ) : (
+                          <span
+                            className="flex items-center gap-2"
+                            role="group"
+                            aria-label={`كمية ${line.name}`}
+                          >
+                            <span className="inline-flex items-stretch overflow-hidden rounded-control border border-line-control/50 bg-surface shadow-e1">
+                              <button
+                                type="button"
+                                aria-label={`أنقص ${line.name}`}
+                                onClick={() => set(q - 1000)}
+                                disabled={q === 0}
+                                className={STEP}
+                              >
+                                <RemoveIcon />
+                              </button>
+                              <output
+                                className={cn(
+                                  'num grid min-w-14 place-items-center border-x border-line px-2 text-lg font-bold',
+                                  q > 0 ? 'text-brand-ink' : 'text-ink',
+                                )}
+                                aria-live="polite"
+                              >
+                                {formatQuantity(q, digits)}
+                              </output>
+                              <button
+                                type="button"
+                                aria-label={`زد ${line.name}`}
+                                onClick={() =>
+                                  set(q + 1000 > line.remainingQty ? line.remainingQty : q + 1000)
+                                }
+                                disabled={q >= line.remainingQty}
+                                className={STEP}
+                              >
+                                <AddIcon />
+                              </button>
+                            </span>
+                            <Button variant="ghost" onClick={() => set(line.remainingQty)}>
+                              الكل
+                            </Button>
+                          </span>
+                        )}
+                        {line.remainingQty > 0 &&
+                        medicineRules.has(line.saleLineNo) &&
+                        !(damaged && medicineRules.get(line.saleLineNo)!.kind === 'sealed') ? (
+                          <MedicineReturnNote
+                            rule={medicineRules.get(line.saleLineNo)!}
+                            name={line.name}
+                            picked={q > 0}
+                            confirmed={sealed[line.saleLineNo] === true}
+                            onConfirm={(yes) => setSealed((all) => ({ ...all, [line.saleLineNo]: yes }))}
+                          />
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <ChoiceGroup label="ماذا يريد الزبون؟" className="flex flex-wrap gap-2">
+                  <OptionChip
+                    selected={!exchange}
+                    onClick={() => {
+                      setExchange(false);
+                      if (current) setMethod(defaultRefundMethod(current.sale));
+                    }}
+                  >
+                    رد المبلغ
+                  </OptionChip>
+                  <OptionChip
+                    selected={exchange}
+                    onClick={() => {
+                      setExchange(true);
+                      setMethod(exchangeCash ? 'cash' : 'voucher');
+                      if (REASONS.includes('تبديل')) setReason('تبديل');
+                    }}
+                  >
+                    استبدال بقطعة أخرى
+                  </OptionChip>
+                </ChoiceGroup>
+                <ChoiceGroup label="السبب" className="flex flex-wrap gap-2">
+                  {[...REASONS, 'other' as const].map((r) => (
+                    <OptionChip key={r} selected={reason === r} onClick={() => setReason(r)}>
+                      {r === 'other' ? 'سبب آخر' : r}
+                    </OptionChip>
+                  ))}
+                </ChoiceGroup>
+                {reason === 'other' ? (
+                  <TextField
+                    label="السبب"
+                    value={otherReason}
+                    onChange={(e) => setOtherReason(e.target.value.slice(0, 200))}
+                  />
+                ) : null}
+                <ChoiceGroup label="القطع المرتجعة" className="flex flex-wrap gap-2">
+                  <OptionChip selected={!broken} onClick={() => setBrokenPicked(false)}>
+                    سليمة: تعود إلى الرف
+                  </OptionChip>
+                  <OptionChip selected={broken} onClick={() => setBrokenPicked(true)}>
+                    تالفة: لا تُباع
+                  </OptionChip>
+                </ChoiceGroup>
+                {broken ? (
+                  <p className="text-xs text-ink-muted">
+                    تذهب القطع إلى «البضاعة التالفة» ولا تُحسب من مخزون البيع، وتبقى بكلفتها حتى تُرجَع للمورد
+                    أو تُشطب.
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 xl:sticky xl:top-0 xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto">
+                {exchange ? (
+                  <>
+                    <ChoiceGroup label="إن كانت البديلة أرخص" className="flex flex-wrap gap-2">
+                      <OptionChip
+                        selected={!exchangeCash}
+                        onClick={() => {
+                          setExchangeCash(false);
+                          setMethod('voucher');
+                        }}
+                      >
+                        يبقى الباقي على قسيمة
+                      </OptionChip>
+                      <OptionChip
+                        selected={exchangeCash}
+                        onClick={() => {
+                          setExchangeCash(true);
+                          setMethod('cash');
+                        }}
+                      >
+                        ردّ الفرق نقداً
+                      </OptionChip>
+                    </ChoiceGroup>
+                    <Alert tone="info">
+                      {exchangeCash
+                        ? 'تُرَدّ للزبون قيمة القطعة كاملة نقداً، ثم يدفع ثمن القطعة الأخرى كاملاً نقداً. المهم أن الفرق وحده هو ما يبقى في الدرج.'
+                        : 'تُسجَّل القطعة مرتجعة على قسيمة بقيمتها، ثم تُباع القطعة الأخرى بالقسيمة: يدفع الزبون الفرق فقط، وإن كانت أرخص يبقى الباقي له على القسيمة.'}
+                    </Alert>
+                  </>
+                ) : (
+                  <ChoiceGroup label="طريقة الرد" className="grid gap-2">
+                    {refundMethods.map((m) => (
+                      <OptionTile
+                        key={m}
+                        selected={method === m}
+                        onClick={() => setMethod(m)}
+                        icon={REFUND_ICON[m]}
+                        title={REFUND_TEXT[m]}
+                      />
+                    ))}
+                  </ChoiceGroup>
+                )}
+                {current?.sale.payments.some((p) => p.method === 'cheque') ? (
+                  <Alert tone="info">
+                    دُفعت هذه الفاتورة بشيك. الشيك نفسه يبقى كما هو عند البنك، والمرتجع لا يخرج من الدرج إلا
+                    إن اخترت النقد بنفسك.
+                  </Alert>
+                ) : null}
+                {needsReference ? (
+                  <TextField
+                    label="رقم العملية"
+                    hint="من جهاز البطاقة أو من التطبيق"
+                    dir="ltr"
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value.slice(0, 64))}
+                  />
+                ) : null}
+                <div
+                  role="status"
+                  aria-label="المبلغ المردود"
+                  className="flex flex-col gap-0.5 rounded-control bg-surface-total px-4 py-3"
+                >
+                  <span className="text-sm font-semibold text-ink-muted">
+                    {exchange && !exchangeCash
+                      ? 'قيمة القطعة المرتجعة'
+                      : method === 'voucher'
+                        ? 'مبلغ القسيمة'
+                        : method === 'account'
+                          ? owed === null
+                            ? 'يُسجَّل على حساب الزبون'
+                            : owed > 0
+                              ? 'يُحسم من دين الزبون'
+                              : 'يُضاف رصيداً للزبون'
+                          : 'المبلغ المردود'}
+                  </span>
+                  <ExactMoney
+                    minor={draft?.refunds[0]?.amountMinor ?? draft?.totals.totalMinor ?? 0}
+                    currency={current.sale.currency}
+                    className="text-kpi font-bold tracking-tight text-ink"
+                    unitClassName="text-base font-semibold text-ink-subtle"
+                  />
+                  {draft?.refunds[0]?.roundingMinor ? (
+                    <span className="text-sm text-ink-muted">
+                      قيمة البضاعة{' '}
+                      <ExactMoney minor={draft.totals.totalMinor} currency={current.sale.currency} /> · تقريب
+                      النقد
+                    </span>
+                  ) : null}
+                </div>
+                {method === 'cash' && foreignPaid ? (
+                  <div className="flex flex-col gap-3 rounded-control border border-line px-4 py-3">
+                    <p className="text-sm text-ink-muted">
+                      {current.sale.payments.every(
+                        (p) => p.method === 'cash' && p.currency !== current.sale.currency,
+                      )
+                        ? 'دُفعت هذه الفاتورة بالدولار، فيرجع المبلغ من درج الدولار.'
+                        : 'دُفعت هذه الفاتورة بأكثر من طريقة، وجزء منها بالدولار. يرجع نفس الجزء من درج الدولار.'}{' '}
+                      غيّر المبلغ، أو اكتب صفراً ليرجع كله بالليرة من درج الليرة.
+                    </p>
+                    <TextField
+                      label={`من درج الدولار (${foreignPaid.currency === 'USD' ? '$' : foreignPaid.currency})`}
+                      hint={`بسعر ${foreignPaid.rate.rate} ل.س للدولار، والمدفوع بالدولار ${(
+                        foreignPaid.amountMinor / 100
+                      ).toFixed(2)}`}
+                      inputMode="decimal"
+                      dir="ltr"
+                      value={foreignText ?? (foreignWanted > 0 ? (foreignWanted / 100).toFixed(2) : '0')}
+                      onChange={(e) => setForeignText(e.target.value)}
+                    />
+                    {draft?.refunds[0] ? (
+                      <p role="status" aria-label="الباقي من درج الليرة" className="text-sm text-ink-muted">
+                        {'من درج الليرة: '}
+                        <ExactMoney
+                          minor={
+                            draft.refunds[0].amountMinor -
+                            (draft.refunds[0].foreign ?? []).reduce((n, f) => n + f.baseAmountMinor, 0)
+                          }
+                          currency={current.sale.currency}
+                        />
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {error ? <Alert tone="error">{error}</Alert> : null}
+                {approving ? (
+                  <ManagerCode
+                    staff={staff}
+                    permission="sale.refund"
+                    reason={
+                      method === 'voucher'
+                        ? 'المرتجع يُصدر قسيمة بمبلغه، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                        : method === 'account'
+                          ? 'المرتجع يخفّض دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                          : 'المرتجع يُخرج مالاً، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                    }
+                    onApproved={(approval) => void record(approval)}
+                    onCancel={() => setApproving(false)}
+                  />
+                ) : (
+                  <>
+                    {confirming ? (
+                      <Alert tone="warning">
+                        {`سيُسجَّل المرتجع على حساب الزبون ولا يخرج من الدرج، ولا يمكن التراجع عنه بعد الحفظ. ${
+                          current?.sale.payments.some((p) => p.method === 'cheque')
+                            ? 'الشيك نفسه يبقى كما هو. '
+                            : ''
+                        }${instalmentReturnNote(current?.sale.installmentPlan)}اضغط «نعم، سجّل» للتأكيد.`}
+                      </Alert>
+                    ) : null}
+                    <Button
+                      size="lg"
+                      fullWidth
+                      icon={<UndoIcon />}
+                      disabled={!ready || saving}
+                      onClick={() => {
+                        if (method === 'account' && !confirming) return setConfirming(true);
+                        if (canRefund) void record(null);
+                        else setApproving(true);
+                      }}
+                    >
+                      {confirming ? 'نعم، سجّل' : exchange ? 'سجّل وبِع البديل' : 'سجّل المرتجع'}
+                    </Button>
+                    {notReadyBecause ? (
+                      <p role="status" className="text-center text-sm text-ink-muted">
+                        {notReadyBecause}
+                      </p>
+                    ) : null}
+                    {confirming ? (
+                      <Button variant="ghost" size="lg" fullWidth onClick={() => setConfirming(false)}>
+                        لا، ارجع
+                      </Button>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -12,9 +12,24 @@ async function fillDetails(user: ReturnType<typeof renderApp>['user']) {
   await user.type(await screen.findByLabelText('رقم الجوال'), '0912 345 678');
   await user.type(screen.getByLabelText('اسمك'), 'أحمد الخطيب');
   await user.type(screen.getByLabelText('كلمة السر'), 'secret-pass');
+  await user.click(screen.getByRole('checkbox', { name: /أوافق على/ }));
 }
 
 describe('RegisterPage', () => {
+  it('asks for an explicit tick on the terms before sending anything', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedOutRefresh,
+      'POST /v1/auth/register': codeSent,
+    });
+    const { user } = renderApp('/register');
+    await user.type(await screen.findByLabelText('رقم الجوال'), '0912 345 678');
+    await user.type(screen.getByLabelText('اسمك'), 'أحمد الخطيب');
+    await user.type(screen.getByLabelText('كلمة السر'), 'secret-pass');
+    await user.click(screen.getByRole('button', { name: 'افتح متجري' }));
+    expect(await screen.findByText('وافق على الشروط وسياسة الخصوصية لتفتح الحساب.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/auth/register')).toHaveLength(0);
+  });
+
   it('sends three fields with the agent code and terms version, then opens the store with the code', async () => {
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedOutRefresh,
@@ -50,6 +65,23 @@ describe('RegisterPage', () => {
       password: 'secret-pass',
     });
     await waitFor(() => expect(screen.queryByLabelText('رمز التحقق')).not.toBeInTheDocument());
+  });
+
+  it('shows which of the three steps the visitor is on', async () => {
+    mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh, 'POST /v1/auth/register': codeSent });
+    const { user } = renderApp('/register');
+
+    const steps = await screen.findByRole('list', { name: 'خطوات فتح المتجر' });
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(steps).getByText('بياناتك').closest('li')).toHaveAttribute('aria-current', 'step');
+
+    await fillDetails(user);
+    await user.click(screen.getByRole('button', { name: 'افتح متجري' }));
+    await screen.findByLabelText('رمز التحقق');
+
+    const next = screen.getByRole('list', { name: 'خطوات فتح المتجر' });
+    expect(within(next).getByText('رمز التحقق').closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(within(next).getByText('بياناتك').closest('li')).not.toHaveAttribute('aria-current');
   });
 
   it('shows no test box on a normal server', async () => {

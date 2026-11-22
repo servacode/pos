@@ -18,6 +18,7 @@ import {
   activationStatus,
   approveDevice,
   createPairingCode,
+  hideDevice,
   listDevices,
   rejectDevice,
   renameDevice,
@@ -103,6 +104,7 @@ export async function deviceRoutes(app: FastifyInstance): Promise<void> {
     ['approve', approveDevice],
     ['reject', rejectDevice],
     ['revoke', revokeDevice],
+    ['hide', hideDevice],
   ] as const) {
     app.post(`/v1/devices/:id/${action}`, { preHandler: requireAuth }, async (request) =>
       handler(db, authOf(request), idOf(request), { now: clock.now(), meta: metaOf(request) }),

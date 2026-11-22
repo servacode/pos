@@ -1,0 +1,439 @@
+/*
+ * The Inventory pages (round 44: المخزون، الجرد، التحويل، التالف، الصلاحية، الأرقام التسلسلية، سحب دفعة): the few rules the
+ * Sales styles (sales.css) do not have. Imported only by the lazy pages of this section, after sales.css, and
+ * scoped under .sx like it.
+ */
+.sx .ix-hero {
+  grid-template-columns: 1.6fr 1fr 1fr;
+}
+.sx .ix-hero .v.big {
+  font-size: 28px;
+  line-height: 36px;
+}
+.sx .ix-hero .note {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--ink-subtle);
+}
+.sx .ix-hero .note a,
+.sx .ix-hero .note button {
+  color: var(--brand-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.sx .ix-hero .v.warn {
+  color: var(--warning-ink);
+}
+.sx .ix-hero .v.bad {
+  color: var(--danger-ink);
+}
+@media (max-width: 639px) {
+  .sx .ix-hero {
+    grid-template-columns: 1fr 1fr;
+  }
+  .sx .ix-hero .v.big {
+    font-size: 24px;
+    line-height: 32px;
+  }
+}
+
+/* a short list of rows with their actions (damaged goods, serials, batches) */
+.sx .ix-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sx .ix-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.sx .ix-list > li:first-child {
+  border-top: 0;
+}
+.sx .ix-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sx .ix-main .t {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.sx .ix-main .d {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ink-muted);
+}
+.sx .ix-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.sx .ix-end {
+  text-align: end;
+  font-weight: 700;
+}
+
+/* an empty state without a box inside a box */
+.sx .ix-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--ink-muted);
+}
+.sx .ix-empty h3 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--ink);
+}
+.sx .ix-empty p {
+  margin: 0;
+  max-width: 44ch;
+}
+
+/* a calm one-line state ("nothing expires soon") */
+.sx .ix-calm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  color: var(--ink-muted);
+}
+.sx .ix-calm svg {
+  color: var(--success);
+  flex: none;
+}
+
+/* the warning note (items without a cost, a stale list) */
+.sx .ix-warn {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--warning-soft);
+  color: var(--warning-ink);
+  font-size: 13px;
+  line-height: 20px;
+}
+.sx .ix-warn svg {
+  flex: none;
+  margin-top: 2px;
+}
+.sx .ix-warn a,
+.sx .ix-warn button {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* counting mode: a bar that stays on screen with the progress and the two actions */
+.sx .ix-countbar {
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--e3);
+}
+.sx .ix-countbar .p {
+  font-weight: 700;
+}
+.sx .ix-countbar .h {
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+.sx .ix-counted {
+  width: 7rem;
+  max-width: 100%;
+}
+.sx .ix-flash {
+  animation: ix-flash 1.2s ease-out 1;
+}
+@keyframes ix-flash {
+  from {
+    background: var(--brand-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx .ix-flash {
+    animation: none;
+  }
+}
+
+/* the stock card of one item on a phone (when the table does not fit) */
+.sx .ix-icard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--e1);
+}
+.sx .ix-icard .n {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.sx .ix-icard .v {
+  font-weight: 700;
+  text-align: end;
+}
+.sx .ix-icard .q {
+  grid-column: 1;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+}
+.sx .ix-icard .u {
+  grid-column: 2;
+  text-align: end;
+  color: var(--ink-subtle);
+  font-size: 12px;
+}
+.sx .ix-icard .c {
+  grid-column: 1 / -1;
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+/* the dialog footer: the cancel at the start, the action at the end */
+.sx .ix-foot,
+.ix-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* the grid of sizes and colours: one cell, in four states */
+.ix-cell {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.sx .sx-fbtn.ix-urgent {
+  border-color: var(--danger);
+  color: var(--danger-ink);
+}
+.sx .ix-calm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  margin: 0;
+  color: var(--ink-muted);
+}
+.sx .ix-calm svg {
+  color: var(--success);
+  flex: none;
+}
+
+.sx.ix-narrow {
+  max-width: 36rem;
+  margin-inline: auto;
+  width: 100%;
+}
+.sx .ix-pad {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* the serial numbers a count picks the missing pieces from (round 60) */
+.ix-serials {
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 8px 12px 12px;
+  margin: 0;
+  min-width: 0;
+}
+.ix-serials legend {
+  padding: 0 6px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.ix-serial-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0 12px;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+/* the valuation method line and the reorder pill (round 60) */
+.sx .ix-method {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: 14px;
+  line-height: 22px;
+}
+.sx .ix-method b {
+  color: var(--color-ink);
+}
+
+/* round 62: the picked numbers, and the search / paste tools of the serial picker */
+.ix-serial-chosen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ix-serial-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px 0 12px;
+  border-radius: 999px;
+  background: var(--color-brand-soft);
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ix-serial-chip .x {
+  color: var(--color-ink-muted);
+  font-size: 16px;
+  line-height: 1;
+}
+.ix-serial-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: end;
+  margin-bottom: 8px;
+}
+@media (max-width: 640px) {
+  .ix-serial-tools {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* round 62: the valuation method and the reorder line sit inside the figures' card, under the tiles */
+.sx .ix-hero .ix-hero-note {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+}
+.sx .ix-hero .ix-hero-note .note {
+  margin: 0;
+}
+
+/* round 62: a one-line card where three empty tiles would only take a screen */
+.sx .ix-oneline {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: 14px;
+  color: var(--color-ink-muted);
+}
+
+/* round 65: «ما معنى هذه الأرقام؟» closes the valuation notes (no empty head band), the size grid fills its card's width */
+.sx .ix-hero .ix-defs {
+  padding-top: 4px;
+}
+.sx .ix-gridtable {
+  width: 100%;
+  table-layout: auto;
+}
+.sx .ix-gridtable td,
+.sx .ix-gridtable th[scope='col'] {
+  min-width: 64px;
+}
+.sx .ix-hero .ix-profit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sx .ix-hero .ix-profit .note {
+  margin: 0;
+}
+
+/* round 65: the mark on a stock row whose serial numbers do not match its stock */
+.sx .ix-drift {
+  display: flex;
+  width: fit-content;
+  margin-top: 4px;
+}
+
+/* serials on a phone: a card is two lines (number and state, then name and documents on one line) */
+.sx .ix-scard .n {
+  font-size: 15px;
+}
+.sx .ix-scard .ix-sline {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  row-gap: 2px;
+  min-width: 0;
+}
+.sx .ix-scard .ix-sline > span {
+  flex: none;
+  white-space: nowrap;
+}
+.sx .ix-scard .ix-sline > .ix-sname {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+.sx .ix-scard .ix-sline > span + span::before {
+  content: '·';
+  margin-inline-end: 8px;
+  color: var(--ink-subtle);
+}
+.sx .ix-more {
+  list-style: none;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+}

@@ -159,6 +159,44 @@ SERVA_OTP_GATEWAY_TOKEN=<سر طويل، 16 حرفاً على الأقل>
 **تنبيه:** بوتات واتساب غير الرسمية قد يحظر واتساب رقمها. استعمل رقماً مخصصاً للبوت لا رقمك
 الشخصي. وعلى الخادم السحابي يجب أن يكون عنوان البوابة `https://`.
 
+### إرسال الرمز عبر رسالة نصية SMS
+
+لأن بوت واتساب غير الرسمي قد يُحظر، يوجد مسار SMS عام يعمل مع أي مزوّد يملك واجهة HTTP.
+لا شيء مكتوب في الكود لمزوّد بعينه: تصف الطلب بإعدادات في `deploy/local/.env`:
+
+```
+SERVA_OTP_DELIVERY=sms
+SERVA_SMS_GATEWAY_URL=https://api.provider.example/v1/messages
+SERVA_SMS_GATEWAY_AUTH_HEADER=Authorization: Bearer <المفتاح>
+SERVA_SMS_GATEWAY_BODY={"to":"{phone}","text":"{message}"}
+# اختيارية: SERVA_SMS_GATEWAY_METHOD=POST (أو PUT أو GET)
+#           SERVA_SMS_GATEWAY_CONTENT_TYPE=application/json
+```
+
+في العنوان والجسم تُستبدل هذه الأسماء بين قوسين معقوفين: `{phone}` الرقم بصيغة `+963933123456`،
+و`{digits}` الأرقام فقط `963933123456` (بعض المزوّدين يريدونه هكذا)، و`{code}` الرمز، و`{message}`
+نص الرسالة الكامل. كل قيمة تُهرَّب بحسب مكانها: نص JSON آمن داخل جسم JSON، وترميز URL داخل
+`application/x-www-form-urlencoded` أو داخل العنوان. أمثلة:
+
+```
+# نموذج (form)
+SERVA_SMS_GATEWAY_CONTENT_TYPE=application/x-www-form-urlencoded
+SERVA_SMS_GATEWAY_BODY=to={digits}&text={message}
+# مزوّد يريد GET والمفتاح في العنوان
+SERVA_SMS_GATEWAY_METHOD=GET
+SERVA_SMS_GATEWAY_URL=https://sms.example/send?key=<المفتاح>&to={digits}&msg={message}
+```
+
+يجب أن يظهر `{message}` أو `{code}` في العنوان أو الجسم، وإلا يرفض الخادم الإقلاع. ترويسة
+المصادقة سطر واحد `الاسم: القيمة`. أي رد 2xx يعني أن المزوّد قبل الرسالة؛ غير ذلك، أو عدم الرد
+خلال 10 ثوانٍ، يظهر للمستخدم «لا يمكن إرسال رمز التحقق الآن»، ويُسجَّل السبب (رقم الحالة فقط)
+دون الرمز ودون الرقم. على الخادم السحابي يجب أن يكون العنوان `https://`.
+
+**قناة احتياطية:** `SERVA_OTP_FALLBACK=gateway` مع `SERVA_OTP_DELIVERY=sms` يجرّب SMS أولاً، فإن
+فشل أرسل عبر بوت واتساب (والعكس صحيح: `SERVA_OTP_DELIVERY=gateway` مع `SERVA_OTP_FALLBACK=sms`).
+كل قناة تحتاج إعداداتها. رسائل البث إلى الزبائن (العروض) لا تُرسل بـ SMS إلا إن وضعت
+`SERVA_SMS_ALLOW_BROADCASTS=true`، لأن كل رسالة مدفوعة.
+
 ## عنوان الخادم على الشبكة
 
 في نهاية `pnpm local:up` و`pnpm local:deploy` يظهر العنوان، مثل:
@@ -208,16 +246,108 @@ SERVA_OFFSITE_DIR=/mnt/c/Users/<اسمك>/Google Drive/serva   # مجلد Google
 (`SERVA_OFFSITE_KEEP`). النسخة مشفرة، فالمجلد السحابي لا يرى البيانات. وإن فشل النسخ
 (القرص غير موصول مثلاً) يكتب **OFF-SITE COPY FAILED** وتبقى النسخة المحلية.
 
+### نسخة خارج المحل في سلة تخزين سحابية (S3)
+
+أي مزوّد يتكلم بروتوكول S3 يصلح: Backblaze B2 أو Wasabi أو Cloudflare R2 أو MinIO على خادم
+آخر أو AWS S3. لا تثبّت شيئاً على الكمبيوتر: الرفع يتم بأداة rclone داخل حاوية Docker
+(بإصدار مثبّت، ونظام ملفات للقراءة فقط، ودون صلاحيات). أنشئ سلة (bucket) ومفتاحاً له
+صلاحية القراءة والكتابة والحذف في هذه السلة وحدها، ثم في `deploy/local/.env`:
+
+```
+SERVA_S3_ENDPOINT=https://s3.us-west-004.backblazeb2.com   # R2: https://<id>.r2.cloudflarestorage.com
+SERVA_S3_BUCKET=اسم-السلة
+SERVA_S3_ACCESS_KEY_ID=...
+SERVA_S3_SECRET_ACCESS_KEY=...
+SERVA_S3_PREFIX=serva-backups      # مجلد داخل السلة
+SERVA_S3_KEEP=30                   # عدد النسخ المحفوظة في السلة
+```
+
+```bash
+pnpm local:offsite test            # يكتب ملفاً صغيراً ويقرؤه ويحذفه: يثبت أن المفتاح والسلة صحيحان
+pnpm local:offsite list            # النسخ الموجودة في السلة
+```
+
+بعدها كل `pnpm local:backup` (واليومي) يرفع الملفات الثلاثة بعد أن تُتحقَّق النسخة المحلية:
+**الحجم** لكل ملف، و**sha256** لملف النسخة المشفّر بعد أن يُقرأ من السلة من جديد
+(`SERVA_S3_VERIFY=size` يكتفي بالحجم إن كان الإنترنت محدود الحجم). السلة لا ترى البيانات
+ولا كلمة السر: الملف مشفّر قبل أن يغادر الكمبيوتر. إن فشل الرفع يكتب
+**OFF-SITE UPLOAD FAILED** ويخرج بخطأ (فيصل التنبيه)، وتبقى النسخة المحلية. يمكن استعمال
+المجلد والسلة معاً.
+
+- المفتاح يحتاج صلاحية الحذف ليُبقي آخر 30 نسخة فقط. فعّل في السلة نفسها «إصدارات الملفات»
+  (versioning) أو «قفل الكائنات» (object lock)، مع قاعدة تحذف الإصدارات القديمة بعد 30 يوماً:
+  هكذا لا يستطيع خطأ أو فيروس على الكمبيوتر أن يمحو النسخ البعيدة نهائياً.
+- لـ MinIO داخل Docker على نفس الكمبيوتر: `SERVA_S3_DOCKER_NETWORK=<اسم شبكة Docker>`
+  و`SERVA_S3_ENDPOINT=http://minio:9000`. العنوان `http://` مقبول فقط لجهاز على شبكة المحل.
+
+**الاستعادة من السلة** (كمبيوتر جديد أو بعد فقد القرص):
+
+1. ثبّت المشروع وضع في `deploy/local/.env` كلمة سر النسخ `SERVA_BACKUP_PASSPHRASE` (من جزأي المفتاح،
+   انظر «مفتاح النسخ بثلاثة أجزاء») وإعدادات `SERVA_S3_*`.
+2. `pnpm local:offsite list` ثم `pnpm local:offsite fetch latest` (أو اسم نسخة محددة).
+   ينزّل الملفات الثلاثة إلى مجلد النسخ ويتحقق من بصمتها، ويرفض ملفاً تالفاً.
+3. `pnpm local:restore deploy/local/backups/<الاسم>.dump.enc` تمرين استعادة (لا يمس الخادم)،
+   ثم أضف `--replace-live` لتطبيقها فعلاً. تفاصيلها في «استعادة فعلية».
+
+### تنبيهات: فشل النسخ أو تأخره أو توقف الخادم
+
+بدون تنبيه، نسخة فاشلة لا يعرف بها أحد إلا يوم الحاجة إليها. التنبيه رسالة تذهب إلى رابط
+(webhook) تحدده؛ يعمل مع Slack وDiscord وTelegram وبوابة واتساب، وهو مطفأ حتى تضع الرابط:
+
+```
+# Slack أو Discord: الرابط وحده يكفي
+SERVA_ALERT_WEBHOOK_URL=https://hooks.slack.com/services/...
+# Telegram: أنشئ بوتاً من @BotFather، وضع معرّف المحادثة في الرابط
+SERVA_ALERT_WEBHOOK_URL=https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>
+SERVA_ALERT_FORMAT=form
+# بوابة واتساب أو أي خدمة تأخذ JSON وتحتاج مفتاحاً
+SERVA_ALERT_WEBHOOK_URL=http://192.168.1.30:3001/send
+SERVA_ALERT_AUTH_HEADER=Authorization: Bearer <السر>
+SERVA_ALERT_BODY={"phone":"+963933123456","text":"{message}"}
+```
+
+`pnpm local:alert test` يرسل رسالة تجريبية. الرابط والمفتاح سرّان: لا يظهران في السجل ولا في
+قائمة العمليات، ورسالة التنبيه لا تحوي أسراراً. يُقبل `http://` فقط لجهاز على شبكة المحل.
+
+متى يصلك تنبيه:
+
+- **فشل النسخ**: تعذّر التفريغ، أو التشفير، أو النسخ إلى المجلد/السلة، أو لم يطابق ما كُتب ما
+  في النسخة (في اللحظة نفسها).
+- **تأخر النسخ**: آخر نسخة، أو آخر نسخة خارج المحل (مجلد أو سلة)، أقدم من 26 ساعة، أو لا
+  يوجد نسخ خارج المحل أصلاً. يفحص cron كل ساعة، ويكرر التنبيه كل 12 ساعة
+  (`SERVA_ALERT_REPEAT_HOURS`) ما دامت المشكلة قائمة.
+- **توقف الخادم**: `/health` لا يجيب 3 مرات متتالية (نحو 15 دقيقة)، ورسالة ثانية حين يعود.
+  `pnpm local:health-watch` يفحص مرة واحدة (`SERVA_HEALTH_URL` لعنوان آخر).
+- **فشل التنظيف اليومي** (التالي).
+
+الكمبيوتر المطفأ لا يرسل شيئاً. لذلك ضع في `SERVA_BACKUP_PING_URL` رابط «مفتاح الرجل الميت»
+من خدمة مجانية مثل healthchecks.io أو Uptime Kuma: يُستدعى بعد كل نسخة ناجحة تماماً (بما في
+ذلك النسخ خارج المحل)، وتنبّهك الخدمة إن لم يصلها نداء خلال يوم. وللتحقق من أن الخادم
+نفسه يُرى من الإنترنت استعمل أي خدمة فحص خارجية على `https://<عنوانك>/health` (UptimeRobot
+وغيرها)؛ ما يعمل على الكمبيوتر نفسه لا يرى انقطاع الكهرباء.
+
 ### نسخة آلية كل يوم
 
 ```bash
 pnpm local:schedule install    # كل يوم الساعة 02:17 (غيّرها بـ SERVA_BACKUP_TIME في .env)
 pnpm local:schedule status     # آخر نسخة وآخر نسخة خارج المحل، وعمر كل منهما
+pnpm local:schedule check      # مثل status، لكن يرسل تنبيهاً إن وُجدت مشكلة
 pnpm local:schedule remove
 ```
 
-`status` يحذّر إن مرّ على آخر نسخة، أو آخر نسخة خارج المحل، أكثر من 26 ساعة. السجل في
-`deploy/local/backups/daily.log`. ويجب أن يكون الكمبيوتر يعمل في ذلك الوقت.
+`install` يضيف سطور cron: النسخة اليومية، والتنظيف اليومي 03:47، وإن كان
+`SERVA_ALERT_WEBHOOK_URL` موضوعاً فأيضاً فحص التأخر كل ساعة وفحص الخادم كل 5 دقائق (إن
+وضعته بعد التثبيت أعد `install`). `status` يحذّر إن مرّ على آخر نسخة، أو آخر نسخة خارج
+المحل، أكثر من 26 ساعة. السجلات في `deploy/local/backups`: `daily.log` و`cleanup.log`
+و`watch.log` و`health.log`. ويجب أن يكون الكمبيوتر يعمل في ذلك الوقت.
+
+### التنظيف اليومي
+
+جلسات الدخول تُنشئ صفاً جديداً مع كل تجديد للرمز، ولا يحذفها أحد، فتكبر قاعدة البيانات بلا
+حد. `pnpm local:cleanup` (يشغّله `install` كل يوم) يحذف فقط ما لا يمكن استعماله بعد الآن:
+جلسات انتهى رمزها أو انتهت مدتها المطلقة منذ أكثر من 7 أيام، ورموز ربط الأجهزة التي انتهت
+ولم تُستعمل، ورموز التسجيل القديمة، وعدّادات الحدود المنتهية. لا يلمس الفواتير ولا القيود ولا
+سجل التدقيق. آمن في أي وقت، ويطبع عدد الصفوف المحذوفة.
 
 **على ويندوز:** cron داخل WSL لا يعمل إلا وWSL يعمل. أسهل طريقة: افتح «Task Scheduler» ←
 Create Basic Task ← يومياً ← Start a program:
@@ -350,7 +480,7 @@ Service workers, `Secure` cookies (the API's refresh cookie is `Secure` in produ
 - The dump is encrypted in the container (`openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256`, passphrase from the environment, never on a command line), so plaintext never reaches the host. The host keeps `.dump.enc`, `.dump.enc.sha256` (`sha256sum -c` format) and `.manifest` (the dump's own sha256 plus the stats), all mode 600 in a 700 folder.
 - `table-stats.sql` prints one line per table, `schema.table|rows|md5(sorted md5 of each row::text)`, with fixed `TimeZone`, `DateStyle` and float settings. It also covers RLS flags, policies, table grants, functions and triggers.
 - Restore drill: a throwaway container from the same image, `--network none`, roles from `db-bootstrap.sql`. Inside it, the backup is decrypted, its sha256 checked against the manifest **before** `pg_restore --exit-on-error --single-transaction`, and then the stats are diffed with the manifest. `--replace-live` repeats this into `serva_restoring` on the live cluster, swaps names, keeps `serva_before_restore_<time>`, and smoke-tests.
-- Limits, by design for the local server: no WAL archiving or point-in-time recovery, no off-site copy, and CBC with a checksum rather than an authenticated cipher. The hosted step replaces this with pgBackRest (tab 16). After a restore, the `server_epoch` bump and the device resend (tab 16 › بعد أي استعادة) do not exist yet in the API.
+- Limits, by design for the local server: no WAL archiving or point-in-time recovery, and CBC with a checksum rather than an authenticated cipher. The hosted step replaces this with pgBackRest (tab 16). After a restore, the `server_epoch` bump and the device resend (tab 16 › بعد أي استعادة) do not exist yet in the API.
 
 ### Environment (`deploy/local/.env`, generated, git-ignored)
 
@@ -361,7 +491,18 @@ Service workers, `Secure` cookies (the API's refresh cookie is `Secure` in produ
 - `SERVA_SUBNET` and `SERVA_PROXY_IP`: change them together;
 - `SERVA_EXTRA_HOSTS`;
 - `SERVA_BACKUP_DIR` and `SERVA_BACKUP_KEEP`;
-- `SERVA_OTP_DELIVERY`: `screen` (default, test mode) or `none`.
+- `SERVA_OTP_DELIVERY`: `screen` (default, test mode), `none`, `gateway` or `sms`; `SERVA_OTP_FALLBACK`;
+- `SERVA_OTP_GATEWAY_URL`/`_TOKEN` and `SERVA_SMS_GATEWAY_URL`/`_METHOD`/`_AUTH_HEADER`/`_CONTENT_TYPE`/`_BODY`, `SERVA_SMS_ALLOW_BROADCASTS` (passed to the API as `OTP_GATEWAY_*`, `SMS_GATEWAY_*`, `SMS_ALLOW_BROADCASTS`);
+- `SERVA_SENTRY_DSN`, `SERVA_SENTRY_ENVIRONMENT`, `SERVA_SENTRY_RELEASE` (API error reports, below);
+- `SERVA_OFFSITE_DIR`/`SERVA_OFFSITE_KEEP` (folder) and `SERVA_S3_ENDPOINT`, `SERVA_S3_BUCKET`, `SERVA_S3_ACCESS_KEY_ID`, `SERVA_S3_SECRET_ACCESS_KEY`, `SERVA_S3_PREFIX`, `SERVA_S3_REGION`, `SERVA_S3_KEEP`, `SERVA_S3_VERIFY`, `SERVA_S3_DOCKER_NETWORK`, `SERVA_RCLONE_IMAGE` (bucket);
+- `SERVA_ALERT_WEBHOOK_URL`, `SERVA_ALERT_FORMAT` (`json`|`form`), `SERVA_ALERT_BODY`, `SERVA_ALERT_AUTH_HEADER`, `SERVA_ALERT_NAME`, `SERVA_ALERT_REPEAT_HOURS`, `SERVA_BACKUP_PING_URL`, `SERVA_HEALTH_URL`, `SERVA_HEALTH_FAILS`.
+
+### Off-site bucket, alerts, cleanup, error reports (all optional, all off by default)
+
+- **Bucket upload** (`scripts/local/offsite-s3.sh`, called by `backup.sh` after the local copy and the optional folder copy). Tool: rclone, `rclone/rclone` pinned by tag and digest, run with `docker run --read-only --cap-drop ALL --security-opt no-new-privileges --user <uid> --memory 512m`, backup folder mounted read-only (read-write only for `fetch`). Why rclone and not aws-cli: one static binary for every S3-compatible provider (`provider=Other`, path-style by default), checksum-aware transfers, a small image, and no dependence on the aws-cli v2.23+ default checksum headers that B2 and some R2/MinIO versions reject. The remote is configured through `RCLONE_CONFIG_SERVA_*` environment variables, so no config file is written; the two secrets are passed to `docker run` by name. Verify = sizes of the three files from `lsf`, then `rclone hashsum sha256 --download` of the `.dump.enc` against the manifest's `encrypted_sha256`. The manifest is uploaded last, so a copy that has one is complete. `last-s3` in the backup folder is written only after verification and drives the staleness check. Failure of the folder copy or the upload fails the run (exit 1) after the other was tried; the local backup is always kept.
+- **Alerts** (`scripts/local/alert.sh`, sourced): one webhook, `json` (body template with `{message}` filled in JSON-escaped; default carries both `text` for Slack and `content` for Discord) or `form` (`text=` urlencoded, for Telegram). The URL and auth header reach curl through `--config -` on stdin, never argv, and are never printed. Plain `http://` is accepted only for localhost, private IPv4, dotless and `.local/.lan/.internal/.home.arpa` hosts. `backup.sh` and `cleanup.sh` alert from an `EXIT` trap, using the message `die` stored in `SERVA_LAST_ERROR`. `send_alert_once` repeats a standing problem at most every `SERVA_ALERT_REPEAT_HOURS` (state in `<backups>/alert-state/`). Cron lines (added by `schedule.sh install`): backup 02:17, cleanup 03:47, and only when a webhook is set, `schedule.sh check` hourly and `health-watch.sh --quiet` every 5 minutes. A computer that is off cannot alert: `SERVA_BACKUP_PING_URL` (dead-man's switch) and an external uptime service cover that. For the hosted deployment, use the provider's uptime check on `/health` instead of the cron job.
+- **Cleanup** (`deploy/local/pg/cleanup.sql`, `scripts/local/cleanup.sh`). Growth audit: `rate_limits` (swept inside `rate_limit_hit`), `otp_challenges` (swept in `otp_create`) and snapshot files (swept on build) already clean themselves while the server is used; `sessions` did not: every refresh inserts a row and revokes the old one, so a till refreshing every 15 minutes adds ~100 rows a day forever. `serva_app` has no `DELETE` on `sessions` and RLS hides other stores' rows, so an in-process job cannot do it; the SQL runs as the `postgres` superuser through `docker compose exec`, which needs no migration. The sessions rule (`least(expires_at, absolute_expires_at) < now() - 7 days`) cannot affect `isSessionLive`, which needs an unrevoked row with both dates in the future. Not touched: `pin_attempts` (bounded by users x devices), `legal_acceptances`, `audit_logs` and `sync_inbox` (kept by design; their partitions are managed separately). The hosted deployment needs the same statements on a schedule (pg_cron or the platform's cron) with a role that can delete from `sessions`.
+- **Error reports** (`apps/api/src/http/error-reporting.ts`, enabled by `SENTRY_DSN`). A small Sentry-protocol client (envelope endpoint, so Sentry and GlitchTip both work) instead of the Sentry SDK: the SDK adds ~100 packages (OpenTelemetry), patches Node internals and by default captures request data, while this client can only send what `buildEvent` builds: `serializeError` output (no SQL text, parameters, Postgres `detail`; quoted values masked), a second `scrubText` pass (SQL-looking text, e-mail, phone numbers, JWTs, long secrets), the route pattern (`/v1/x/:id`, never the URL), method, status and the request `ref`. No headers, cookies, body, query, user, IP or breadcrumbs. 5xx only (not 4xx, not the 503 load shedding), at most 30 reports a minute, 5 s timeout, never affects the response. `server.ts` also reports `uncaughtException`/`unhandledRejection` and flushes before exiting. Tests: `apps/api/test/error-reporting.test.ts`. The web app is not instrumented: a browser reporter needs the DSN host in the CSP `connect-src` of `apps/web/nginx` (fixed until the host is chosen), would ship page URLs and cashier data paths unless filtered as strictly, and the cashier is offline-first, so reports would arrive late and out of context. Revisit when the hosting and the tracker are chosen.
 
 ### Test mode (`OTP_DELIVERY=screen`)
 

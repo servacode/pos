@@ -8,9 +8,9 @@ import type {
 import { validateDocumentPayload } from '@serva/core/contracts/documents';
 import { stripBidiControls } from '@serva/core/text';
 import { memoryLocal } from '../../offline/local';
-import { ids, PINS, PRODUCTS } from '../../test/pos';
+import { ids, PINS, posSets, PRODUCTS } from '../../test/pos';
 import { openShift, renderPos, scan, SHIFT_ID } from '../../test/renderPos';
-import { closeDrawer, shiftActivity } from './shift';
+import { closeDrawer, netMethodRows, notesFor, refundVouchers, shiftActivity } from './shift';
 
 beforeEach(() => {
   vi.spyOn(window, 'print').mockImplementation(() => undefined);
@@ -30,11 +30,17 @@ async function signIn(user: ReturnType<typeof renderPos>['user'], name: 'سام�
 const docsOf = <T,>(outbox: ReturnType<typeof renderPos>['outbox'], type: string) =>
   outbox.filter((e) => e.type === type).map((e) => ({ entry: e, payload: e.doc.payload as unknown as T }));
 
+/** A shift opens on one amount per drawer; the notes are counted one by one behind «عدّ تفصيلي» */
+async function countByNotes(user: ReturnType<typeof renderPos>['user']) {
+  for (const button of await screen.findAllByRole('button', { name: 'عدّ تفصيلي' })) await user.click(button);
+}
+
 describe('shift', () => {
   it('opens with the counted drawers and saves shift_open (SFT) before the first sale', async () => {
     const { user, outbox, local } = renderPos();
     await signIn(user, 'سامر');
     expect(await screen.findByRole('heading', { name: 'افتح الوردية' })).toBeInTheDocument();
+    await countByNotes(user);
 
     await user.type(screen.getByLabelText('عدد أوراق 500 ل.س'), '2');
     await user.click(screen.getByRole('button', { name: 'زِد 100 ل.س' }));
@@ -65,6 +71,43 @@ describe('shift', () => {
     expect(screen.getByText(/وردية منذ/)).toBeInTheDocument();
   });
 
+  it('opens on one amount per drawer: «اكتب المجموع» is the default, no note-by-note rows until asked', async () => {
+    const { user, outbox } = renderPos();
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    expect(screen.queryByLabelText(/^عدد أوراق/)).not.toBeInTheDocument();
+    await user.type(screen.getAllByRole('textbox', { name: 'المجموع' })[0]!, '5000');
+    await user.click(screen.getByRole('button', { name: 'افتح الوردية' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    const [open] = docsOf<ShiftOpenPayload>(outbox, 'shift_open');
+    expect(open!.payload.opening[0]).toMatchObject({ currency: 'SYP', amountMinor: 500_000 });
+  });
+
+  it('a double click on «افتح الوردية» opens one shift, not two', async () => {
+    const { user, outbox } = renderPos();
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    await user.dblClick(screen.getByRole('button', { name: 'افتح الوردية' }));
+    expect(await screen.findByRole('list', { name: 'الأصناف' })).toBeInTheDocument();
+    expect(docsOf<ShiftOpenPayload>(outbox, 'shift_open')).toHaveLength(1);
+  });
+
+  it('asks again before saving an opening count far above the usual one', async () => {
+    const { user, outbox, local } = renderPos();
+    // Last time the drawer opened with 1,100 ل.س; now a slipped key makes it 100 times that
+    await local.set('lastOpeningCount', { SYP: 110_000, USD: 0 });
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    await countByNotes(user);
+    await user.type(screen.getByLabelText('عدد أوراق 500 ل.س'), '300');
+    await user.click(screen.getByRole('button', { name: 'افتح الوردية' }));
+    expect(await screen.findByText(/أكبر بكثير من المعتاد/)).toBeInTheDocument();
+    expect(docsOf<ShiftOpenPayload>(outbox, 'shift_open')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: /نعم، المبلغ صحيح/ }));
+    expect(await screen.findByRole('list', { name: 'الأصناف' })).toBeInTheDocument();
+    expect(docsOf<ShiftOpenPayload>(outbox, 'shift_open')).toHaveLength(1);
+  });
+
   it('closes blind for a cashier: no expected amount, and shift_close carries every term', async () => {
     const local = memoryLocal();
     await openShift(local);
@@ -83,14 +126,37 @@ describe('shift', () => {
     expect(
       await screen.findByText('عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.'),
     ).toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: 'تخطَّ العدّ واكتب المجموع' })[0]!);
+    // A short neutral line: the drawer holds customers' cash and deposits too (the expected amount stays hidden)
+    expect(screen.getByText('عُدّ كل النقد الذي في الدرج.')).toBeInTheDocument();
+    // One total per drawer, note by note behind a button, and no jargon line about the chosen note
+    await screen.findAllByRole('textbox', { name: 'المجموع' });
+    expect(screen.getAllByRole('button', { name: 'عدّ تفصيلي' }).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/الفئة المختارة/)).not.toBeInTheDocument();
     await user.type(screen.getAllByRole('textbox', { name: 'المجموع' })[0]!, '240');
-    await user.click(screen.getByRole('button', { name: 'تابع للملخّص' }));
+    await user.click(screen.getByRole('button', { name: 'راجع وأغلق' }));
 
     expect(await screen.findByRole('heading', { name: 'ملخّص الوردية' })).toBeInTheDocument();
     expect(screen.getByText('المتوقع والفرق يراهما المدير فقط.')).toBeInTheDocument();
     expect(screen.queryByText(/المتوقع/, { selector: 'span' })).not.toBeInTheDocument();
+    // The sellers show whenever a sale was made, even when the cashier sold it himself
+    expect(screen.getByLabelText('مرتجعات وقسائم')).toHaveTextContent('البائعون');
     await user.click(screen.getByRole('button', { name: 'أغلق الوردية' }));
+    // A confirmation first, then the Z report, then the cashier leaves
+    expect(screen.getByRole('alertdialog', { name: 'تأكيد إغلاق الوردية' })).toBeInTheDocument();
+    expect(outbox.some((e) => e.type === 'shift_close')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'نعم، أغلق الوردية' }));
+    const z = await screen.findByLabelText('تقرير إغلاق الوردية');
+    // The cashier has no «shift.view_difference»: the slip carries the count, not the expected cash
+    expect(z).toHaveTextContent('البائعون');
+    expect(z).toHaveTextContent('المعدود');
+    expect(z).not.toHaveTextContent('المتوقع');
+    expect(z).not.toHaveTextContent('الفرق');
+    await user.click(screen.getByRole('button', { name: 'اطبع' }));
+    expect(window.print).toHaveBeenCalled();
+    // One way out: «تمّ» beside the slip, and no second «اخرج»
+    expect(screen.queryByRole('button', { name: 'اخرج' })).not.toBeInTheDocument();
+    expect(z).not.toHaveTextContent('0 مرتجع');
+    await user.click(screen.getByRole('button', { name: 'تمّ' }));
 
     expect(await screen.findByRole('heading', { name: 'من يعمل الآن؟' })).toBeInTheDocument();
     const [close] = docsOf<ShiftClosePayload>(outbox, 'shift_close');
@@ -125,7 +191,7 @@ describe('shift', () => {
     await screen.findByRole('list', { name: 'الأصناف' });
     await user.click(screen.getByRole('button', { name: 'المزيد' }));
     await user.click(screen.getByRole('menuitem', { name: 'أغلق الوردية' }));
-    await user.click(await screen.findByRole('button', { name: 'تابع للملخّص' }));
+    await user.click(await screen.findByRole('button', { name: 'راجع وأغلق' }));
     await screen.findByRole('heading', { name: 'ملخّص الوردية' });
     expect(plain(document.body)).toContain('المتوقع 0 ل.س · الفرق 0 ل.س');
   });
@@ -208,5 +274,161 @@ describe('the drawer formula (10 › مطابقة الصندوق)', () => {
       totalMinor: 300,
     });
     expect(usd).toMatchObject({ expectedMinor: 400, differenceMinor: -100, differenceBaseMinor: -13_000 });
+  });
+});
+
+describe('the close summary rows', () => {
+  it('takes the cash paid back for returns off the cash row and leaves the saved summary alone', () => {
+    const doc = (type: string, payload: Record<string, unknown>, seq: number) =>
+      ({ seq, type, doc: { type, payload } }) as never;
+    const activity = shiftActivity(SHIFT_ID, [
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 174_100 }],
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 27_000 }] },
+        2,
+      ),
+    ]);
+    expect(netMethodRows(activity)).toEqual([
+      { method: 'cash', currency: 'SYP', count: 1, amountMinor: 147_100 },
+    ]);
+    // The saved summary and the drawer's expected cash are what they were
+    expect(activity.byMethod[0]!.amountMinor).toBe(174_100);
+    expect(activity.terms.get('SYP')!.refundsMinor).toBe(27_000);
+    // Cash paid back with no cash sale in the shift still shows, as a minus
+    const only = shiftActivity(SHIFT_ID, [
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 5_000 }] },
+        1,
+      ),
+    ]);
+    expect(netMethodRows(only)).toEqual([{ method: 'cash', currency: 'SYP', count: 0, amountMinor: -5_000 }]);
+    expect(netMethodRows(null)).toEqual([]);
+    // A card sale refunded to the card, and an exchange refunded on a voucher, are taken off too
+    const mixed = shiftActivity(SHIFT_ID, [
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          payments: [{ method: 'card', currency: 'SYP', amountMinor: 20_000 }],
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'card', currency: 'SYP', amountMinor: 8_000 }] },
+        2,
+      ),
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'voucher', currency: 'SYP', amountMinor: 3_500 }] },
+        3,
+      ),
+    ]);
+    // …but a refund voucher is not a payment taken back: no negative «قسيمة» row, it has its own line
+    expect(netMethodRows(mixed)).toEqual([
+      { method: 'card', currency: 'SYP', count: 1, amountMinor: 12_000 },
+    ]);
+    expect(refundVouchers(mixed)).toEqual([{ currency: 'SYP', amountMinor: 3_500 }]);
+    expect(refundVouchers(null)).toEqual([]);
+  });
+
+  it('keeps what came into the drawer outside a sale, and a dollar payment given back in lira', () => {
+    const doc = (type: string, payload: Record<string, unknown>, seq: number) =>
+      ({ seq, type, doc: { type, payload } }) as never;
+    const a = shiftActivity(SHIFT_ID, [
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          payments: [{ method: 'cash', currency: 'USD', amountMinor: 2_000 }],
+          change: { currency: 'SYP', amountMinor: 80_000 },
+        },
+        1,
+      ),
+      doc('receipt', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 110_000 }, 2),
+      doc('gift_voucher', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 50_000 }, 3),
+    ]);
+    expect(a.changeBack).toEqual([{ paid: 'USD', change: 'SYP', paidMinor: 2_000, changeMinor: 80_000 }]);
+    expect(a.cashIn).toEqual({
+      receipts: [{ currency: 'SYP', amountMinor: 110_000 }],
+      vouchers: [{ currency: 'SYP', amountMinor: 50_000 }],
+    });
+  });
+});
+
+describe('deposits («عربون») in the shift', () => {
+  it('counts a cash deposit into the drawer like a gift voucher did, and keeps it apart from gifts', () => {
+    const doc = (type: string, payload: Record<string, unknown>, seq: number) =>
+      ({ seq, type, doc: { type, payload } }) as never;
+    const a = shiftActivity(SHIFT_ID, [
+      doc('deposit', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 50_000 }, 1),
+      doc('deposit', { shiftId: SHIFT_ID, method: 'card', currency: 'SYP', amountMinor: 20_000 }, 2),
+      doc('gift_voucher', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 30_000 }, 3),
+    ]);
+    expect(a.deposits).toEqual({ count: 2, byCurrency: [{ currency: 'SYP', amountMinor: 70_000 }] });
+    expect(a.vouchers).toEqual({ count: 1, byCurrency: [{ currency: 'SYP', amountMinor: 30_000 }] });
+    expect(a.cashIn?.deposits).toEqual([{ currency: 'SYP', amountMinor: 50_000 }]);
+    expect(a.cashIn?.vouchers).toEqual([{ currency: 'SYP', amountMinor: 30_000 }]);
+    expect(a.terms.get('SYP')?.receiptsMinor).toBe(80_000);
+  });
+});
+
+describe('the banknotes the counter offers', () => {
+  const withTill = (till: unknown) => {
+    const base = posSets();
+    return { ...base, settings: [{ ...base.settings[0]!, till }] } as ReturnType<typeof posSets>;
+  };
+
+  it('falls back to the built-in notes when the store set none', () => {
+    expect(notesFor(null, 'SYP')).toEqual([50_000, 20_000, 10_000, 5_000, 2_500, 1_000, 500]);
+    expect(notesFor({ returnWindowDays: null, cardApprovalRequired: false }, 'USD')).toEqual([
+      10_000, 5_000, 2_000, 1_000, 500, 100,
+    ]);
+    // Only the pound was set: the dollar keeps its own list
+    const till = { returnWindowDays: null, cardApprovalRequired: false, cashNotes: { SYP: [10, 2000] } };
+    expect(notesFor(till, 'SYP')).toEqual([200_000, 1_000]);
+    expect(notesFor(till, 'USD')).toEqual([10_000, 5_000, 2_000, 1_000, 500, 100]);
+  });
+
+  it('counts the store’s own notes when the shift opens and saves them as before', async () => {
+    const till = { returnWindowDays: null, cardApprovalRequired: false, cashNotes: { SYP: [2000, 500, 10] } };
+    const { user, outbox } = renderPos({ sets: withTill(till) });
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    await countByNotes(user);
+    expect(screen.getByLabelText('عدد أوراق 2000 ل.س')).toBeInTheDocument();
+    expect(screen.queryByLabelText('عدد أوراق 200 ل.س')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('عدد أوراق 25 ل.س')).not.toBeInTheDocument();
+    // The dollar keeps the built-in list
+    expect(screen.getByLabelText('عدد أوراق 20 $')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('عدد أوراق 2000 ل.س'), '1');
+    await user.click(screen.getByRole('button', { name: 'افتح الوردية' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    const [open] = docsOf<ShiftOpenPayload>(outbox, 'shift_open');
+    expect(validateDocumentPayload('shift_open', open!.payload)).toEqual({ ok: true, checked: true });
+    expect(open!.payload.opening[0]).toEqual({
+      currency: 'SYP',
+      amountMinor: 200_000,
+      denominations: [{ valueMinor: 200_000, count: 1 }],
+    });
+  });
+
+  it('offers the built-in notes when no setting was pulled', async () => {
+    const { user } = renderPos({ sets: withTill(null) });
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    await countByNotes(user);
+    expect(screen.getByLabelText('عدد أوراق 200 ل.س')).toBeInTheDocument();
   });
 });

@@ -1,0 +1,176 @@
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
+import { QUOTATION_STATUS_LABELS, type QuotationListItem, type QuotationStatus } from '@serva/core';
+import {
+  AddIcon,
+  Badge,
+  DataTable,
+  EmptyState,
+  ListIcon,
+  Money,
+  PageHeader,
+  SearchField,
+  SegmentedControl,
+  Button,
+  useDigits,
+  type BadgeTone,
+  type DataColumn,
+} from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
+import { ReportScreen } from '../reports/parts';
+import { Pager, useCursorPages } from '../pager';
+import { dayText } from '../../lib/dates';
+import { listQuotations } from './api';
+
+export const QUOTATION_TONES: Record<QuotationStatus, BadgeTone> = {
+  draft: 'neutral',
+  sent: 'info',
+  accepted: 'success',
+  expired: 'danger',
+  converted: 'brand',
+};
+
+const FILTERS = [
+  { value: 'all', label: 'الكل' },
+  { value: 'open', label: 'بانتظار الرد' },
+  { value: 'accepted', label: 'مقبولة' },
+  { value: 'converted', label: 'حُوّلت لفاتورة' },
+  { value: 'expired', label: 'منتهية' },
+] as const;
+
+/**
+ * «عروض الأسعار» (03 › الجملة: عرض السعر): the store's offers to customers, newest first, by
+ * their number and status. An offer is opened to edit it, print it on A4 or turn it into an invoice;
+ * none of it posts or moves stock.
+ */
+export function QuotationsPage() {
+  const me = useMe();
+  const digits = useDigits();
+  const navigate = useNavigate();
+  const [status, setStatus] = useState<(typeof FILTERS)[number]['value']>('all');
+  const [q, setQ] = useState('');
+  // The search waits for the typing to pause; the pages restart on a new status or search, and an
+  // answer that comes late for an older one is dropped by useCursorPages
+  const [asked, setAsked] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setAsked(q.trim()), q.trim() ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [q]);
+  const { data, error, loading, retry, pager, topRef } = useCursorPages(`${status}|${asked}`, (cursor) =>
+    listQuotations(status, asked, cursor),
+  );
+  const rows = data?.items ?? [];
+  const filtered = status !== 'all' || asked !== '';
+
+  const columns: DataColumn<QuotationListItem>[] = [
+    {
+      key: 'number',
+      header: 'الرقم',
+      cell: (r) => (
+        <div className="flex flex-col items-start gap-1 py-2">
+          <Link
+            to={`/quotations/${r.id}`}
+            className="rounded-sm font-semibold text-ink underline decoration-transparent underline-offset-4 transition-[color,text-decoration-color] duration-120 ease-standard hover:text-brand-ink hover:decoration-current"
+          >
+            <bdi dir="ltr" className="num">
+              {r.number}
+            </bdi>
+          </Link>
+          <span className="text-xs text-ink-muted sm:hidden">{r.customerName ?? '—'}</span>
+          <span className="sm:hidden">
+            <Badge tone={QUOTATION_TONES[r.status]}>{QUOTATION_STATUS_LABELS[r.status]}</Badge>
+          </span>
+        </div>
+      ),
+    },
+    // On a phone the number's cell carries the customer, the status and the day, so the total stays in view.
+    {
+      key: 'customer',
+      header: 'الزبون',
+      className: 'hidden sm:table-cell',
+      cell: (r) => r.customerName ?? '—',
+    },
+    {
+      key: 'date',
+      header: 'التاريخ',
+      className: 'hidden md:table-cell',
+      cell: (r) => dayText(r.issueDate, digits),
+    },
+    {
+      key: 'valid',
+      header: 'صالح حتى',
+      className: 'hidden lg:table-cell',
+      cell: (r) => dayText(r.validUntil, digits),
+    },
+    {
+      key: 'total',
+      header: 'المجموع',
+      numeric: true,
+      cell: (r) => <Money minor={r.totalMinor} currency={r.currency} />,
+    },
+    {
+      key: 'status',
+      header: 'الحالة',
+      className: 'hidden sm:table-cell',
+      cell: (r) => <Badge tone={QUOTATION_TONES[r.status]}>{QUOTATION_STATUS_LABELS[r.status]}</Badge>,
+    },
+  ];
+
+  return (
+    <ReportScreen me={me} access={['customers.manage']} title="عروض الأسعار">
+      <div className="flex w-full flex-col gap-6">
+        <PageHeader
+          title="عروض الأسعار"
+          description="اعرض أسعارك على زبون، واطبعها على A4، وحوّل المقبول منها إلى فاتورة. العرض لا يسجّل بيعاً ولا يحرّك المخزون."
+          icon={<ListIcon />}
+          actions={
+            <Button icon={<AddIcon />} onClick={() => void navigate('/quotations/new')}>
+              عرض سعر جديد
+            </Button>
+          }
+        />
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="max-w-full min-w-0 overflow-x-auto">
+            <SegmentedControl
+              label="حالة العرض"
+              value={status}
+              onValueChange={setStatus}
+              options={FILTERS.map((f) => ({ value: f.value, label: f.label }))}
+            />
+          </div>
+          <SearchField
+            label="ابحث برقم العرض أو اسم الزبون"
+            value={q}
+            onValueChange={setQ}
+            className="w-full sm:w-80"
+          />
+        </div>
+        <div ref={topRef} />
+        <DataTable
+          caption="عروض الأسعار"
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.id}
+          loading={loading && !error}
+          {...(error ? { error, onRetry: retry } : {})}
+          empty={
+            filtered ? (
+              <EmptyState
+                icon={ListIcon}
+                title="لا عروض تطابق هذه التصفية"
+                description="جرّب حالة ثانية أو غيّر كلمة البحث."
+              />
+            ) : (
+              <EmptyState
+                icon={ListIcon}
+                title="لا عروض أسعار هنا"
+                description="اضغط «عرض سعر جديد»، أو احفظ سلة الكاشير كعرض سعر من زر «عرض سعر»."
+              />
+            )
+          }
+        />
+        <Pager noun="العروض" pager={pager} />
+      </div>
+    </ReportScreen>
+  );
+}

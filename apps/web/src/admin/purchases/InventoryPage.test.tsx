@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event';
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { InventoryResponse, MeResponse, StocktakeDetail } from '@serva/core';
@@ -48,16 +49,50 @@ describe('«سجّل هدراً» (03 › الخضار والمخابز)', () =>
       }),
     });
     const { user } = renderApp('/inventory');
+    // The form is in a window opened by its own button, not the first block of the page
+    expect(screen.queryByRole('form', { name: 'سجّل هدراً' })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'سجّل هدراً' }));
     const form = await screen.findByRole('form', { name: 'سجّل هدراً' });
     await user.selectOptions(within(form).getByLabelText('الصنف التالف'), 'b-1:v-1');
     await user.type(within(form).getByLabelText('كمية الهدر'), '2.5');
     await user.click(within(form).getByRole('button', { name: 'سجّل الهدر' }));
+    // Nothing leaves the stock until it is confirmed
+    expect(requestsTo('POST', '/v1/stocktakes')).toHaveLength(0);
+    await user.click(within(form).getByRole('button', { name: 'أكّد الهدر' }));
     expect(await screen.findByText(/سُجّل الجرد STK-0001/)).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/stocktakes').at(-1)?.body).toMatchObject({
       branchId: 'b-1',
       note: 'هدر',
       lines: [{ variantId: 'v-1', countedQty: 10_000 }],
     });
+  });
+});
+
+describe('«سجّل هدراً» for a piece item', () => {
+  it('takes whole pieces only, and tells a shelf below zero apart as «سالب»', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({
+        status: 200,
+        body: {
+          ...stock,
+          items: [
+            { ...stock.items[0]!, allowsFraction: false, qty: 10_000 },
+            { ...stock.items[0]!, variantId: 'v-2', name: 'كمامة', allowsFraction: false, qty: -2000 },
+          ],
+        },
+      }),
+    });
+    const { user } = renderApp('/inventory');
+    expect(await screen.findByText('سالب')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'سجّل هدراً' }));
+    const form = await screen.findByRole('form', { name: 'سجّل هدراً' });
+    await user.selectOptions(within(form).getByLabelText('الصنف التالف'), 'b-1:v-1');
+    await user.type(within(form).getByLabelText('كمية الهدر'), '2.5');
+    await user.click(within(form).getByRole('button', { name: 'سجّل الهدر' }));
+    expect(await within(form).findByText('هذا الصنف يُعدّ بالقطعة: اكتب عدداً صحيحاً.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/stocktakes')).toHaveLength(0);
   });
 });
 
@@ -101,10 +136,212 @@ describe('counting the shelf by scanning (03 › الألبسة)', () => {
     expect(screen.getByLabelText('المعدود من بندورة')).toHaveValue('14');
     await user.type(field, '999{Enter}');
     expect(await screen.findByText('لا صنف بالباركود 999.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'راجع الجرد' }));
+    expect(await screen.findByRole('table', { name: 'فروق الجرد' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'سجّل الجرد' }));
     expect(await screen.findByText(/سُجّل الجرد STK-0002/)).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/stocktakes')[0]?.body).toMatchObject({
       lines: [{ variantId: 'v-1', countedQty: 14_000 }],
     });
+  });
+});
+
+describe('counting the shelf by hand', () => {
+  it('refuses a negative count with a message and keeps the review closed', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({ status: 200, body: stock }),
+    });
+    const { user } = renderApp('/inventory');
+    await user.click(await screen.findByRole('button', { name: 'جرد الرفوف' }));
+    await user.type(screen.getByLabelText('المعدود من بندورة'), '-3');
+    expect(await screen.findByText(/العدد لا يكون سالباً/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'راجع الجرد' })).toBeDisabled();
+  });
+});
+
+describe('شبكة المقاس واللون في المخزون', () => {
+  it('lays a model out with sizes down and colours across, and goes back to the list', async () => {
+    const piece = (id: string, size: string, colour: string, qty: number) => ({
+      variantId: id,
+      name: `قميص ${size} · ${colour}`,
+      productId: 'p-1',
+      productName: 'قميص',
+      attributes: [
+        { name: 'المقاس', value: size },
+        { name: 'اللون', value: colour },
+      ],
+      branchId: 'b-1',
+      qty,
+      valueMinor: 0,
+      unitCostMinor: null,
+    });
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({
+        status: 200,
+        body: {
+          items: [piece('a', 'M', 'أبيض', 3000), piece('b', 'L', 'أبيض', 0), piece('c', 'M', 'أزرق', 5000)],
+          totalValueMinor: 0,
+          baseCurrency: 'SYP',
+        } satisfies InventoryResponse,
+      }),
+    });
+    const { user } = renderApp('/inventory');
+    await user.click(await screen.findByRole('radio', { name: 'شبكة الخيارات' }));
+    const grid = await screen.findByRole('region', { name: 'شبكة قميص' });
+    expect(within(grid).getByRole('columnheader', { name: 'أزرق' })).toBeInTheDocument();
+    expect(within(grid).getByRole('rowheader', { name: 'L' })).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'قائمة' }));
+    expect(await screen.findByRole('table', { name: 'المخزون' })).toBeInTheDocument();
+  });
+});
+
+describe('a clothing shop’s inventory', () => {
+  it('opens on the size × colour grids, thinnest model first, with row and column totals', async () => {
+    const piece = (id: string, product: string, size: string, color: string, qty: number) => ({
+      variantId: id,
+      productId: product,
+      productName: product === 'p-1' ? 'قميص' : 'بنطال',
+      name: `${product} ${size} ${color}`,
+      attributes: [
+        { name: 'المقاس', value: size },
+        { name: 'اللون', value: color },
+      ],
+      branchId: 'b-1',
+      qty,
+      valueMinor: 0,
+      unitCostMinor: 0,
+    });
+    const base = owner();
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({
+        status: 200,
+        body: { ...base, tenant: { ...base.tenant, sectors: ['clothing'] } },
+      }),
+      'GET /v1/inventory': () => ({
+        status: 200,
+        body: {
+          ...stock,
+          items: [
+            piece('a', 'p-1', 'S', 'أحمر', 3000),
+            piece('b', 'p-1', 'M', 'أحمر', 4000),
+            piece('c', 'p-1', 'S', 'أزرق', 1000),
+            piece('d', 'p-1', 'M', 'أزرق', 2000),
+            piece('e', 'p-2', 'S', 'أسود', 0),
+            piece('f', 'p-2', 'M', 'أسود', 9000),
+          ],
+        } satisfies InventoryResponse,
+      }),
+    });
+    renderApp('/inventory');
+    const grids = await screen.findAllByRole('region', { name: /شبكة/ });
+    // «بنطال» has a size at zero: it comes first
+    expect(grids[0]).toHaveAccessibleName('شبكة بنطال');
+    // Only the first model opens by itself (round 62: the page stays short); the shirt opens by a press
+    await userEvent.click(within(screen.getByRole('region', { name: 'شبكة قميص' })).getByRole('button'));
+    const shirt = within(screen.getByRole('region', { name: 'شبكة قميص' }));
+    // Totals: the S row 3 + 1, the whole grid 10
+    expect(shirt.getAllByText('المجموع').length).toBeGreaterThan(0);
+    expect(shirt.getByText('10')).toBeInTheDocument();
+    // 4 is a cell (M red) and also the S row's total
+    expect(shirt.getAllByText('4')).toHaveLength(2);
+  });
+});
+
+describe('stock numbers that explain themselves', () => {
+  it('keeps a minus out of the grid totals, says «سالب» apart, and opens the count on it', async () => {
+    const piece = (id: string, size: string, qty: number) => ({
+      variantId: id,
+      productId: 'p-1',
+      productName: 'قميص',
+      name: `قميص ${size}`,
+      attributes: [{ name: 'المقاس', value: size }],
+      branchId: 'b-1',
+      qty,
+      valueMinor: 0,
+      unitCostMinor: 0,
+    });
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({
+        status: 200,
+        body: {
+          ...stock,
+          items: [piece('a', 'S', 5000), piece('b', 'M', -2000)],
+        } satisfies InventoryResponse,
+      }),
+    });
+    const { user } = renderApp('/inventory');
+    // one definition: the one below zero is out («نفد 1») and says «منها سالب 1» once, not a second count
+    const tiles = within(await screen.findByRole('region', { name: 'أرقام المخزون' }));
+    expect(await tiles.findAllByText(/منها سالب 1/)).toHaveLength(1);
+    expect(tiles.queryByText(/ناقص/)).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('radio', { name: 'شبكة الخيارات' }));
+    const grid = within(await screen.findByRole('region', { name: 'شبكة قميص' }));
+    expect(grid.getByText('متوفر 5')).toBeInTheDocument();
+    expect(grid.getByText('سالب قطعتان')).toBeInTheDocument();
+    // the cell below zero reads «سالب 2», not «-2»
+    expect(grid.getAllByText(/سالب/).map((e) => e.textContent)).toContain('سالب 2');
+    await user.click(grid.getByRole('button', { name: 'صحّح بالجرد' }));
+    expect(await screen.findByText('تعرض الصفحة الأصناف الناقصة فقط.')).toBeInTheDocument();
+  });
+
+  it('tells a waste larger than the stock inside its window, before asking to confirm', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({ status: 200, body: stock }),
+    });
+    const { user } = renderApp('/inventory');
+    await user.click(await screen.findByRole('button', { name: 'سجّل هدراً' }));
+    const form = await screen.findByRole('form', { name: 'سجّل هدراً' });
+    await user.selectOptions(within(form).getByLabelText('الصنف التالف'), 'b-1:v-1');
+    await user.type(within(form).getByLabelText('كمية الهدر'), '99');
+    await user.click(within(form).getByRole('button', { name: 'سجّل الهدر' }));
+    expect(within(form).getByText(/الموجود من هذا الصنف/)).toBeInTheDocument();
+    expect(within(form).queryByRole('button', { name: 'أكّد الهدر' })).not.toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/stocktakes')).toHaveLength(0);
+  });
+});
+
+describe('the stock list on a phone folds (round 66)', () => {
+  it('shows the first 15 items and «اعرض الكل (N)» opens the rest', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      const many: InventoryResponse = {
+        ...stock,
+        items: Array.from({ length: 22 }, (_, i) => ({
+          variantId: `v-${i + 1}`,
+          name: `صنف ${i + 1}`,
+          branchId: 'b-1',
+          qty: 1000 * (i + 1),
+          valueMinor: 1000 * (i + 1),
+          unitCostMinor: 1,
+        })),
+      };
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': () => ({ status: 200, body: owner() }),
+        'GET /v1/inventory': () => ({ status: 200, body: many }),
+      });
+      const { user } = renderApp('/inventory');
+      const cards = await screen.findByRole('list', { name: 'المخزون على الهاتف' });
+      expect(within(cards).getAllByRole('listitem')).toHaveLength(16);
+      await user.click(within(cards).getByRole('button', { name: 'اعرض الكل (22)' }));
+      expect(within(cards).getAllByRole('listitem')).toHaveLength(22);
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });

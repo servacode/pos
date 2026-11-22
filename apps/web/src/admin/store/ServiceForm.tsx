@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { StoreResponse } from '@serva/core';
-import { Alert, Button, Card, Switch, TextField } from '@serva/ui';
+import { Button, Switch, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { saveService } from './api';
+import { FailedNote, SavedNote, SETTINGS_SECTIONS, SettingsCard } from './parts';
 
 /** «1-12، VIP1» → 1 … 12, VIP1: ranges of numbers and names, in the order typed */
 export function tablesOf(text: string): string[] {
@@ -75,49 +76,54 @@ export function ServiceForm({
   }
 
   return (
-    <Card>
-      <form
-        aria-label="الصالة والمطبخ"
-        className="flex flex-col gap-5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-      >
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        {saved ? <Alert tone="success">حُفظت، وتصل الكاشير مع أول مزامنة.</Alert> : null}
-        <Switch
-          label="مطعم أو مقهى"
-          description="يظهر على الكاشير نوع الطلب: صالة، سفري، توصيل."
-          checked={enabled}
-          onCheckedChange={setEnabled}
-        />
-        {enabled ? (
-          <>
-            <TextField
-              label="الطاولات"
-              hint="أرقام أو أسماء مفصولة بفاصلة، والمدى بشرطة: 1-12، VIP1. فارغ: بلا طاولات (سفري سريع)"
-              value={tables}
-              onChange={(e) => setTables(e.target.value)}
-            />
+    <SettingsCard
+      section={SETTINGS_SECTIONS.service}
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+      footer={
+        <>
+          {error ? <FailedNote>{error}</FailedNote> : null}
+          {saved ? <SavedNote>حُفظت، وتصل إلى أجهزة الكاشير مع أول اتصال.</SavedNote> : null}
+          <Button type="submit" loading={saving} className="max-sm:w-full">
+            احفظ
+          </Button>
+        </>
+      }
+    >
+      <Switch
+        label="مطعم أو مقهى"
+        description="يظهر على الكاشير نوع الطلب: صالة، سفري، توصيل."
+        checked={enabled}
+        onCheckedChange={setEnabled}
+      />
+      {enabled ? (
+        <div className="flex flex-col gap-5 border-t border-line pt-5">
+          <TextField
+            label="الطاولات"
+            hint="أرقام أو أسماء مفصولة بفاصلة، والمدى بشرطة: 1-12، VIP1. فارغ: بلا طاولات (سفري سريع)"
+            value={tables}
+            onChange={(e) => setTables(e.target.value)}
+          />
+          <div className="flex flex-col divide-y divide-line rounded-control border border-line px-4">
             <Switch
               label="رقم لكل طلب"
               description="رقم كبير على الإيصال للنداء، يبدأ من 1 كل يوم."
               checked={orderNumbers}
               onCheckedChange={setOrderNumbers}
+              className="py-3"
             />
             <Switch
               label="ورقة المطبخ"
               description="زر «للمطبخ» يطبع الجديد من الطلب دون أسعار."
               checked={kitchenTickets}
               onCheckedChange={setKitchenTickets}
+              className="py-3"
             />
-          </>
-        ) : null}
-        <Button type="submit" size="lg" loading={saving}>
-          احفظ
-        </Button>
-      </form>
-    </Card>
+          </div>
+        </div>
+      ) : null}
+    </SettingsCard>
   );
 }

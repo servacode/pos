@@ -1,537 +1,645 @@
-import { Link } from 'react-router';
-import { useCallback, useEffect, useState } from 'react';
-import type { PurchasePayment, PurchaseRow, SupplierListResponse, SupplierRow } from '@serva/core';
+import { Link, useSearchParams } from 'react-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  type PurchaseOrderDetail,
+  type PurchasePayment,
+  type PurchaseRow,
+  type SupplierListResponse,
+} from '@serva/core';
+import {
+  AddIcon,
   Alert,
   Button,
-  cn,
-  DataTable,
-  DeleteIcon,
-  Money,
+  CashIcon,
+  EmptyState,
+  IconButton,
+  Menu,
+  MenuItem,
+  MoreIcon,
+  PackageOpenIcon,
+  PrintIcon,
+  SearchField,
   Select,
-  StatTile,
-  TextField,
-  type DataColumn,
+  TruckIcon,
+  useDigits,
+  UserIcon,
 } from '@serva/ui';
-import { AppShell } from '../../layout/AppShell';
-import { ApiError, errorMessage } from '../../lib/api';
-import {
-  createPurchase,
-  createSupplier,
-  listPurchases,
-  listSuppliers,
-  moneyOf,
-  paySupplier,
-  qtyOf,
-  today,
-} from './api';
-import { VariantPicker, type PickedVariant } from './VariantPicker';
+import { useMe } from '../../auth/useAuth';
+import { dayText, monthStart } from '../../lib/dates';
+import { useIsPhone } from '../../lib/useIsPhone';
+import { errorMessage } from '../../lib/api';
+import { listPurchasePage, listSuppliers, storeToday, type PurchaseFilters } from './api';
+import { Pager, useCursorPages } from '../pager';
+import { ReportScreen } from '../reports/parts';
+import { addDays } from '../reports/periods';
+import { Amt, DownloadGlyph, PageTop, Panel, SalesPage, SxTable, type SxColumn } from '../sales/ui';
+import { InvoiceStatus, PAYMENT_TEXT } from './pui';
+import { dropCorrection, keepCorrection, keptCorrection, type KeptCorrection } from './correctionDraft';
+import { PurchaseDetailDialog } from './PurchaseDetailDialog';
+import { DuePanel } from './DuePanel';
+import { DueMark } from './DueMark';
+import { dueById, useSupplierDues } from './useSupplierDues';
+import { getOrder } from './orderApi';
+import { downloadCsv } from '../exportCsv';
+import { pounds } from './PurchasesShared';
+import { SupplierForm } from './SupplierForm';
+import { PurchaseForm } from './PurchaseForm';
+import { PurchasesStrip } from './PurchasesStrip';
+import { PurchaseCards } from './PurchaseCards';
+import { PaymentForm } from './PaymentForm';
 
-const PAYMENT_TEXT: Record<PurchasePayment, string> = {
-  credit: 'على حساب المورد',
-  cash: 'نقداً من الخزنة',
-  bank: 'من البنك',
-};
+/** The spans of the invoice list: the whole history by default, or a period */
+type Span = 'all' | 'month' | 'last' | 'quarter' | 'year';
+const SPANS: { key: Span; label: string }[] = [
+  { key: 'all', label: 'الكل' },
+  { key: 'month', label: 'هذا الشهر' },
+  { key: 'last', label: 'الشهر الماضي' },
+  { key: 'quarter', label: 'آخر ٩٠ يوماً' },
+  { key: 'year', label: 'هذه السنة' },
+];
 
-interface Line extends PickedVariant {
-  qty: string;
-  cost: string;
-  /** «رقم الدفعة» and «تاريخ الانتهاء» (03 › الصيدليات), both optional */
-  batch?: string;
-  expiry?: string;
-  /** Serial numbers or IMEIs, one per line of text (03 › الإلكترونيات) */
-  serials?: string;
+function spanRange(span: Span, today: string): { from?: string; to?: string } {
+  if (span === 'month') return { from: monthStart(today), to: today };
+  if (span === 'last') {
+    const end = addDays(monthStart(today), -1);
+    return { from: monthStart(end), to: end };
+  }
+  if (span === 'quarter') return { from: addDays(today, -89), to: today };
+  if (span === 'year') return { from: `${today.slice(0, 4)}-01-01`, to: today };
+  return {};
 }
 
+const PAGE_SIZE = 50;
+/** A phone shows cards that are tall: twenty to a page keeps the list short (round 60) */
+const PHONE_PAGE_SIZE = 12;
+
 /**
- * «المشتريات» (08 › فاتورة شراء): the suppliers and what is owed to each, the purchases, a new
- * purchase (goods into the stock at what they cost) and a payment to a supplier.
+ * «المشتريات» (08 › فاتورة شراء): the purchases (paged, searched and filtered by the server), a new
+ * purchase (goods into the stock at what they cost), a payment to a supplier, and what is owed. Round 44: the
+ * Sales language (hero strip, filter bar, status badges, cards on a phone, page navigation).
  */
 export function PurchasesPage() {
+  const me = useMe();
+  const digits = useDigits();
+  const phone = useIsPhone();
+  const today = storeToday(me.tenant.timezone);
   const [notice, setNotice] = useState<string | null>(null);
   const [suppliers, setSuppliers] = useState<SupplierListResponse | null>(null);
-  const [purchases, setPurchases] = useState<PurchaseRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'list' | 'buy' | 'pay' | 'supplier'>('list');
+  // «ابحث في المتجر» sends a purchase number here as ?q=PUR-…
+  const [params, setParams] = useSearchParams();
+  const [typed, setTyped] = useState(params.get('q') ?? '');
+  const [q, setQ] = useState(typed);
+  const [span, setSpan] = useState<Span>('all');
+  const [supplierId, setSupplierId] = useState('');
+  const [payment, setPayment] = useState('');
+  const [opened, setOpened] = useState<PurchaseRow | null>(null);
+  // «استلم البضاعة» on a purchase order sends the order's number here as ?order=…
+  const orderId = params.get('order');
+  const [order, setOrder] = useState<PurchaseOrderDetail | null>(null);
+  // «صحّح الفاتورة»: the draft of the invoice to write again, and the two documents it came from. It is kept in
+  // the tab's session storage too, so a closed page does not lose it
+  const [correction, setCorrection] = useState<KeptCorrection | null>(null);
+  const [kept, setKept] = useState<KeptCorrection | null>(() => keptCorrection());
+  const [month, setMonth] = useState<{ count: number; totalMinor: number } | null | 'failed'>(null);
+  const [exporting, setExporting] = useState(false);
 
-  const load = useCallback(() => {
-    setError(null);
-    Promise.all([listSuppliers(), listPurchases()])
-      .then(([s, p]) => {
-        setSuppliers(s);
-        setPurchases(p.items);
-      })
-      .catch((e: unknown) => setError(errorMessage(e)));
+  useEffect(() => {
+    const timer = setTimeout(() => setQ(typed.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [typed]);
+
+  const loadSuppliers = useCallback(() => {
+    let alive = true;
+    listSuppliers().then(
+      (s) => alive && setSuppliers(s),
+      (e: unknown) => alive && setError(errorMessage(e)),
+    );
+    return () => {
+      alive = false;
+    };
   }, []);
-  useEffect(load, [load]);
+  useEffect(() => loadSuppliers(), [loadSuppliers]);
 
-  const base = suppliers?.baseCurrency ?? 'SYP';
+  const filters = useMemo<PurchaseFilters>(
+    () => ({ ...spanRange(span, today), supplierId, payment, q }),
+    [span, today, supplierId, payment, q],
+  );
+  const fetchKey = JSON.stringify({ ...filters, phone });
+  const {
+    data: page,
+    error: listError,
+    loading,
+    retry,
+    topRef,
+    pager,
+  } = useCursorPages(fetchKey, (cursor) =>
+    listPurchasePage(filters, cursor, phone ? PHONE_PAGE_SIZE : PAGE_SIZE),
+  );
+  const items = useMemo(() => page?.items ?? [], [page]);
+
+  // This month's total, whatever the list shows: one small request (the invoices corrected are not in it)
+  const [monthTick, setMonthTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    listPurchasePage({ from: monthStart(today), to: today }, null, 1).then(
+      (r) => alive && setMonth(r.summary ?? 'failed'),
+      () => alive && setMonth('failed'),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [today, monthTick]);
+
+  useEffect(() => {
+    if (!orderId) return;
+    let alive = true;
+    getOrder(orderId)
+      .then((o) => {
+        if (!alive) return;
+        setOrder(o);
+        setMode('buy');
+      })
+      .catch((e: unknown) => alive && setError(errorMessage(e)));
+    return () => {
+      alive = false;
+    };
+  }, [orderId]);
+
+  // «دفعة» on a supplier's row sends its id here as ?pay=…: the payment window opens on that supplier
+  // Round 64: «ادفع» on a due invoice sends ?pay=…&amount=… (the invoice's open amount): the window opens with it typed
+  const payId = params.get('pay');
+  const payAmount = Number(params.get('amount'));
+  const payKey = payId ? `${payId}/${payAmount}` : null;
+  const payOpened = useRef<string | null>(null);
+  useEffect(() => {
+    if (!payKey || payOpened.current === payKey || !suppliers) return;
+    payOpened.current = payKey;
+    if (suppliers.items.some((x) => x.id === payId && !x.archived)) setMode('pay');
+  }, [payKey, payId, suppliers]);
+  const closePay = () => {
+    setMode('list');
+    if (params.has('pay') || params.has('amount')) {
+      payOpened.current = null;
+      setParams(
+        (old) => {
+          const next = new URLSearchParams(old);
+          next.delete('pay');
+          next.delete('amount');
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  };
+  const dues = useSupplierDues(monthTick);
+  const dueOpen = useMemo(() => dueById(dues), [dues]);
+
+  const base = suppliers?.baseCurrency ?? me.settings.baseCurrency;
+  // After a save the form closes and the page is left scrolled down: bring the success message into view
+  const noticeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (notice && mode === 'list') noticeRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [notice, mode]);
+  const reload = useCallback(() => {
+    setError(null);
+    retry();
+    loadSuppliers();
+    setMonthTick((n) => n + 1);
+  }, [retry, loadSuppliers]);
   const done = (message: string) => {
     setNotice(message);
-    setMode('list');
-    load();
+    setOrder(null);
+    setCorrection(null);
+    setKept(null);
+    dropCorrection();
+    closePay();
+    reload();
+  };
+  const startCorrection = (c: KeptCorrection) => {
+    keepCorrection(c);
+    setKept(c);
+    setCorrection(c);
+    setOpened(null);
+    setMode('buy');
+    // The old invoice is turned back: the supplier's balance on screen is read again
+    reload();
   };
 
-  const purchaseColumns: DataColumn<PurchaseRow>[] = [
+  const owing = (suppliers?.items ?? [])
+    .filter((s) => s.balanceMinor > 0 && !s.archived)
+    .sort((a, b) => b.balanceMinor - a.balanceMinor);
+  const owedUsd = (suppliers?.items ?? []).reduce((sum, s) => sum + Math.max(0, s.usdBalanceMinor ?? 0), 0);
+  const active = [span !== 'all', supplierId !== '', payment !== '', q !== ''].filter(Boolean).length;
+  const clearAll = () => {
+    setSpan('all');
+    setSupplierId('');
+    setPayment('');
+    setTyped('');
+    setQ('');
+  };
+
+  async function exportAll() {
+    setExporting(true);
+    try {
+      const rows: PurchaseRow[] = [];
+      let cursor: string | null = null;
+      for (let i = 0; i < 100; i++) {
+        const r: Awaited<ReturnType<typeof listPurchasePage>> = await listPurchasePage(filters, cursor, 200);
+        rows.push(...r.items);
+        cursor = r.nextCursor;
+        if (!cursor) break;
+      }
+      exportPurchases(rows, today);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const moreFilters = (
+    <>
+      <Select label="المورد" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+        <option value="">كل الموردين</option>
+        {(suppliers?.items ?? []).map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </Select>
+      <Select label="طريقة الدفع" value={payment} onChange={(e) => setPayment(e.target.value)}>
+        <option value="">الكل</option>
+        {(Object.keys(PAYMENT_TEXT) as PurchasePayment[]).map((k) => (
+          <option key={k} value={k}>
+            {PAYMENT_TEXT[k]}
+          </option>
+        ))}
+      </Select>
+      <div role="radiogroup" aria-label="المدة" className="sx-chips scroll">
+        {SPANS.map((x) => (
+          <label key={x.key} className="sx-chip">
+            <input
+              type="radio"
+              name="purchase-span"
+              checked={span === x.key}
+              onChange={() => setSpan(x.key)}
+            />
+            {x.label}
+          </label>
+        ))}
+      </div>
+      <Button
+        variant="ghost"
+        icon={<DownloadGlyph size={20} />}
+        loading={exporting}
+        disabled={loading || items.length === 0}
+        onClick={() => void exportAll()}
+      >
+        صدّر إلى إكسل
+      </Button>
+    </>
+  );
+
+  const columns: SxColumn<PurchaseRow>[] = [
     {
       key: 'number',
       header: 'الرقم',
+      lead: true,
       cell: (p) => (
-        <bdi dir="ltr" className="num font-semibold">
-          {p.number}
-        </bdi>
+        <>
+          <button type="button" className="sx-rowbtn" onClick={() => setOpened(p)}>
+            <bdi dir="ltr" className="sx-n sx-no">
+              {p.number}
+            </bdi>
+          </button>
+          {p.reference ? (
+            <span className="sx-subline">
+              رقمها عند المورد <bdi className="sx-n">{p.reference}</bdi>
+            </span>
+          ) : null}
+        </>
       ),
     },
-    { key: 'date', header: 'التاريخ', cell: (p) => <span className="num">{p.date}</span> },
+    {
+      key: 'date',
+      header: 'التاريخ',
+      cell: (p) => <span className="sx-mute">{dayText(p.date, digits)}</span>,
+    },
     { key: 'supplier', header: 'المورد', cell: (p) => p.supplierName },
-    { key: 'payment', header: 'الدفع', cell: (p) => PAYMENT_TEXT[p.payment] },
+    { key: 'status', header: 'الدفع', cell: (p) => <InvoiceStatus row={p} /> },
+    {
+      key: 'due',
+      header: 'الاستحقاق',
+      cell: (p) =>
+        p.payment === 'credit' && !p.correctedBy ? (
+          <DueMark dueDate={p.dueDate} today={today} open={dueOpen.has(p.id)} />
+        ) : (
+          <span className="sx-sub">—</span>
+        ),
+    },
     {
       key: 'total',
       header: 'المبلغ',
       numeric: true,
-      cell: (p) => <Money minor={p.totalMinor} currency={base} />,
+      strong: true,
+      cellClass: (p) => (p.correctedBy ? 'sx-sub' : undefined),
+      cell: (p) => (
+        <span className="px-dual">
+          <Amt minor={p.totalMinor} currency={base} />
+          {p.currency === 'USD' && p.foreignTotalMinor ? (
+            <span className="usd">
+              <Amt minor={p.foreignTotalMinor} currency="USD" />
+            </span>
+          ) : null}
+        </span>
+      ),
     },
     {
-      key: 'labels',
-      header: '',
+      key: 'more',
+      header: <span className="sr-only">إجراءات</span>,
       cell: (p) => (
-        <Link to={`/labels?purchase=${p.id}`} className="font-semibold text-brand-ink hover:underline">
-          الملصقات
-        </Link>
+        <span className="px-actions">
+          <Button variant="ghost" size="xs" aria-label={`تفاصيل ${p.number}`} onClick={() => setOpened(p)}>
+            التفاصيل
+          </Button>
+          <Menu
+            label={`المزيد: ${p.number}`}
+            align="end"
+            trigger={<IconButton label={`المزيد: ${p.number}`} icon={<MoreIcon />} />}
+          >
+            <MenuItem
+              icon={<PrintIcon size={16} />}
+              render={(props) => <Link to={`/labels?purchase=${p.id}`} {...props} />}
+            >
+              الملصقات
+            </MenuItem>
+          </Menu>
+        </span>
       ),
     },
   ];
-  const supplierColumns: DataColumn<SupplierRow>[] = [
-    { key: 'name', header: 'المورد', cell: (s) => <span className="font-semibold">{s.name}</span> },
-    {
-      key: 'phone',
-      header: 'الجوال',
-      cell: (s) =>
-        s.phone ? (
-          <bdi dir="ltr" className="num">
-            {s.phone}
-          </bdi>
-        ) : (
-          '—'
-        ),
-    },
-    {
-      key: 'balance',
-      header: 'له علينا',
-      numeric: true,
-      cell: (s) => <Money minor={s.balanceMinor} currency={base} className="font-semibold" />,
-    },
-  ];
+
+  const noSuppliers = suppliers !== null && suppliers.items.length === 0;
+  const emptyState = noSuppliers ? (
+    <EmptyState
+      icon={TruckIcon}
+      title="لا موردين بعد."
+      description="أضف مورداً أولاً، ثم سجّل فواتير الشراء منه."
+    />
+  ) : active > 0 ? (
+    <EmptyState
+      icon={PackageOpenIcon}
+      title="لا فاتورة تطابق التصفية."
+      description="جرّب رقماً آخر أو اسماً آخر أو مدة أطول."
+      action={
+        <Button variant="secondary" onClick={clearAll}>
+          امسح التصفية
+        </Button>
+      }
+    />
+  ) : (
+    <EmptyState
+      icon={PackageOpenIcon}
+      title="لا فواتير شراء بعد."
+      description="سجّل أول فاتورة من «فاتورة شراء»، فتدخل البضاعة المخزون بكلفتها."
+    />
+  );
 
   return (
-    <AppShell>
-      <title>المشتريات · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="flex-1 text-2xl font-bold text-ink">المشتريات والموردون</h1>
-          {mode === 'list' ? (
-            <>
-              <Button onClick={() => setMode('buy')} disabled={!suppliers?.items.length}>
-                فاتورة شراء
+    <ReportScreen me={me} access={['purchases.manage']} title="المشتريات">
+      <SalesPage>
+        <PageTop
+          title="المشتريات والموردون"
+          subtitle={
+            mode === 'buy'
+              ? 'فاتورة شراء جديدة: البضاعة تدخل المخزون بكلفتها.'
+              : 'فواتير الشراء من الموردين، وما لكل مورد عليك.'
+          }
+          actions={
+            mode === 'buy' ? null : (
+              <>
+                <Button variant="ghost" icon={<UserIcon />} onClick={() => setMode('supplier')}>
+                  مورد جديد
+                </Button>
+                <Button
+                  variant="secondary"
+                  icon={<CashIcon />}
+                  onClick={() => setMode('pay')}
+                  disabled={!suppliers?.items.length}
+                >
+                  دفعة لمورد
+                </Button>
+                <Button icon={<AddIcon />} onClick={() => setMode('buy')} disabled={!suppliers?.items.length}>
+                  فاتورة شراء
+                </Button>
+              </>
+            )
+          }
+        />
+        {error ? (
+          <Alert tone="error">
+            <span className="flex flex-wrap items-center gap-3">
+              {error}
+              <Button variant="secondary" size="sm" onClick={reload}>
+                أعد المحاولة
               </Button>
-              <Button variant="secondary" onClick={() => setMode('pay')} disabled={!suppliers?.items.length}>
-                دفعة لمورد
-              </Button>
-              <Button variant="secondary" onClick={() => setMode('supplier')}>
-                مورد جديد
-              </Button>
-            </>
-          ) : null}
-        </div>
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        {notice && mode === 'list' ? <Alert tone="success">{notice}</Alert> : null}
-        {suppliers && suppliers.items.length === 0 && mode === 'list' ? (
-          <Alert tone="info">أضف مورداً أولاً، ثم سجّل فواتير الشراء منه.</Alert>
+            </span>
+          </Alert>
         ) : null}
-        {mode === 'supplier' ? (
-          <SupplierForm onSaved={() => done('أُضيف المورد.')} onCancel={() => setMode('list')} />
+        {notice && mode === 'list' ? (
+          <div ref={noticeRef} className="scroll-mt-36 sm:scroll-mt-28">
+            <Alert tone="success">{notice}</Alert>
+          </div>
+        ) : null}
+        {kept && mode === 'list' ? (
+          <Alert tone="warning" title={`صُحّحت الفاتورة ${kept.original} ولم تُسجَّل نسختها الجديدة`}>
+            <span className="px-draftbar">
+              المستند {kept.reversal} أخرج البضاعة ورجّع ما للمورد. أكمل كتابة الفاتورة، أو اتركها إن لم تعد
+              تريدها.
+              <Button
+                size="sm"
+                onClick={() => {
+                  setCorrection(kept);
+                  setMode('buy');
+                }}
+              >
+                أكمل كتابة الفاتورة
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  dropCorrection();
+                  setKept(null);
+                }}
+              >
+                اتركها
+              </Button>
+            </span>
+          </Alert>
         ) : null}
         {mode === 'buy' && suppliers ? (
           <PurchaseForm
             suppliers={suppliers.items}
-            onSaved={(n) => done(`سُجّلت الفاتورة ${n} ودخلت البضاعة المخزون.`)}
+            order={order}
+            correction={correction}
+            onSaved={(n, photoFailed) =>
+              done(
+                `سُجّلت الفاتورة ${n} ودخلت البضاعة المخزون.${photoFailed ? ' تعذّر رفع الصورة: أضفها من تفاصيل الفاتورة.' : ''}`,
+              )
+            }
+            onCancel={() => {
+              setOrder(null);
+              setCorrection(null);
+              setMode('list');
+              // The old invoice is already turned back: leaving the draft says so, and it is kept to pick up again
+              if (correction) {
+                setNotice(
+                  `صُحّحت الفاتورة ${correction.original} بالمستند ${correction.reversal}، ولم تُسجَّل النسخة الجديدة بعد. تجدها محفوظة هنا لتكملها.`,
+                );
+                reload();
+              }
+            }}
+          />
+        ) : (
+          <>
+            <PurchasesStrip
+              hasSuppliers={suppliers !== null}
+              totalOwedMinor={suppliers?.totalOwedMinor}
+              base={base}
+              owing={owing}
+              owedUsd={owedUsd}
+              month={month}
+              active={active}
+              summary={page?.summary}
+            />
+            <DuePanel dues={dues} />
+            {owing.length > 0 && !phone ? (
+              <Panel
+                title="أكبر المستحقات للموردين"
+                aside={
+                  <Link to="/suppliers" className="sx-linkbtn">
+                    كل الموردين
+                  </Link>
+                }
+              >
+                <ul className="sx-cards" aria-label="أكبر المستحقات">
+                  {owing.slice(0, 3).map((s) => (
+                    <li key={s.id}>
+                      <Link
+                        to={`/suppliers/${s.id}/statement`}
+                        className="sx-icard"
+                        aria-label={`كشف حساب ${s.name}`}
+                      >
+                        <span className="px-owe-name">{s.name}</span>
+                        <span className="t">
+                          <Amt minor={s.balanceMinor} currency={base} />
+                        </span>
+                        <span className="d">
+                          {s.usdBalanceMinor && s.usdBalanceMinor > 0 ? (
+                            <>
+                              منه <Amt minor={s.usdBalanceMinor} currency="USD" />
+                            </>
+                          ) : (
+                            'كشف الحساب'
+                          )}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            ) : null}
+            <div className="sx-card sx-filterbar print:hidden">
+              <div className="sx-search">
+                <SearchField
+                  label="ابحث برقم الفاتورة أو المورد"
+                  placeholder="رقم الفاتورة أو المورد أو رقمها عند المورد"
+                  value={typed}
+                  onValueChange={setTyped}
+                />
+              </div>
+              {phone ? (
+                <details className="px-more" open={active > (q ? 1 : 0)}>
+                  <summary>تصفية أخرى</summary>
+                  {moreFilters}
+                </details>
+              ) : (
+                moreFilters
+              )}
+            </div>
+            <div ref={topRef}>
+              {phone && items.length > 0 && !loading ? (
+                <PurchaseCards items={items} base={base} today={today} dueOpen={dueOpen} onOpen={setOpened} />
+              ) : (
+                <SxTable
+                  caption="فواتير الشراء"
+                  columns={columns}
+                  rows={items}
+                  rowKey={(p) => p.id}
+                  onRowClick={(p) => setOpened(p)}
+                  loading={loading}
+                  error={listError ?? undefined}
+                  onRetry={retry}
+                  empty={emptyState}
+                />
+              )}
+            </div>
+            <Pager noun="الفواتير" pager={pager} />
+            {opened ? (
+              <PurchaseDetailDialog
+                purchase={opened}
+                onClose={() => setOpened(null)}
+                onCorrected={(c) =>
+                  startCorrection({ draft: c.draft, original: opened.number, reversal: c.reversal.number })
+                }
+                onRewrite={(draft, reversal) => {
+                  setCorrection({ draft, original: opened.number, reversal });
+                  setOpened(null);
+                  setMode('buy');
+                }}
+              />
+            ) : null}
+          </>
+        )}
+        {mode === 'supplier' ? (
+          <SupplierForm
+            suppliers={suppliers?.items ?? []}
+            onSaved={() => done('أُضيف المورد.')}
             onCancel={() => setMode('list')}
           />
         ) : null}
         {mode === 'pay' && suppliers ? (
           <PaymentForm
-            suppliers={suppliers.items}
+            suppliers={suppliers.items.filter((x) => !x.archived)}
+            {...(payId ? { initialSupplierId: payId } : {})}
+            {...(payAmount > 0 ? { initialAmountMinor: payAmount } : {})}
+            base={base}
             onSaved={(n) => done(`سُجّل سند الدفع ${n}.`)}
-            onCancel={() => setMode('list')}
+            onCancel={closePay}
           />
         ) : null}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <StatTile
-            label="المستحق للموردين"
-            value={<Money minor={suppliers?.totalOwedMinor ?? 0} currency={base} />}
-          />
-          <StatTile label="عدد الفواتير" value={purchases?.length ?? 0} />
-        </div>
-        <DataTable
-          caption="الموردون"
-          columns={supplierColumns}
-          rows={suppliers?.items ?? []}
-          rowKey={(s) => s.id}
-          loading={!suppliers && !error}
-          empty="لا موردين بعد."
-        />
-        <DataTable
-          caption="فواتير الشراء"
-          columns={purchaseColumns}
-          rows={purchases ?? []}
-          rowKey={(p) => p.id}
-          loading={!purchases && !error}
-          empty="لا فواتير شراء بعد."
-        />
-      </div>
-    </AppShell>
+      </SalesPage>
+    </ReportScreen>
   );
 }
 
-function useSaving() {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fields, setFields] = useState<Record<string, string>>({});
-  async function run<T>(work: () => Promise<T>): Promise<T | null> {
-    setSaving(true);
-    setError(null);
-    setFields({});
-    try {
-      return await work();
-    } catch (e) {
-      if (e instanceof ApiError && e.fields) setFields(e.fields);
-      setError(errorMessage(e));
-      return null;
-    } finally {
-      setSaving(false);
-    }
-  }
-  return { saving, error, fields, run, setFields };
-}
-
-function SupplierForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: () => void }) {
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const s = useSaving();
-  return (
-    <form
-      aria-label="مورد جديد"
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void s.run(() => createSupplier({ name, phone })).then((r) => r && onSaved());
-      }}
-    >
-      {s.error && !Object.keys(s.fields).length ? <Alert tone="error">{s.error}</Alert> : null}
-      <div className="grid gap-4 md:grid-cols-2">
-        <TextField
-          label="اسم المورد"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          error={s.fields.name}
-        />
-        <TextField
-          label="الجوال"
-          dir="ltr"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          error={s.fields.phone}
-        />
-      </div>
-      <div className="flex gap-3">
-        <Button type="submit" loading={s.saving}>
-          احفظ
-        </Button>
-        <Button variant="secondary" onClick={onCancel}>
-          إلغاء
-        </Button>
-      </div>
-    </form>
+/** The purchases on screen as a CSV file (Excel opens it in Arabic). */
+function exportPurchases(rows: PurchaseRow[], day: string) {
+  downloadCsv(
+    `المشتريات-${day}`,
+    ['الرقم', 'التاريخ', 'المورد', 'رقمها عند المورد', 'طريقة الدفع', 'الإجمالي'],
+    rows.map((p) => [
+      p.number,
+      p.date,
+      p.supplierName,
+      p.reference ?? '',
+      PAYMENT_TEXT[p.payment],
+      pounds(p.totalMinor),
+    ]),
   );
 }
 
-function PurchaseForm({
-  suppliers,
-  onSaved,
-  onCancel,
-}: {
-  suppliers: SupplierRow[];
-  onSaved: (number: string) => void;
-  onCancel: () => void;
-}) {
-  const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? '');
-  const [date, setDate] = useState(today());
-  const [payment, setPayment] = useState<PurchasePayment>('credit');
-  const [reference, setReference] = useState('');
-  const [lines, setLines] = useState<Line[]>([]);
-  const s = useSaving();
-  const parsed = lines.map((l) => ({ qty: qtyOf(l.qty), cost: moneyOf(l.cost) }));
-  const ready = lines.length > 0 && parsed.every((p) => p.qty && p.qty > 0 && p.cost !== null);
-  const total = parsed.reduce((sum, p) => sum + (p.cost ?? 0), 0);
-
-  return (
-    <form
-      aria-label="فاتورة شراء"
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!ready) return;
-        void s
-          .run(() =>
-            createPurchase({
-              supplierId,
-              date,
-              payment,
-              reference: reference || null,
-              notes: null,
-              lines: lines.map((l, i) => ({
-                variantId: l.variantId,
-                qty: parsed[i]!.qty!,
-                costMinor: parsed[i]!.cost!,
-                batchNo: l.batch?.trim() || null,
-                expiryDate: l.expiry || null,
-                ...(l.serials?.trim()
-                  ? {
-                      serials: l.serials
-                        .split(/[\n,،]+/)
-                        .map((x) => x.trim())
-                        .filter(Boolean),
-                    }
-                  : {}),
-              })),
-            }),
-          )
-          .then((r) => r && onSaved(r.number));
-      }}
-    >
-      {s.error ? <Alert tone="error">{s.error}</Alert> : null}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Select label="المورد" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-          {suppliers.map((sup) => (
-            <option key={sup.id} value={sup.id}>
-              {sup.name}
-            </option>
-          ))}
-        </Select>
-        <TextField
-          label="التاريخ"
-          type="date"
-          dir="ltr"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
-        <TextField
-          label="رقم فاتورة المورد"
-          dir="ltr"
-          value={reference}
-          onChange={(e) => setReference(e.target.value)}
-        />
-      </div>
-      <div role="group" aria-label="الدفع" className="flex flex-wrap gap-2">
-        {(Object.keys(PAYMENT_TEXT) as PurchasePayment[]).map((p) => (
-          <button
-            key={p}
-            type="button"
-            aria-pressed={payment === p}
-            onClick={() => setPayment(p)}
-            className={cn(
-              'min-h-11 rounded-control border-2 px-4 font-semibold',
-              payment === p ? 'border-brand bg-brand-soft text-brand-ink' : 'border-line bg-surface text-ink',
-            )}
-          >
-            {PAYMENT_TEXT[p]}
-          </button>
-        ))}
-      </div>
-      <VariantPicker
-        onPick={(v) =>
-          setLines((list) =>
-            list.some((l) => l.variantId === v.variantId)
-              ? list
-              : [...list, { ...v, qty: '', cost: '', batch: '', expiry: '' }],
-          )
-        }
-        onPickGrid={(picked) =>
-          setLines((list) => [
-            ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
-            ...picked.map((p) => ({ ...p, batch: '', expiry: '' })),
-          ])
-        }
-      />
-      {lines.length > 0 ? (
-        <ul aria-label="أصناف الفاتورة" className="flex flex-col gap-2">
-          {lines.map((l, i) => (
-            <li
-              key={l.variantId}
-              className="grid grid-cols-2 items-end gap-3 md:grid-cols-[minmax(0,1fr)_8rem_10rem_8rem_10rem_auto]"
-            >
-              <span className="pb-3 font-semibold text-ink">{l.name}</span>
-              <TextField
-                label={`كمية ${l.name}`}
-                inputMode="decimal"
-                dir="ltr"
-                value={l.qty}
-                onChange={(e) =>
-                  setLines((all) => all.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))
-                }
-                error={s.fields[`lines.${i}.qty`]}
-              />
-              <TextField
-                label={`كلفة ${l.name}`}
-                hint="مجموع السطر بالليرة"
-                inputMode="decimal"
-                dir="ltr"
-                value={l.cost}
-                onChange={(e) =>
-                  setLines((all) => all.map((x, j) => (j === i ? { ...x, cost: e.target.value } : x)))
-                }
-                error={s.fields[`lines.${i}.costMinor`]}
-              />
-              <TextField
-                label={`دفعة ${l.name}`}
-                hint="اختياري"
-                dir="ltr"
-                value={l.batch ?? ''}
-                onChange={(e) =>
-                  setLines((all) => all.map((x, j) => (j === i ? { ...x, batch: e.target.value } : x)))
-                }
-              />
-              <TextField
-                label={`انتهاء ${l.name}`}
-                hint="اختياري"
-                type="date"
-                dir="ltr"
-                value={l.expiry ?? ''}
-                onChange={(e) =>
-                  setLines((all) => all.map((x, j) => (j === i ? { ...x, expiry: e.target.value } : x)))
-                }
-                error={s.fields[`lines.${i}.expiryDate`]}
-              />
-              <label className="col-span-2 flex flex-col gap-1 text-sm font-semibold text-ink md:col-span-6">
-                الأرقام التسلسلية أو IMEI (رقم في كل سطر، للأجهزة)
-                <textarea
-                  aria-label={`أرقام ${l.name}`}
-                  dir="ltr"
-                  rows={2}
-                  value={l.serials ?? ''}
-                  onChange={(e) =>
-                    setLines((all) => all.map((x, j) => (j === i ? { ...x, serials: e.target.value } : x)))
-                  }
-                  className="rounded-control border border-line-control bg-surface p-2 font-normal"
-                />
-                {s.fields[`lines.${i}.serials`] ? (
-                  <span className="text-danger-ink">{s.fields[`lines.${i}.serials`]}</span>
-                ) : null}
-              </label>
-              <button
-                type="button"
-                aria-label={`احذف ${l.name}`}
-                onClick={() => setLines((all) => all.filter((_, j) => j !== i))}
-                className="grid size-12 place-items-center rounded-xl text-ink-muted hover:bg-surface-muted"
-              >
-                <DeleteIcon size={20} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div className="flex items-center justify-between rounded-card bg-surface-total p-4">
-        <span className="font-semibold text-ink-muted">مجموع الفاتورة</span>
-        <Money minor={total} currency="SYP" className="text-2xl font-bold text-ink" />
-      </div>
-      <div className="flex gap-3">
-        <Button type="submit" loading={s.saving} disabled={!ready}>
-          سجّل الفاتورة
-        </Button>
-        <Button variant="secondary" onClick={onCancel}>
-          إلغاء
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-function PaymentForm({
-  suppliers,
-  onSaved,
-  onCancel,
-}: {
-  suppliers: SupplierRow[];
-  onSaved: (number: string) => void;
-  onCancel: () => void;
-}) {
-  const owing = suppliers.filter((x) => x.balanceMinor > 0);
-  const [supplierId, setSupplierId] = useState((owing[0] ?? suppliers[0])?.id ?? '');
-  const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<'cash' | 'bank'>('cash');
-  const [date, setDate] = useState(today());
-  const s = useSaving();
-  const minor = moneyOf(amount);
-  return (
-    <form
-      aria-label="دفعة لمورد"
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!minor) return;
-        void s
-          .run(() => paySupplier({ supplierId, date, amountMinor: minor, method, note: null }))
-          .then((r) => r && onSaved(r.number));
-      }}
-    >
-      {s.error ? <Alert tone="error">{s.error}</Alert> : null}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Select label="المورد" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-          {suppliers.map((sup) => (
-            <option key={sup.id} value={sup.id}>
-              {sup.name}
-            </option>
-          ))}
-        </Select>
-        <TextField
-          label="المبلغ بالليرة"
-          inputMode="decimal"
-          dir="ltr"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-        <TextField
-          label="التاريخ"
-          type="date"
-          dir="ltr"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
-      </div>
-      <div role="group" aria-label="من أين" className="flex gap-2">
-        {(['cash', 'bank'] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            aria-pressed={method === m}
-            onClick={() => setMethod(m)}
-            className={cn(
-              'min-h-11 rounded-control border-2 px-4 font-semibold',
-              method === m ? 'border-brand bg-brand-soft text-brand-ink' : 'border-line bg-surface text-ink',
-            )}
-          >
-            {m === 'cash' ? 'من الخزنة' : 'من البنك'}
-          </button>
-        ))}
-      </div>
-      <div className="flex gap-3">
-        <Button type="submit" loading={s.saving} disabled={!minor}>
-          سجّل الدفعة
-        </Button>
-        <Button variant="secondary" onClick={onCancel}>
-          إلغاء
-        </Button>
-      </div>
-    </form>
-  );
-}
+export { SupplierForm, termsDaysOf } from './SupplierForm';

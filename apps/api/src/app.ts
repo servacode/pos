@@ -10,6 +10,7 @@ import { systemClock, type Clock } from './clock';
 import type { Env } from './env';
 import { clientAddressing, clientIp } from './http/client-ip';
 import { installErrorHandling } from './http/error-handler';
+import { createReporter, noopReporter } from './http/error-reporting';
 import { loggerOptions, newRequestRef } from './http/logging';
 import { postgresRateLimitStore } from './http/rate-limit';
 import { installSecurityHeaders } from './http/security-headers';
@@ -20,19 +21,43 @@ import { deviceRoutes } from './routes/devices';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
 import { reportRoutes } from './routes/reports';
+import { ledgerDocRoutes } from './routes/ledger-docs';
+import { financialReportRoutes } from './routes/financial-reports';
+import { saleRoutes } from './routes/sales';
+import { exportRoutes } from './routes/export';
+import { importRoutes } from './routes/import';
 import { storeRoutes } from './routes/store';
 import { customerRoutes } from './routes/customers';
+import { periodCloseRoutes } from './routes/period-close';
 import { purchaseRoutes } from './routes/purchases';
+import { stockWasteRoutes } from './routes/stock-waste';
+import { pharmacyRoutes } from './routes/pharmacy';
 import { alterationRoutes } from './routes/alterations';
+import { hallRoutes } from './routes/hall';
 import { broadcastRoutes } from './routes/broadcasts';
 import { shopRoutes } from './routes/shop';
 import { billingRoutes } from './routes/billing';
+import { platformAuthRoutes } from './routes/platform-auth';
+import { agentRoutes } from './routes/agents';
 import { promotionRoutes } from './routes/promotions';
 import { chequeRoutes } from './routes/cheques';
+import { installmentRoutes } from './routes/installments';
 import { serialRoutes } from './routes/serials';
+import { warrantyRoutes } from './routes/warranty';
+import { contractRoutes } from './routes/contracts';
+import { quotationRoutes } from './routes/quotations';
+import { recipeRoutes } from './routes/recipes';
 import { staffRoutes } from './routes/staff';
+import { staffAdminRoutes } from './routes/staff-admin';
+import { branchRoutes } from './routes/branches';
+import { distributionRoutes } from './routes/distribution';
+import { salesOrderRoutes } from './routes/sales-orders';
+import { repDayRoutes } from './routes/rep-day';
+import { repSettlementRoutes } from './routes/rep-settlements';
+import { distributionReportRoutes } from './routes/distribution-reports';
 import { syncRoutes } from './routes/sync';
 import { DOCUMENT_PROCESSORS } from './services/processors';
+import { changesShopCatalogue, forgetShopCatalogues } from './services/shop-cache';
 import type { SyncProcessors } from './services/sync-push';
 import './types';
 
@@ -80,6 +105,18 @@ export async function buildApp({
   app.decorate('tokenKeys', new TokenKeys(env.JWT_SECRET, env.JWT_PREVIOUS_SECRETS));
   app.decorate('otpSender', otpSender !== undefined ? otpSender : otpSenderFor(env, app.log));
   app.decorate('sessionGate', new SessionGate(handle.db, clock, env.AUTH_CHECK_CACHE_SECONDS));
+  const reporter = env.SENTRY_DSN
+    ? createReporter(
+        {
+          dsn: env.SENTRY_DSN,
+          environment: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV,
+          release: env.SENTRY_RELEASE,
+        },
+        app.log,
+      )
+    : noopReporter;
+  app.decorate('reporter', reporter);
+  app.addHook('onClose', async () => reporter.flush());
   app.decorateRequest('auth', null);
   app.decorateRequest('device', null);
   if (!database) app.addHook('onClose', async () => handle.client.end());
@@ -89,6 +126,11 @@ export async function buildApp({
   app.removeContentTypeParser('text/plain');
 
   await app.register(cookie);
+  // An owner's save that the public shop shows drops the kept catalogues (services/shop-cache.ts)
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (changesShopCatalogue(request.method, request.url, reply.statusCode)) forgetShopCatalogues();
+    return payload;
+  });
   // Every route is limited per client address; routes can set stricter limits (sign-in) or opt out
   // (health). Counters live in Postgres, shared by all instances and kept across restarts.
   await app.register(rateLimit, {
@@ -119,16 +161,39 @@ export async function buildApp({
   await app.register(deviceRoutes);
   await app.register(catalogRoutes);
   await app.register(staffRoutes);
+  await app.register(staffAdminRoutes);
+  await app.register(branchRoutes);
+  await app.register(distributionRoutes);
+  await app.register(salesOrderRoutes);
+  await app.register(repDayRoutes);
+  await app.register(repSettlementRoutes);
+  await app.register(distributionReportRoutes);
   await app.register(reportRoutes);
+  await app.register(ledgerDocRoutes);
+  await app.register(financialReportRoutes);
+  await app.register(saleRoutes);
+  await app.register(importRoutes);
+  await app.register(exportRoutes);
   await app.register(storeRoutes);
   await app.register(customerRoutes);
+  await app.register(periodCloseRoutes);
   await app.register(purchaseRoutes);
+  await app.register(stockWasteRoutes);
+  await app.register(pharmacyRoutes);
   await app.register(shopRoutes);
   await app.register(alterationRoutes);
+  await app.register(hallRoutes);
   await app.register(broadcastRoutes);
-  await app.register(billingRoutes);
+  await app.register(billingRoutes(syncProcessors));
+  await app.register(platformAuthRoutes);
+  await app.register(agentRoutes(syncProcessors));
   await app.register(promotionRoutes);
   await app.register(chequeRoutes);
+  await app.register(installmentRoutes);
   await app.register(serialRoutes);
+  await app.register(warrantyRoutes);
+  await app.register(contractRoutes);
+  await app.register(quotationRoutes);
+  await app.register(recipeRoutes);
   return app;
 }

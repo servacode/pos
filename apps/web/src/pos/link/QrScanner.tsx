@@ -97,7 +97,7 @@ export function QrScanner({ onToken, onClose }: { onToken: (token: string) => vo
       {error ? (
         <Alert tone="error">{error}</Alert>
       ) : (
-        <div className="relative overflow-hidden rounded-card bg-ink">
+        <div className="relative overflow-hidden rounded-card border border-line bg-sidebar shadow-e1">
           <video
             ref={videoRef}
             muted
@@ -105,13 +105,10 @@ export function QrScanner({ onToken, onClose }: { onToken: (token: string) => vo
             aria-label="الكاميرا: وجّهها إلى رمز QR"
             className="aspect-video w-full object-cover"
           />
-          <span
-            aria-hidden="true"
-            className="absolute inset-[18%] rounded-card border-4 border-on-brand/80"
-          />
+          <span aria-hidden="true" className="absolute inset-[18%] rounded-card border-4 border-on-mark/80" />
         </div>
       )}
-      <Button variant="secondary" icon={<CloseIcon />} onClick={onClose}>
+      <Button variant="secondary" fullWidth icon={<CloseIcon />} onClick={onClose}>
         أغلق الكاميرا
       </Button>
     </div>

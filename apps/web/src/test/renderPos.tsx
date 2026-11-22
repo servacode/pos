@@ -1,5 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { expect } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { memoryLocal, type LocalStore } from '../offline/local';
 import type { CatalogSets } from '../pos/catalog';
@@ -77,15 +78,57 @@ export async function saleScreen(options: RenderPosOptions = {}) {
   const local = options.local ?? memoryLocal();
   await openShift(local);
   const pos = renderPos({ ...options, local });
-  const list = await screen.findByRole('list', { name: 'الموظفون' });
-  await pos.user.click(within(list).getByRole('button', { name: /سامر/ }));
-  await pos.user.keyboard(PINS[ids.samer]!);
-  await screen.findByRole('list', { name: 'الأصناف' });
+  await signInIfAsked(pos.user);
+  await catalogueReady(options.sets ?? posSets());
   return pos;
 }
 
+/**
+ * سامر signs in with his code, unless the till still knows him: a render after a «reload» in the same test finds
+ * the cashier signed in (the idle window), and then no code is typed.
+ */
+export async function signInIfAsked(user: ReturnType<typeof renderPos>['user']) {
+  const list = await waitFor(
+    () => {
+      const staff = screen.queryByRole('list', { name: 'الموظفون' });
+      if (staff) return staff;
+      if (screen.queryByRole('list', { name: 'الأصناف' }) || screen.queryByRole('region', { name: 'الدفع' }))
+        return null;
+      throw new Error('neither the sign-in nor the sale screen yet');
+    },
+    { timeout: 10_000 },
+  );
+  if (!list) return;
+  await user.click(within(list).getByRole('button', { name: /سامر/ }));
+  await user.keyboard(PINS[ids.samer]!);
+}
+
+/**
+ * The sale screen with its catalogue in: the tiles fill from the device's database after the screen shows, and
+ * a code scanned before then reads as unknown (a lost scan the test did not mean to test).
+ */
+export async function catalogueReady(sets: CatalogSets = posSets()) {
+  const tiles = await screen.findByRole('list', { name: 'الأصناف' });
+  if (sets.products.length === 0) return;
+  await waitFor(() => expect(within(tiles).queryAllByRole('button').length).toBeGreaterThan(0), {
+    timeout: 10_000,
+  });
+}
+
 /** What a scanner does: the whole code fast, then Enter, wherever the focus is. */
-export async function scan(user: ReturnType<typeof renderPos>['user'], code: string) {
+export async function scan(_user: ReturnType<typeof renderPos>['user'], code: string) {
+  // On the sale screen, a scan before the catalogue is in reads as unknown: wait for the first tile (a test whose
+  // catalogue is empty on purpose goes on after the wait)
+  const tiles = screen.queryByRole('list', { name: 'الأصناف' });
+  if (tiles && within(tiles).queryAllByRole('button').length === 0) {
+    await waitFor(() => expect(within(tiles).queryAllByRole('button').length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    }).catch(() => undefined);
+  }
   (document.activeElement as HTMLElement | null)?.blur();
-  await user.keyboard(`${code}{Enter}`);
+  // Every key in one go, as a scanner sends them: typed key by key, a busy test machine can pause past the
+  // scanner's gap and the code starts over (a lost scan the test did not mean to test).
+  await act(async () => {
+    for (const key of [...code, 'Enter']) fireEvent.keyDown(document.activeElement ?? document.body, { key });
+  });
 }

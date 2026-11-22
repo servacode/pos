@@ -1,36 +1,61 @@
-import type { ReactNode } from 'react';
+import { Children, isValidElement, type ReactNode } from 'react';
 import { cn } from './cn';
+import * as icons from './icons';
 import { ConnectedIcon, OfflineIcon } from './icons';
+
+/**
+ * The components of ./icons, to tell a badge that starts with its own icon by identity (never by
+ * name, which minifying changes). It keeps every icon in the bundle; apps/web draws nearly all.
+ */
+const ICONS: ReadonlySet<unknown> = new Set(Object.values(icons));
+
+/** True when the first thing in the badge is an icon of ./icons (or a bare <svg>). */
+function startsWithIcon(children: ReactNode): boolean {
+  const first = Children.toArray(children)[0];
+  return isValidElement(first) && (first.type === 'svg' || ICONS.has(first.type));
+}
 
 export type BadgeTone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger' | 'info';
 
+// هوية 4 › Badge: a tinted pill with the tone's -ink words. Neutral is surface-muted/ink-muted.
 const TONES: Record<BadgeTone, string> = {
-  neutral: 'bg-surface-muted text-ink-muted ring-line',
-  brand: 'bg-brand-soft text-brand-ink ring-brand/20',
-  success: 'bg-success-soft text-success-ink ring-success/20',
-  warning: 'bg-warning-soft text-warning-ink ring-warning/20',
-  danger: 'bg-danger-soft text-danger-ink ring-danger/20',
-  info: 'bg-info-soft text-info-ink ring-info/20',
+  neutral: 'bg-surface-muted text-ink-muted',
+  brand: 'bg-brand-soft text-brand-ink',
+  success: 'bg-success-soft text-success-ink',
+  warning: 'bg-warning-soft text-warning-ink',
+  danger: 'bg-danger-soft text-danger-ink',
+  info: 'bg-info-soft text-info-ink',
 };
+
+const PILL =
+  'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap';
+
+/** The 6 px dot in the words' own colour: the tone shows twice, never by colour alone. */
+function Dot() {
+  return <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-current" />;
+}
 
 /** A small label: a sector, a count, «جديد». For the status of a record use StatusChip. */
 export function Badge({
   tone = 'neutral',
+  dot,
   className,
   children,
 }: {
   tone?: BadgeTone;
+  /**
+   * The dot before the words (هوية 4 › Badge). On by default, also before a number or an amount
+   * (<bdi>, <Money>); a badge that starts with its own icon (e.g. a check before «متوازن») leaves
+   * it out, as the icon already marks it.
+   */
+  dot?: boolean;
   className?: string;
   children: ReactNode;
 }) {
+  const showDot = dot ?? !startsWithIcon(children);
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ring-1 ring-inset',
-        TONES[tone],
-        className,
-      )}
-    >
+    <span className={cn(PILL, TONES[tone], className)}>
+      {showDot ? <Dot /> : null}
       {children}
     </span>
   );
@@ -60,15 +85,6 @@ export const STATUSES = {
 
 export type Status = keyof typeof STATUSES;
 
-const CHIP_TONES: Record<BadgeTone, string> = {
-  neutral: 'bg-surface-muted text-ink-muted',
-  brand: 'bg-brand-soft text-brand-ink',
-  success: 'bg-success-soft text-success-ink',
-  warning: 'bg-warning-soft text-warning-ink',
-  danger: 'bg-danger-soft text-danger-ink',
-  info: 'bg-info-soft text-info-ink',
-};
-
 /** The status of a record (kit .badge): a dot, the colour and the word. `children` adds a count. */
 export function StatusChip({
   status,
@@ -81,14 +97,8 @@ export function StatusChip({
 }) {
   const { tone, label } = STATUSES[status];
   return (
-    <span
-      className={cn(
-        'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.8125rem] font-semibold whitespace-nowrap',
-        CHIP_TONES[tone],
-        className,
-      )}
-    >
-      <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-current" />
+    <span className={cn(PILL, TONES[tone], className)}>
+      <Dot />
       {children}
       {label}
     </span>

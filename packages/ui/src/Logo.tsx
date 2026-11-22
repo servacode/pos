@@ -1,104 +1,93 @@
 import { cn } from './cn';
 
-// The emerald logo, exactly as docs/design/kit/logo.md: viewBox 64, a square with corner 16, the «S»
-// of two arcs (stroke 7, round caps) and the small dot. Drawn with colour tokens so it follows the
-// theme: the mark is brand with an on-brand «S»; the dot is brand-soft in light mode and on-brand in
-// dark. Resize with the width and height only, never redraw it.
+// The SERVA logo is the owner's own drawing, used as it is (docs/design/IDENTITY.md › الشعار): never
+// redrawn. Every file comes from scripts/brand/serva-logo-source.svg through `pnpm brand`:
+//   /brand/serva-logo.svg: the logo itself;
+//   /brand/serva-mark.svg: the same drawing cut to the square around the «S», for small places.
+// On a dark surface (the sidebar) it sits on a white tile so its blue reads. Resize with the height only.
 
-export const LOGO_S_PATH = 'M42 22 A10 10 0 1 0 32 32 A10 10 0 1 1 22 42';
+/** The «S» of the logo as a line, for the faint watermark of the sign-in side (not the logo itself). */
+export const LOGO_S_PATH = 'M254 276 C334 296 372 318 366 358 C356 420 236 430 142 388';
 
-interface MarkProps {
-  className?: string;
-  /** Give the mark a name when it stands alone; next to the words it is decorative. */
-  label?: string;
-}
+export type LogoTone = 'default' | 'sidebar';
 
-function a11y(label: string | undefined) {
-  return label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': true as const };
-}
+const BRAND = '/brand';
+/** The white tile under the logo on a dark surface (part of the logo, the same in both themes). */
+// eslint-disable-next-line no-restricted-syntax -- the logo's own white ground, white in both themes, not an interface colour
+const TILE = { backgroundColor: '#fff' } as const;
 
-export function LogoMark({ className, label }: MarkProps) {
-  return (
-    <svg viewBox="0 0 64 64" focusable="false" {...a11y(label)} className={cn('size-8 shrink-0', className)}>
-      <rect width="64" height="64" rx="16" className="fill-brand" />
-      <path d={LOGO_S_PATH} fill="none" strokeWidth="7" strokeLinecap="round" className="stroke-on-brand" />
-      <circle cx="46" cy="46" r="3.5" className="fill-brand-soft dark:fill-on-brand" />
-    </svg>
-  );
-}
-
-/**
- * The app icon (logo.md › أيقونة التطبيق): corner 15 of 64. Large and medium keep the dot; the small
- * one (48 and under) has a wider stroke and no dot.
- */
-export function AppIcon({ className, label, small = false }: MarkProps & { small?: boolean }) {
-  return (
-    <svg viewBox="0 0 64 64" focusable="false" {...a11y(label)} className={cn('size-16 shrink-0', className)}>
-      <rect width="64" height="64" rx="15" className="fill-brand" />
-      <path
-        d={LOGO_S_PATH}
-        fill="none"
-        strokeWidth={small ? 8 : 7}
-        strokeLinecap="round"
-        className="stroke-on-brand"
-      />
-      {small ? null : <circle cx="46" cy="46" r="3.5" className="fill-brand-soft dark:fill-on-brand" />}
-    </svg>
-  );
-}
-
-const HORIZONTAL = {
-  // Headers (sidebar, cashier bar, phone top): mark 32, «Serva» 20/22, «سيرفا» 12/16, gap 10.
-  sm: {
-    gap: 'gap-2.5',
-    mark: 'size-8',
-    latin: 'text-xl/[22px] tracking-[-0.3px]',
-    arabic: 'text-xs/4',
-  },
-  // The large sheet: mark 92, «Serva» 60/64, «سيرفا» 26/36, gap 20.
-  lg: {
-    gap: 'gap-5',
-    mark: 'size-23',
-    latin: 'text-[60px]/16 tracking-[-1px]',
-    arabic: 'text-[26px]/9',
-  },
-} as const;
-
-/** The horizontal lockup: the mark, «Serva» and «سيرفا» under it. */
-export function Logo({
+/** The «S» alone, square: the logo's own drawing cut around it. */
+export function LogoMark({
   className,
-  markClassName,
-  size = 'sm',
+  label,
+  tone = 'default',
 }: {
   className?: string;
-  markClassName?: string;
-  size?: keyof typeof HORIZONTAL;
+  label?: string;
+  tone?: LogoTone;
 }) {
-  const s = HORIZONTAL[size];
   return (
-    <span className={cn('inline-flex items-center', s.gap, className)}>
-      <LogoMark className={cn(s.mark, markClassName)} />
-      <span className="flex flex-col">
-        <span lang="en" dir="ltr" className={cn('font-bold text-ink', s.latin)}>
-          Serva
-        </span>
-        <span className={cn('font-semibold text-brand-ink', s.arabic)}>سيرفا</span>
-      </span>
-    </span>
+    <img
+      src={`${BRAND}/serva-mark.svg`}
+      width={64}
+      height={64}
+      decoding="async"
+      alt={label ?? ''}
+      aria-hidden={label ? undefined : true}
+      style={tone === 'sidebar' ? TILE : undefined}
+      className={cn('size-8 shrink-0', tone === 'sidebar' && 'rounded-md p-0.5', className)}
+    />
   );
 }
 
-/** The stacked lockup for the splash, sign-in and error pages: mark 96, «Serva» 44/48, «سيرفا» 20/30. */
+/** The app icon: the mark on a white rounded tile (the PWA and home-screen icons in public/ are the same). */
+export function AppIcon({ className, label }: { className?: string; label?: string }) {
+  return (
+    <LogoMark
+      label={label}
+      tone="sidebar"
+      className={cn('size-16 rounded-[22%] p-[6%] shadow-e1', className)}
+    />
+  );
+}
+
+const SIZES = {
+  // Headers (sidebar, cashier bar, phone top).
+  sm: 'h-10',
+  // The large sheet.
+  lg: 'h-28',
+} as const;
+
+/** The logo (alt «SERVA»), the owner's own drawing unchanged; on the dark sidebar on a white tile. */
+export function Logo({
+  className,
+  size = 'sm',
+  tone = 'default',
+}: {
+  className?: string;
+  size?: keyof typeof SIZES;
+  /** 'sidebar' on the always-dark sidebar: the logo on a white tile, so its blue reads. */
+  tone?: LogoTone;
+}) {
+  return (
+    <img
+      src={`${BRAND}/serva-logo.svg`}
+      width={1536}
+      height={1024}
+      decoding="async"
+      alt="SERVA"
+      style={tone === 'sidebar' ? TILE : undefined}
+      className={cn('w-auto shrink-0', tone === 'sidebar' && 'rounded-lg px-2 py-1', SIZES[size], className)}
+    />
+  );
+}
+
+/** The stacked lockup for the splash and error pages: the logo, and «سيرفا» under it. */
 export function LogoStacked({ className }: { className?: string }) {
   return (
-    <span className={cn('inline-flex flex-col items-center gap-4', className)}>
-      <LogoMark className="size-24" />
-      <span className="flex flex-col items-center">
-        <span lang="en" dir="ltr" className="text-[44px]/12 font-bold tracking-[-0.8px] text-ink">
-          Serva
-        </span>
-        <span className="text-xl/[30px] font-semibold text-brand-ink">سيرفا</span>
-      </span>
+    <span className={cn('inline-flex flex-col items-center gap-3', className)}>
+      <Logo size="lg" />
+      <span className="text-xl/[30px] font-semibold text-brand-ink">سيرفا</span>
     </span>
   );
 }

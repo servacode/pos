@@ -125,6 +125,11 @@ jobs:
       - name: Sign up a store with the on-screen test code (two-step API, test mode)
         run: bash scripts/local/ci-checks.sh signup
 
+      - name: Alerts reach a webhook (failed backup, stale backups) and the cleanup removes expired sessions
+        run: |
+          bash scripts/local/ci-checks.sh alerts
+          bash scripts/local/ci-checks.sh cleanup
+
       - name: Drill reports
         if: always()
         run: cat deploy/local/backups/drills/*.txt 2> /dev/null || echo "No drill report."

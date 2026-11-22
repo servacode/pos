@@ -83,6 +83,22 @@ describe('the golden first sale (23 › المرحلة 1 › أول بيع)', ()
     line(5, 27500, { name: 'سكر' }),
   ];
 
+  it('keeps a cheque payment bank, number and due date, and only that payment carries them', () => {
+    const cheque = { bank: 'بنك سورية', number: '000123', dueDate: '2026-12-01', drawer: null };
+    const tender: SaleTender = {
+      method: 'cheque',
+      currency: 'SYP',
+      amountMinor: 129000,
+      reference: 'بنك سورية · 000123 · 2026-12-01',
+      cheque,
+    };
+    const sale = buildSalePayload(cart(lines, [tender], { customerId: CUSTOMER, customerName: 'زبون' }));
+    expect(sale.payments[0]!.cheque).toEqual(cheque);
+    expect(salePayloadSchema.safeParse(sale).success).toBe(true);
+    const plain = buildSalePayload(cart(lines, [cash('SYP', 129000)]));
+    expect('cheque' in plain.payments[0]!).toBe(false);
+  });
+
   it('totals 1,290.00 ل.س, takes 9 $ then 200 ل.س and gives back 80.00 ل.س', () => {
     const sale = buildSalePayload(cart(lines, [cash('USD', 900), cash('SYP', 20000)]));
     expect(sale.totals.totalMinor).toBe(129000);
@@ -193,6 +209,32 @@ describe('buildSalePayload', () => {
     });
     expect(sale.change).toMatchObject({ currency: 'USD', amountMinor: 591 });
     expect(sale.invoiceDiscount?.approval?.userId).toBe(MANAGER);
+  });
+
+  it("a customer group's percent is an ordinary invoice discount: the same totals as the typed one, the group named beside it", () => {
+    const GROUP = '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a09';
+    const lines = [line(1, 50_000), line(2, 30_000, { qty: 2000 })];
+    const typed = buildSalePayload({
+      ...cart(lines, [cash('SYP', 99_000)]),
+      invoiceDiscount: { type: 'percent', bp: 1000, source: 'manual', reason: null, approval: null },
+    });
+    const group = buildSalePayload({
+      ...cart(lines, [cash('SYP', 99_000)]),
+      invoiceDiscount: {
+        type: 'percent',
+        bp: 1000,
+        source: 'promotion',
+        reason: 'خصم المجموعة جملة',
+        approval: null,
+        groupId: GROUP,
+      },
+    });
+    expect(group.totals).toEqual(typed.totals);
+    expect(group.lines.map((l) => l.priced)).toEqual(typed.lines.map((l) => l.priced));
+    expect(group.totals.invoiceDiscountMinor).toBe(11_000);
+    expect(group.invoiceDiscount).toMatchObject({ source: 'promotion', groupId: GROUP });
+    expect(verifySalePayload(group)).toEqual([]);
+    expect(salePayloadSchema.safeParse(group).success).toBe(true);
   });
 
   it('converts a dollar price at the sale rate and keeps the catalog price beside it', () => {

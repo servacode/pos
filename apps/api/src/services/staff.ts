@@ -15,6 +15,7 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
+import { mayUseRepPhone, REP_PHONE_REFUSAL } from './devices';
 
 /**
  * PIN «رمز الدخول» (16 › تخمين رمز PIN; packages/core › contracts/staff.ts). The server keeps only an
@@ -128,6 +129,7 @@ export async function setMyPin(
 type Outcome =
   | { kind: 'ok'; session: StaffSessionResponse }
   | { kind: 'invalid' }
+  | { kind: 'refused' }
   | { kind: 'locked'; retryAfter: number };
 
 /**
@@ -219,6 +221,18 @@ export async function startStaffSession(
       .update(pinAttempts)
       .set({ failures: 0, lockedUntil: null })
       .where(eq(pinAttempts.id, attempts!.id));
+    // A rep's phone takes its van's rep, a manager or the owner (round 35 › D3); the PIN was right, so the count is clear
+    if (
+      !(await mayUseRepPhone(
+        tx,
+        device,
+        user.id,
+        held.map((r) => r.key),
+      ))
+    ) {
+      await record('staff_session.refused', { reason: 'rep_phone_not_his_van' });
+      return { kind: 'refused' };
+    }
     await record('staff_session.signed_in', { pinVersion: user.pinVersion });
     const granted = new Set(held.flatMap((r) => r.permissions));
     return {
@@ -236,5 +250,6 @@ export async function startStaffSession(
   // Thrown after the transaction, so the failure count and the audit entry are kept.
   if (outcome.kind === 'locked') throw pinLocked(outcome.retryAfter);
   if (outcome.kind === 'invalid') throw pinInvalid();
+  if (outcome.kind === 'refused') throw new AppError(403, 'forbidden', REP_PHONE_REFUSAL);
   return outcome.session;
 }

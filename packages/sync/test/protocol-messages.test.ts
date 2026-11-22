@@ -261,4 +261,13 @@ describe('the flag that separates received from posted (task M0-3)', () => {
     expect(SYNC_FLAGS).toContain('held_for_processing');
     expect(SYNC_FLAGS.filter((f) => f === 'held_for_processing')).toHaveLength(1);
   });
+
+  // Round A5: the till's group discount and typed coupon are checked on push; the sale stands and the owner is told.
+  // Additive: a device that does not know the names ignores them (flags are only ever read by name).
+  it('carries the flags of a group discount or a coupon the server does not back, once each', () => {
+    for (const flag of ['group_discount_mismatch', 'coupon_invalid'] as const) {
+      expect(SYNC_FLAGS.filter((f) => f === flag)).toHaveLength(1);
+    }
+    expect(new Set(SYNC_FLAGS).size).toBe(SYNC_FLAGS.length);
+  });
 });

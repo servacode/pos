@@ -30,8 +30,12 @@ function sides(debitSigned: number): [number, number] {
 }
 
 /** A balance signed on the account's normal side (the server's form) turned debit-signed. */
-export function debitSigned(minor: number, type: Parameters<typeof normalSide>[0]): number {
-  return normalSide(type) === 'debit' ? minor : -minor;
+export function debitSigned(
+  minor: number,
+  type: Parameters<typeof normalSide>[0],
+  side?: 'debit' | 'credit',
+): number {
+  return (side ?? normalSide(type)) === 'debit' ? minor : -minor;
 }
 
 /**
@@ -51,8 +55,8 @@ export function trialBalanceCsv(report: TrialBalance, base: CurrencyCode): strin
     'رصيد آخر المدة دائن',
   ].map((title) => csvField(title));
   const lines = report.rows.map((row) => {
-    const [openDebit, openCredit] = sides(debitSigned(row.openingMinor, row.type));
-    const [closeDebit, closeCredit] = sides(debitSigned(row.closingMinor, row.type));
+    const [openDebit, openCredit] = sides(debitSigned(row.openingMinor, row.type, row.normalSide));
+    const [closeDebit, closeCredit] = sides(debitSigned(row.closingMinor, row.type, row.normalSide));
     return [
       csvField(row.accountCode),
       csvField(row.accountName),

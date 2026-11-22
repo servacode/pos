@@ -60,6 +60,39 @@ export const SIZE_KINDS: readonly OptionKind[] = [
       { label: 'أطفال', values: range(2, 16).map((n) => years(Number(n))) },
     ],
   },
+  {
+    name: 'الحجم',
+    pick: 'حجم (عطور)',
+    groups: [
+      {
+        label: 'بالمل',
+        values: ['10 مل', '30 مل', '50 مل', '75 مل', '100 مل', '125 مل', '150 مل', '200 مل'],
+      },
+    ],
+  },
+];
+
+/**
+ * Trousers and suits are bought by two numbers: the waist and the length, the chest and the length.
+ * They are options of their own (not shown as the one «المقاس» chip), picked together by PAIR_KINDS.
+ */
+const LENGTH_GROUPS: readonly PresetGroup[] = [
+  { label: 'بالإنش', values: even(28, 40) },
+  { label: 'بالفئة', values: ['قصير', 'عادي', 'طويل'] },
+];
+export const PAIR_KINDS: readonly (OptionKind & { second: OptionKind })[] = [
+  {
+    name: 'الخصر',
+    pick: 'بنطلون: الخصر × الطول',
+    groups: [{ label: 'بالإنش', values: even(26, 50) }],
+    second: { name: 'الطول', pick: 'الطول', groups: LENGTH_GROUPS },
+  },
+  {
+    name: 'الصدر',
+    pick: 'جاكيت: الصدر × الطول',
+    groups: [{ label: 'بالإنش', values: even(34, 56) }],
+    second: { name: 'الطول', pick: 'الطول', groups: LENGTH_GROUPS },
+  },
 ];
 
 export const COLOURS: PresetGroup = {
@@ -96,7 +129,12 @@ export const COLOUR_NAME = 'اللون';
 export function presetGroups(name: string): readonly PresetGroup[] {
   const n = name.trim();
   if (n === COLOUR_NAME || n === 'الألوان') return [COLOURS];
-  return SIZE_KINDS.find((k) => k.name === n)?.groups ?? [];
+  return (
+    SIZE_KINDS.find((k) => k.name === n)?.groups ??
+    PAIR_KINDS.find((k) => k.name === n)?.groups ??
+    PAIR_KINDS.find((k) => k.second.name === n)?.second.groups ??
+    []
+  );
 }
 
 /**

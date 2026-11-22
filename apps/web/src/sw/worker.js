@@ -81,7 +81,7 @@ async function page(request) {
 }
 
 async function file(request) {
-  const cached = await caches.match(request);
+  const cached = await caches.match(request, { ignoreVary: true });
   if (cached) return cached;
   const response = await fetch(request);
   if (response.ok && new URL(request.url).pathname.startsWith('/assets/')) {

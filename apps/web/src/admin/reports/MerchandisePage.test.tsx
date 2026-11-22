@@ -58,6 +58,10 @@ const report = (idleDays: number, withCost: boolean): MerchandiseReport => ({
       productId: 'p-shirt',
       name: 'قميص كتان',
       label: 'M · أبيض',
+      attributes: [
+        { name: 'المقاس', value: 'M' },
+        { name: 'اللون', value: 'أبيض' },
+      ],
       stockQty: 1000,
       soldQty: 6000,
       minStockQty: null,
@@ -82,8 +86,16 @@ const report = (idleDays: number, withCost: boolean): MerchandiseReport => ({
     },
   ],
   bySeller: [
-    { userId: 'u-1', fullName: 'رنا', invoiceCount: 12, totalMinor: 5_400_000, returnedMinor: 400_000 },
+    {
+      userId: 'u-1',
+      fullName: 'رنا',
+      invoiceCount: 12,
+      totalMinor: 5_400_000,
+      returnedMinor: 400_000,
+      commissionBp: null,
+    },
   ],
+  seasons: [],
 });
 
 const url = (period: number, idle: number) =>
@@ -110,6 +122,8 @@ describe('«حركة الأصناف»', () => {
       [`GET ${url(30, 90)}`]: () => ({ status: 200, body: report(90, false) }),
     });
     const { user } = renderApp('/reports/merchandise');
+    // The long tables are folded until opened
+    await user.click(await screen.findByRole('button', { name: 'افتح كل الأقسام' }));
     const sizes = await screen.findByRole('table', { name: 'المبيعات حسب المقاس' });
     const rows = within(sizes).getAllByRole('row');
     expect(rows[1]).toHaveTextContent('M');
@@ -128,7 +142,7 @@ describe('«حركة الأصناف»', () => {
     expect(screen.getByText('رأس مال نائم فيها')).toBeInTheDocument();
 
     // One M white left of six sold: reorder it
-    const low = screen.getByRole('table', { name: 'قرّب يخلص' });
+    const low = screen.getByRole('table', { name: 'يوشك على النفاد' });
     expect(within(low).getByRole('link', { name: 'قميص كتان M · أبيض' })).toHaveAttribute(
       'href',
       '/products/p-shirt',
@@ -153,9 +167,9 @@ describe('«حركة الأصناف»', () => {
     await user.selectOptions(screen.getByLabelText('القسم'), 'كل الأقسام');
 
     // Without «التكلفة» the cost is not there
-    await user.click(screen.getByRole('radio', { name: '3 أشهر' }));
+    await user.click(screen.getByRole('radio', { name: 'آخر 3 أشهر' }));
     await screen.findByRole('table', { name: 'القطع الراكدة' });
-    expect(requestsTo('GET', url(30, 90))).toHaveLength(1);
+    expect(requestsTo('GET', url(90, 90))).toHaveLength(1);
     expect(screen.queryByText('رأس مال نائم فيها')).not.toBeInTheDocument();
   });
 });

@@ -54,6 +54,8 @@ describe('sign-in «من يعمل الآن؟»', () => {
     await first.user.keyboard(PINS[ids.samer]!);
     await screen.findByRole('heading', { name: 'افتح الوردية' });
     first.view.unmount();
+    // Another visit, after the idle window: the code is asked again
+    globalThis.sessionStorage.clear();
 
     const fetch = vi.fn(async () => {
       throw new TypeError('Failed to fetch');

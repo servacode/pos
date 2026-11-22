@@ -1,6 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { roles, userRoles, users, type Transaction } from '@serva/db';
-import { forbidden, requirePermission } from '../../auth/permissions';
+import { forbidden, permissionScope, requirePermission } from '../../auth/permissions';
 import type { AccessClaims } from '../../auth/tokens';
 import { AppError } from '../../errors';
 import type { RequestMeta } from '../../types';
@@ -38,15 +38,23 @@ async function roleKeys(tx: Transaction, userId: string): Promise<string[]> {
   return rows.map((r) => r.key);
 }
 
-/** Reading the catalog in the admin (17: «owner, manager»): those roles, or catalog.manage. */
+/**
+ * Reading the catalog in the admin (17: «owner, manager»): those roles, catalog.manage, or the
+ * books' reader (accounting.view: the accountant reads items, stock and cost, never writes them).
+ */
 export async function requireCatalogReader(tx: Transaction, userId: string): Promise<void> {
   if ((await roleKeys(tx, userId)).length > 0) return;
+  if ((await permissionScope(tx, userId, 'accounting.view')).all) return;
   await requirePermission(tx, userId, 'catalog.manage');
 }
 
-/** Writing products, categories and units. */
+/**
+ * Writing products, categories and units. The catalog is the whole store's (one price, one name for
+ * every branch), so a role given for one branch only may read it but not change it.
+ */
 export async function requireCatalogManager(tx: Transaction, userId: string): Promise<void> {
-  await requirePermission(tx, userId, 'catalog.manage');
+  const scope = await requirePermission(tx, userId, 'catalog.manage');
+  if (!scope.all) throw forbidden();
 }
 
 /** Tax rates are the owner's alone (17 › المنتجات: tax-rates «owner»). */

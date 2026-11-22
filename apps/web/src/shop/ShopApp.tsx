@@ -1,21 +1,75 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, Route, Routes, useNavigate, useParams } from 'react-router';
-import type { ShopCodeSent, ShopHome, ShopOrderPlaced, ShopOrderTrack, ShopProduct } from '@serva/core';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
+import type {
+  CurrencyCode,
+  ShopCodeSent,
+  ShopCoupon,
+  ShopHome,
+  ShopOrderPlaced,
+  ShopOrderTrack,
+  ShopProduct,
+  ShopQuote,
+} from '@serva/core';
 import {
+  AddIcon,
   Alert,
+  AlertCircleIcon,
+  BackIcon,
+  Badge,
+  Banner,
   Button,
   CartIcon,
+  CheckCircleIcon,
+  ClockIcon,
   cn,
+  CONTROL_HEIGHT,
   EmptyState,
-  FullScreenLoader,
+  IconButton,
+  IconChip,
+  InfoIcon,
+  LogoMark,
   Money,
+  OfferIcon,
+  RemoveIcon,
+  ScrollStrip,
+  SearchField,
   Select,
+  SendIcon,
+  Skeleton,
+  SkeletonText,
   StoreIcon,
   TextField,
+  TextLink,
+  ThemeToggle,
+  TruckIcon,
+  useDensity,
+  type Density,
 } from '@serva/ui';
 import { ApiError, apiFetch, errorMessage } from '../lib/api';
-import { canPick, cartCount, cartTotal, MAX_QTY, useShopCart, variantFor } from './cart';
-import { openWhatsApp } from './open';
+import { counted } from '../pos/format';
+import { placeholderIconFor } from '../lib/productPlaceholder';
+import { isColourOption, swatchOf } from '../pos/sale/swatch';
+import { canChoose, canPick, capOf, cartCount, cartTotal, useShopCart, variantFor } from './cart';
+import { openWhatsApp, withTrackingLink } from './open';
+import { getOnce } from './getOnce';
+import { CatalogueFilters } from './CatalogueFilters';
+import {
+  accentStyle,
+  CouponBox,
+  CoverBanner,
+  NotifyMe,
+  ProductNotes,
+  ShopHero,
+  StoreMark,
+} from './ShopExtras';
+import {
+  applyFilters,
+  filterCount,
+  NO_FILTERS,
+  sortProducts,
+  type ShopFilters,
+  type ShopSort,
+} from './filters';
 
 /**
  * The store's online shop (26 › المتجر الإلكتروني): its goods with their pictures, sizes and
@@ -23,16 +77,25 @@ import { openWhatsApp } from './open';
  * (saved for the store, then WhatsApp opens on the store's number with it written out) or, when the
  * store takes orders in the shop itself, a code to the customer's phone confirms it. Each order has
  * its page for the customer to follow. No sign-in, no app to install; made for a phone first.
+ *
+ * هوية 4, led by the store: its name and monogram in the header, its note in the strip above it,
+ * and SERVA only in the footer's small «يعمل بنظام سيرفا».
  */
 export function ShopApp() {
   const { slug = '' } = useParams();
   const [home, setHome] = useState<ShopHome | null>(null);
   const [error, setError] = useState<string | null>(null);
   const cart = useShopCart(slug);
+  const density = useDensity();
+  const { pathname } = useLocation();
+  // Every page of the shop opens at its top (a product opened from far down the list, the cart)
+  useEffect(() => {
+    document.scrollingElement?.scrollTo?.({ top: 0 });
+  }, [pathname]);
 
   useEffect(() => {
     let alive = true;
-    apiFetch<ShopHome>(`/v1/shop/${encodeURIComponent(slug)}`)
+    getOnce<ShopHome>(`/v1/shop/${encodeURIComponent(slug)}`)
       .then((h) => alive && setHome(h))
       .catch((e: unknown) => alive && setError(errorMessage(e)));
     return () => {
@@ -42,40 +105,129 @@ export function ShopApp() {
 
   if (error) {
     return (
-      <main dir="rtl" className="mx-auto max-w-lg p-6">
+      <main dir="rtl" className="grid min-h-dvh place-items-center bg-canvas p-6">
         <title>المتجر · Serva</title>
-        <EmptyState icon={StoreIcon} title="المتجر غير متاح" description={error} />
+        <EmptyState
+          icon={StoreIcon}
+          title="المتجر غير متاح"
+          description={error}
+          className="w-full max-w-md bg-surface"
+        />
       </main>
     );
   }
-  if (!home) return <FullScreenLoader />;
+  if (!home) return <ShopSkeleton />;
   const base = `/shop/${slug}`;
   const count = cartCount(cart.lines);
+  const { store } = home;
 
   return (
-    <div dir="rtl" className="min-h-screen bg-surface-muted text-ink">
+    <div dir="rtl" style={accentStyle(store.accent)} className="flex min-h-dvh flex-col bg-canvas text-ink">
       <title>{`${home.store.name} · المتجر`}</title>
-      <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-surface px-4 py-3">
-        <Link to={base} className="flex-1 truncate text-lg font-bold">
-          {home.store.name}
-        </Link>
-        <Link
-          to={`${base}/cart`}
-          aria-label={`السلة، ${count} قطعة`}
-          className="inline-flex min-h-11 items-center gap-2 rounded-full bg-brand px-4 font-semibold text-on-brand"
-        >
-          السلة
-          <span className="num rounded-full bg-surface px-2 text-sm text-ink">{count}</span>
-        </Link>
+      {store.note ? (
+        <p className="border-b border-sidebar-line bg-sidebar px-4 py-2 text-center text-sm text-sidebar-ink">
+          {store.note}
+        </p>
+      ) : null}
+      {store.delivery && store.showPrices && store.freeDeliveryOverMinor ? (
+        <p className="border-b border-line bg-success-soft px-4 py-2 text-center text-sm font-semibold text-success-ink">
+          توصيل مجاني للطلبات فوق <Money minor={store.freeDeliveryOverMinor} currency={store.currency} />
+        </p>
+      ) : null}
+      <header className="sticky top-0 z-20 border-b border-line bg-surface/85 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-4 sm:px-6">
+          <Link to={base} className="me-auto flex min-h-11 min-w-0 items-center gap-3 rounded-control">
+            <StoreMark store={store} />
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-lg/6 font-bold">{store.name}</span>
+              {store.tagline ? (
+                <span className="truncate text-xs text-ink-muted">{store.tagline}</span>
+              ) : null}
+            </span>
+          </Link>
+          <Link
+            to={`${base}/cart`}
+            aria-label={`السلة، ${counted(count, PIECES)}`}
+            className={cn(
+              CONTROL_HEIGHT[density],
+              'min-h-11! inline-flex shrink-0 items-center gap-2 rounded-control border border-line-control/50 bg-surface ps-3 pe-2.5 text-sm font-semibold text-ink shadow-e1 transition-colors duration-120 ease-standard hover:bg-surface-muted',
+            )}
+          >
+            <CartIcon className="text-brand-ink" />
+            السلة
+            <span
+              className={cn(
+                'num min-w-5.5 rounded-full px-1.5 text-center text-xs/5.5 font-bold',
+                count > 0 ? 'bg-brand text-on-brand' : 'bg-surface-muted text-ink-muted',
+              )}
+            >
+              {count}
+            </span>
+          </Link>
+        </div>
       </header>
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4">
+      <CoverBanner store={store} />
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 pt-6 pb-16 sm:px-6 lg:pt-8">
         <Routes>
           <Route index element={<Catalogue home={home} base={base} />} />
           <Route path="p/:id" element={<ProductView home={home} slug={slug} base={base} cart={cart} />} />
           <Route path="cart" element={<CartView home={home} slug={slug} base={base} cart={cart} />} />
-          <Route path="o/:token" element={<TrackView slug={slug} base={base} />} />
+          <Route path="o/:token" element={<TrackView home={home} slug={slug} base={base} />} />
+          <Route
+            path="*"
+            element={
+              <EmptyState
+                icon={StoreIcon}
+                title="هذه الصفحة غير موجودة"
+                description="قد يكون الرابط ناقصاً أو قديماً."
+                className="bg-surface"
+                action={
+                  <Link to={base} className={linkButton('primary', density)}>
+                    إلى المتجر
+                  </Link>
+                }
+              />
+            }
+          />
         </Routes>
       </main>
+      <footer className="border-t border-line bg-surface">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-muted">
+            <span className="font-semibold text-ink">{store.name}</span>
+            <span aria-hidden="true" className="text-ink-subtle">
+              ·
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-ink-subtle">
+              يعمل بنظام
+              {/* The mark at 16: its own size-8 would win over a smaller size given to it. */}
+              <span className="inline-flex [&_svg]:size-4">
+                <LogoMark />
+              </span>
+              <span className="font-semibold text-ink-muted">سيرفا</span>
+            </span>
+          </p>
+          <span className="flex items-center gap-4 text-sm">
+            <TextLink
+              href="/terms"
+              target="_blank"
+              rel="noopener"
+              className="inline-flex min-h-11 items-center"
+            >
+              الشروط
+            </TextLink>
+            <TextLink
+              href="/privacy"
+              target="_blank"
+              rel="noopener"
+              className="inline-flex min-h-11 items-center"
+            >
+              الخصوصية
+            </TextLink>
+          </span>
+          <ThemeToggle size="sm" />
+        </div>
+      </footer>
     </div>
   );
 }
@@ -84,8 +236,181 @@ type Cart = ReturnType<typeof useShopCart>;
 
 const digitsOf = (text: string) => [...text].filter((ch) => ch >= '0' && ch <= '9').join('');
 
+/** «قطعة واحدة», «قطعتان», «3 قطع», «16 قطعة»: the count and its noun agree, as Arabic counts. */
+const PIECES = ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'] as const;
+const PRODUCTS = ['منتج واحد', 'منتجان', 'منتجات', 'منتجاً'] as const;
+
+/**
+ * A link drawn as a button (هوية 4 › الزر), the density's control height: the way on to WhatsApp, to
+ * the order's page and back to the goods, which stay links.
+ */
+const LINK_BUTTON = {
+  primary:
+    'inset-shadow-[0_1px_0] inset-shadow-highlight/15 bg-brand text-on-brand shadow-[0_1px_2px] shadow-mark-from/30 hover:bg-brand-hover',
+  secondary: 'border border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted',
+} as const;
+
+function linkButton(variant: keyof typeof LINK_BUTTON, density: Density) {
+  return cn(
+    CONTROL_HEIGHT[density],
+    'inline-flex items-center justify-center gap-2 rounded-control px-5 text-[0.9375rem] font-semibold transition-colors duration-120 ease-standard',
+    LINK_BUTTON[variant],
+  );
+}
+
+/** A piece without a picture: a soft tile with the goods' sign, never an empty box. */
+/** The first paint while the shop loads: a header and tiles in the shape of the real ones, not a spinner */
+function ShopSkeleton() {
+  return (
+    <div dir="rtl" aria-busy="true" className="flex min-h-dvh flex-col bg-canvas text-ink">
+      <span role="status" className="sr-only">
+        جارٍ التحميل…
+      </span>
+      <div className="border-b border-line bg-surface">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-4 sm:px-6">
+          <Skeleton className="size-10 rounded-control" />
+          <Skeleton className="h-5 w-32" />
+        </div>
+      </div>
+      <div className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-x-3 gap-y-4 px-4 pt-8 sm:grid-cols-3 sm:px-6 lg:grid-cols-4">
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((n) => (
+          <div key={n} aria-hidden="true" className="flex flex-col gap-2">
+            <Skeleton className="aspect-[4/3] w-full" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/3" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The price before the markdown: struck through, its figure and unit kept together so the unit never jumps sides */
+function WasPrice({
+  minor,
+  currency,
+  className = 'text-xs',
+}: {
+  minor: number;
+  currency: CurrencyCode;
+  className?: string;
+}) {
+  return (
+    <s aria-label="السعر قبل التنزيل" className={cn('whitespace-nowrap text-ink-subtle', className)}>
+      <bdi dir="rtl">
+        <Money minor={minor} currency={currency} />
+      </bdi>
+    </s>
+  );
+}
+
+/** What the tile's ribbon says: the saving when the card has a before and an after («خصم 15%»), else the offer's name */
+function ribbonOf(p: { offer: string | null; priceMinor: number | null; wasPriceMinor: number | null }) {
+  if (!p.offer) return null;
+  if (p.priceMinor !== null && p.wasPriceMinor && p.wasPriceMinor > p.priceMinor) {
+    const percent = Math.round((1 - p.priceMinor / p.wasPriceMinor) * 100);
+    if (percent >= 1) return `خصم ${percent}%`;
+  }
+  return p.offer;
+}
+
+/** Where the price would be, when the store keeps its prices to itself */
+function PriceOnRequest({ className }: { className?: string }) {
+  return <span className={cn('font-semibold text-ink-muted', className)}>السعر عند الطلب</span>;
+}
+
+/** The tints a photo-less tile takes, one per department: the identity's soft families only (dark mode follows the tokens) */
+const TILE_TINTS = [
+  'from-brand-soft text-brand-ink',
+  'from-info-soft text-info-ink',
+  'from-accent-soft text-accent-ink',
+] as const;
+
+/** A stable pick from a name: the same department always gets the same tint */
+function tintIndex(text: string): number {
+  let h = 0;
+  for (const ch of text) h = (h * 31 + (ch.codePointAt(0) ?? 0)) % 9973;
+  return h % TILE_TINTS.length;
+}
+
+function NoPicture({
+  name,
+  categoryName = null,
+  sectors,
+  large = false,
+  typographic = false,
+  small = false,
+}: {
+  name: string;
+  categoryName?: string | null;
+  /** A catalogue tile without a photo: a small icon of its kind with its department, on the tint */
+  typographic?: boolean;
+  /** The compact grid's tile: a smaller icon and department line */
+  small?: boolean;
+  /** The store's business types (a clothing store never draws a medical icon) */
+  sectors?: readonly string[];
+  large?: boolean;
+}) {
+  // The icon of its kind on a soft tint reads as a deliberate tile, not a missing image
+  const Kind = placeholderIconFor({ categoryName, name, ...(sectors ? { sectors } : {}) });
+  // Each department keeps its own tint (by its name), so a grid of tiles without photos is not one pale block
+  const tint = TILE_TINTS[tintIndex(categoryName ?? name)]!;
+  if (typographic) {
+    return (
+      <span
+        aria-hidden="true"
+        className={cn(
+          'flex size-full flex-col items-center justify-center gap-1 bg-linear-to-br to-surface-muted select-none',
+          tint,
+        )}
+      >
+        <Kind size={small ? 20 : 24} />
+        <span className="max-w-full truncate px-2 text-[0.6875rem] font-semibold sm:text-xs">
+          {categoryName ?? ''}
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className={cn('grid size-full place-items-center bg-linear-to-br to-surface-muted select-none', tint)}
+    >
+      <Kind size={large ? 48 : 32} />
+    </span>
+  );
+}
+
+/** The running offer's name (هوية 4 › Accent: the highlight chip), on the card and the page. */
+function OfferTag({
+  children,
+  className,
+  title,
+}: {
+  children: ReactNode;
+  className?: string;
+  title?: string;
+}) {
+  return (
+    <span
+      title={title ?? (typeof children === 'string' ? children : undefined)}
+      className={cn(
+        'inline-flex items-start gap-1 rounded-2xl bg-accent px-2.5 py-0.5 text-xs/5 font-semibold text-on-accent',
+        className,
+      )}
+    >
+      <OfferIcon size={16} className="mt-0.5 shrink-0" />
+      <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>
+    </span>
+  );
+}
+
 function Catalogue({ home, base }: { home: ShopHome; base: string }) {
+  const density = useDensity();
   const [category, setCategory] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState<ShopFilters>(NO_FILTERS);
+  const [sort, setSort] = useState<ShopSort>('newest');
   const tops = home.categories.filter((c) => c.parentId === null);
   const rootOf = useMemo(() => {
     const parent = new Map(home.categories.map((c) => [c.id, c.parentId]));
@@ -99,70 +424,199 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
       return at;
     };
   }, [home.categories]);
-  const shown = category ? home.products.filter((p) => rootOf(p.categoryId) === category) : home.products;
+  const inCategory = category
+    ? home.products.filter((p) => rootOf(p.categoryId) === category)
+    : home.products;
+  // The search box narrows what the department shows, by the piece's name.
+  const words = query.trim().toLocaleLowerCase('ar');
+  const named = words ? inCategory.filter((p) => p.name.toLocaleLowerCase('ar').includes(words)) : inCategory;
+  const shown = sortProducts(applyFilters(named, filters), sort);
+  const title = (category ? tops.find((c) => c.id === category)?.name : null) ?? 'كل البضاعة';
+  // A shop without a single picture yet gets shorter tiles: a wall of tall empty frames looks unfinished.
+  // A shop where most pieces still have no picture gets the compact grid (3 to a row on a phone, 5 to 6 on a
+  // desk, a small icon tile each); once most have pictures it is the photo grid.
+  const compact = home.products.filter((p) => p.imageUrl).length * 2 < home.products.length;
+  const media = compact ? 'aspect-[3/2] sm:aspect-[4/3]' : 'aspect-[4/5]';
   return (
     <>
-      {home.store.note ? <p className="rounded-control bg-surface p-3 text-sm">{home.store.note}</p> : null}
-      {tops.length > 0 ? (
-        <div role="group" aria-label="الأقسام" className="flex gap-2 overflow-x-auto pb-1">
-          {[{ id: null, name: 'الكل' }, ...tops].map((c) => (
-            <button
-              key={c.id ?? 'all'}
-              type="button"
-              aria-pressed={category === c.id}
-              onClick={() => setCategory(c.id)}
-              className={cn(
-                'min-h-11 shrink-0 rounded-full border px-4 font-semibold',
-                category === c.id ? 'border-brand bg-brand text-on-brand' : 'border-line bg-surface',
-              )}
-            >
-              {c.name}
-            </button>
-          ))}
+      <ShopHero store={home.store} count={home.products.length} />
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+          <div className="flex min-w-0 flex-col gap-1">
+            <h1 className="text-2xl font-bold text-ink sm:text-3xl">{title}</h1>
+            <p className="text-sm text-ink-muted">
+              {counted(shown.length, PRODUCTS)}
+              {home.store.delivery ? ' · توصيل' : ''}
+              {home.store.pickup ? ' · استلام من المحل' : ''}
+            </p>
+          </div>
         </div>
-      ) : null}
+        <CatalogueFilters
+          products={inCategory}
+          currency={home.store.currency}
+          showPrices={home.store.showPrices}
+          filters={filters}
+          onFilters={setFilters}
+          sort={sort}
+          onSort={setSort}
+          search={
+            <SearchField
+              label="ابحث في المتجر"
+              placeholder="ابحث عن قطعة…"
+              value={query}
+              onValueChange={setQuery}
+              className="w-full [&>div]:min-h-11!"
+            />
+          }
+        />
+        {tops.length > 0 ? (
+          <ScrollStrip className="-mx-4 px-4 pb-1 sm:mx-0 sm:px-0">
+            <div role="group" aria-label="الأقسام" className="flex w-max gap-2 sm:w-auto sm:flex-wrap">
+              {[{ id: null, name: 'الكل' }, ...tops].map((c) => (
+                <button
+                  key={c.id ?? 'all'}
+                  type="button"
+                  aria-pressed={category === c.id}
+                  onClick={() => {
+                    setCategory(c.id);
+                    // Sizes and colours of the other department no longer apply
+                    setFilters((f) => ({ ...f, options: {} }));
+                  }}
+                  className={cn(
+                    CONTROL_HEIGHT[density],
+                    'min-h-11! shrink-0 rounded-small border px-4 text-sm font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
+                    category === c.id
+                      ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
+                      : 'border-line-control/50 bg-surface text-ink-muted shadow-e1 hover:bg-surface-muted hover:text-ink',
+                  )}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          </ScrollStrip>
+        ) : null}
+      </div>
       {shown.length === 0 ? (
-        <EmptyState icon={StoreIcon} title="لا بضاعة هنا الآن" description="جرّب قسماً آخر، أو عد لاحقاً." />
+        <EmptyState
+          icon={StoreIcon}
+          title="لا بضاعة هنا الآن"
+          description={
+            words
+              ? 'لا قطعة بهذا الاسم. جرّب كلمة أخرى.'
+              : filterCount(filters) > 0
+                ? 'لا قطعة تناسب هذه التصفية. خفّف شروطها.'
+                : 'جرّب قسماً آخر، أو عد لاحقاً.'
+          }
+        />
       ) : (
-        <ul aria-label="البضاعة" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <ul
+          aria-label="البضاعة"
+          className={cn(
+            compact
+              ? 'grid grid-cols-3 gap-x-2 gap-y-3 sm:grid-cols-4 sm:gap-x-3 sm:gap-y-4 lg:grid-cols-5 xl:grid-cols-6'
+              : 'grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-4',
+          )}
+        >
           {shown.map((p) => (
             <li key={p.id}>
               <Link
                 to={`${base}/p/${p.id}`}
-                className="flex h-full flex-col overflow-hidden rounded-card border border-line bg-surface"
+                className="group flex h-full flex-col overflow-hidden rounded-card border border-line bg-surface shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5"
               >
-                {p.imageUrl ? (
-                  <img src={p.imageUrl} alt="" loading="lazy" className="aspect-[3/4] w-full object-cover" />
-                ) : (
-                  <div className="grid aspect-[3/4] w-full place-items-center bg-surface-muted text-ink-muted">
-                    بلا صورة
-                  </div>
-                )}
-                <span className="flex flex-1 flex-col gap-1 p-2">
-                  {p.offer ? (
-                    <span className="w-fit rounded-full bg-danger-soft px-2 text-xs font-bold text-danger-ink">
-                      {p.offer}
+                <span
+                  className={cn(
+                    'relative block overflow-hidden border-b border-line bg-surface-muted',
+                    media,
+                  )}
+                >
+                  {p.imageUrl ? (
+                    <img
+                      src={p.imageUrl}
+                      alt=""
+                      loading="lazy"
+                      className={cn(
+                        'size-full object-cover transition-transform duration-200 ease-standard motion-safe:group-hover:scale-[1.03]',
+                        !p.available && 'opacity-60',
+                      )}
+                    />
+                  ) : (
+                    <NoPicture
+                      name={p.name}
+                      sectors={home.store.sectors}
+                      categoryName={home.categories.find((c) => c.id === p.categoryId)?.name ?? null}
+                      typographic
+                      small={compact}
+                    />
+                  )}
+                  {ribbonOf(p) ? (
+                    <OfferTag
+                      title={p.offer ?? undefined}
+                      className="absolute start-2 top-2 max-w-[calc(100%-1rem)] shadow-e1"
+                    >
+                      {ribbonOf(p)}
+                    </OfferTag>
+                  ) : null}
+                  {!p.available ? (
+                    <span className="absolute inset-x-0 bottom-0 bg-surface/85 py-1.5 text-center text-xs font-semibold text-ink-muted backdrop-blur-sm">
+                      نفد
                     </span>
                   ) : null}
-                  <span className="line-clamp-2 font-semibold">{p.name}</span>
-                  <span className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                    <span>
-                      {p.maxPriceMinor > p.priceMinor ? 'من ' : ''}
-                      <Money minor={p.priceMinor} currency={p.currency} className="font-bold" />
-                    </span>
-                    {p.wasPriceMinor ? (
-                      <s aria-label="السعر قبل التنزيل" className="text-xs text-ink-muted">
-                        <Money minor={p.wasPriceMinor} currency={p.currency} />
-                      </s>
-                    ) : null}
+                </span>
+                <span
+                  className={cn('flex flex-1 flex-col gap-1.5', compact ? 'p-2 sm:p-3' : 'gap-2 p-3 sm:p-4')}
+                >
+                  <span
+                    className={cn(
+                      'line-clamp-2 font-semibold text-ink',
+                      compact ? 'text-[0.8125rem] leading-snug sm:text-sm' : 'text-[0.9375rem]',
+                    )}
+                  >
+                    {p.name}
                   </span>
-                  {!p.available ? <span className="text-xs font-semibold text-danger-ink">نفد</span> : null}
+                  <span className="mt-auto flex flex-wrap items-baseline gap-x-2">
+                    {p.priceMinor === null ? (
+                      <PriceOnRequest className="text-sm" />
+                    ) : (
+                      <span className={cn('text-ink', compact ? 'text-sm' : 'text-[0.9375rem]')}>
+                        {p.maxPriceMinor !== null && p.maxPriceMinor > p.priceMinor ? (
+                          <span className="text-sm text-ink-muted">من </span>
+                        ) : (
+                          ''
+                        )}
+                        <Money
+                          minor={p.priceMinor}
+                          currency={p.currency}
+                          className="font-bold"
+                          unitClassName="text-xs font-semibold text-ink-subtle"
+                        />
+                      </span>
+                    )}
+                    {p.wasPriceMinor ? <WasPrice minor={p.wasPriceMinor} currency={p.currency} /> : null}
+                  </span>
                 </span>
               </Link>
             </li>
           ))}
         </ul>
       )}
+      {home.truncated ? (
+        <p role="note" className="text-center text-sm text-ink-muted">
+          هذه أول البضاعة بالاسم، وفي المحل أكثر منها.
+          {home.store.whatsapp ? (
+            <>
+              {' '}
+              <TextLink
+                href={`https://wa.me/${home.store.whatsapp}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                اسأل المحل على واتساب
+              </TextLink>
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </>
   );
 }
@@ -170,6 +624,7 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
 function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string; base: string; cart: Cart }) {
   const { id = '' } = useParams();
   const navigate = useNavigate();
+  const density = useDensity();
   const [product, setProduct] = useState<ShopProduct | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<Record<string, string>>({});
@@ -180,7 +635,7 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
   useEffect(() => {
     let alive = true;
     setProduct(null);
-    apiFetch<ShopProduct>(`/v1/shop/${encodeURIComponent(slug)}/products/${encodeURIComponent(id)}`)
+    getOnce<ShopProduct>(`/v1/shop/${encodeURIComponent(slug)}/products/${encodeURIComponent(id)}`)
       .then((p) => {
         if (!alive) return;
         setProduct(p);
@@ -197,166 +652,299 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
     };
   }, [slug, id]);
 
+  const back = (
+    <Link
+      to={base}
+      className="inline-flex w-fit items-center gap-1.5 rounded-small text-sm font-semibold text-ink-muted transition-colors duration-120 ease-standard hover:text-ink"
+    >
+      <BackIcon size={16} />
+      كل البضاعة
+    </Link>
+  );
+
   if (error) return <Alert tone="error">{error}</Alert>;
-  if (!product) return <p className="text-ink-muted">لحظة…</p>;
+  if (!product) {
+    return (
+      <div aria-busy="true" className="flex flex-col gap-6 md:grid md:grid-cols-2 md:gap-x-10 lg:gap-x-14">
+        <p className="sr-only">لحظة…</p>
+        <Skeleton className="aspect-[4/5] w-full" />
+        <div className="flex flex-col gap-4">
+          <Skeleton className="h-9 w-2/3" />
+          <Skeleton className="h-7 w-1/3" />
+          <SkeletonText lines={3} className="mt-4" />
+        </div>
+      </div>
+    );
+  }
   const variant = variantFor(product, chosen);
+  // The shelf's count caps the quantity: the cart never holds more than is there
+  const stockCap = variant?.maxQty ?? null;
+  const cap = variant ? capOf(variant) : 50;
+  const shownQty = Math.max(1, Math.min(qty, cap));
   // The picture of a chosen colour first
   const images = product.images;
   const matching = images.findIndex((i) => i.optionValue && Object.values(chosen).includes(i.optionValue));
   const main = images[matching >= 0 && shown === 0 ? matching : shown] ?? images[0];
-  const cheapest = product.variants.reduce((a, b) => (b.priceMinor < a.priceMinor ? b : a));
+  const cheapest = product.variants.reduce((a, b) =>
+    b.priceMinor !== null && (a.priceMinor === null || b.priceMinor < a.priceMinor) ? b : a,
+  );
   const price = variant?.priceMinor ?? cheapest.priceMinor;
   const was = (variant ?? cheapest).wasPriceMinor;
 
   return (
-    <article aria-label={product.name} className="flex flex-col gap-4 md:grid md:grid-cols-2">
-      <div className="flex flex-col gap-2">
-        {main ? (
-          <img src={main.url} alt={product.name} className="w-full rounded-card bg-surface object-contain" />
-        ) : (
-          <div className="grid aspect-square place-items-center rounded-card bg-surface text-ink-muted">
-            بلا صورة
-          </div>
-        )}
-        {images.length > 1 ? (
-          <div className="flex gap-2 overflow-x-auto">
-            {images.map((img, i) => (
-              <button
-                key={img.url}
-                type="button"
-                aria-label={`الصورة ${i + 1}`}
-                aria-pressed={img === main}
-                onClick={() => setShown(i)}
-                className={cn(
-                  'size-16 shrink-0 overflow-hidden rounded-control border-2',
-                  img === main ? 'border-brand' : 'border-line',
-                )}
-              >
-                <img src={img.thumbUrl} alt="" className="size-full object-cover" />
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
-      <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-bold">{product.name}</h1>
-        {product.offer ? (
-          <span className="w-fit rounded-full bg-danger-soft px-3 py-1 text-sm font-bold text-danger-ink">
-            {product.offer}
-          </span>
-        ) : null}
-        <span className="flex flex-wrap items-baseline gap-3">
-          <Money minor={price} currency={product.currency} className="text-2xl font-bold" />
-          {was ? (
-            <s aria-label="السعر قبل التنزيل" className="text-lg text-ink-muted">
-              <Money minor={was} currency={product.currency} />
-            </s>
-          ) : null}
-        </span>
-        {product.options.map((option) => (
-          <div key={option.name} role="group" aria-label={option.name} className="flex flex-col gap-2">
-            <span className="font-semibold">{option.name}</span>
-            <div className="flex flex-wrap gap-2">
-              {option.values.map((value) => {
-                const can = canPick(product, chosen, option.name, value);
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={chosen[option.name] === value}
-                    disabled={!can}
-                    onClick={() => {
-                      setChosen((c) => ({ ...c, [option.name]: value }));
-                      setShown(0);
-                      setAdded(false);
-                    }}
-                    className={cn(
-                      'min-h-11 min-w-11 rounded-control border-2 px-3 font-semibold',
-                      chosen[option.name] === value
-                        ? 'border-brand bg-brand-soft text-brand-ink'
-                        : 'border-line bg-surface',
-                      !can && 'opacity-40 line-through',
-                    )}
-                  >
-                    {value}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-        <div className="flex items-center gap-3" role="group" aria-label="الكمية">
-          <Button
-            variant="secondary"
-            aria-label="أنقص"
-            disabled={qty <= 1}
-            onClick={() => setQty((q) => q - 1)}
-          >
-            −
-          </Button>
-          <output className="num min-w-8 text-center text-lg font-bold">{qty}</output>
-          <Button
-            variant="secondary"
-            aria-label="زد"
-            disabled={qty >= MAX_QTY}
-            onClick={() => setQty((q) => q + 1)}
-          >
-            +
-          </Button>
-        </div>
-        {variant && !variant.available ? (
-          <p className="font-semibold text-danger-ink">هذه القطعة نفدت.</p>
-        ) : null}
-        <Button
-          size="lg"
-          disabled={!variant || !variant.available}
-          onClick={() => {
-            if (!variant) return;
-            cart.add({
-              variantId: variant.id,
-              productId: product.id,
-              name: product.name,
-              label: variant.label,
-              imageUrl: product.images[0]?.thumbUrl ?? null,
-              priceMinor: variant.priceMinor,
-              qty,
-            });
-            setAdded(true);
-          }}
-        >
-          {variant ? 'أضف إلى السلة' : `اختر ${product.options.find((o) => !chosen[o.name])?.name ?? ''}`}
-        </Button>
-        {added ? (
+    <>
+      {back}
+      <article
+        aria-label={product.name}
+        className="flex flex-col gap-6 md:grid md:grid-cols-2 md:grid-rows-[auto_auto_1fr] md:items-start md:gap-x-10 lg:gap-x-14"
+      >
+        {/* The pictures: the start column on a wide screen, first on a phone */}
+        <div className="flex flex-col gap-3 md:row-span-3">
           <div
-            role="status"
-            className="flex items-center gap-3 rounded-control bg-success-soft p-3 text-success-ink"
+            className={cn(
+              'overflow-hidden rounded-card border border-line bg-surface',
+              main ? 'aspect-[4/5]' : 'aspect-[16/7] md:aspect-[4/3]',
+            )}
           >
-            <span className="flex-1 font-semibold">أُضيفت إلى السلة.</span>
-            <Button size="sm" onClick={() => navigate(`${base}/cart`)}>
-              السلة
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => navigate(base)}>
-              تابع التسوق
+            {main ? (
+              <img src={main.url} alt={product.name} className="size-full object-contain" />
+            ) : (
+              <NoPicture
+                name={product.name}
+                sectors={home.store.sectors}
+                categoryName={home.categories.find((c) => c.id === product.categoryId)?.name ?? null}
+                large
+              />
+            )}
+          </div>
+          {images.length > 1 ? (
+            <div className="scrollbar-none flex gap-2 overflow-x-auto">
+              {images.map((img, i) => (
+                <button
+                  key={img.url}
+                  type="button"
+                  aria-label={`الصورة ${i + 1}`}
+                  aria-pressed={img === main}
+                  onClick={() => setShown(i)}
+                  className={cn(
+                    'size-16 shrink-0 overflow-hidden rounded-small border bg-surface transition-[border-color,box-shadow] duration-120 ease-standard',
+                    img === main
+                      ? 'border-brand ring-1 ring-brand'
+                      : 'border-line hover:border-line-control/50',
+                  )}
+                >
+                  <img src={img.thumbUrl} alt="" className="size-full object-cover" />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        {/* The name, the price and the choices */}
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-3">
+            {product.offer ? <OfferTag className="w-fit max-w-full">{product.offer}</OfferTag> : null}
+            <h1 className="text-2xl font-bold text-ink sm:text-3xl">{product.name}</h1>
+            <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              {price === null ? (
+                <PriceOnRequest className="text-xl" />
+              ) : (
+                <Money
+                  minor={price}
+                  currency={product.currency}
+                  className="text-2xl font-bold text-ink"
+                  unitClassName="text-base font-semibold text-ink-subtle"
+                />
+              )}
+              {was ? <WasPrice minor={was} currency={product.currency} className="text-base" /> : null}
+            </p>
+          </div>
+          {product.options.length > 0 ? (
+            <div className="flex flex-col gap-5 border-t border-line pt-6">
+              {product.options.map((option) => (
+                <div
+                  key={option.name}
+                  role="group"
+                  aria-label={option.name}
+                  className="flex flex-col gap-2.5"
+                >
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+                    {option.name}
+                    {chosen[option.name] ? (
+                      <span className="font-normal text-ink-muted">· {chosen[option.name]}</span>
+                    ) : null}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {option.values.map((value) => {
+                      const can = canPick(product, chosen, option.name, value);
+                      // A piece that ran out can be chosen, to leave a phone for when it is back
+                      const exists = can || canChoose(product, chosen, option.name, value);
+                      const on = chosen[option.name] === value;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          aria-pressed={on}
+                          disabled={!exists}
+                          onClick={() => {
+                            setChosen((c) => ({ ...c, [option.name]: value }));
+                            setShown(0);
+                            setAdded(false);
+                          }}
+                          className={cn(
+                            CONTROL_HEIGHT[density],
+                            'min-w-12 rounded-small border px-4 text-[0.9375rem] font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
+                            !can
+                              ? cn(
+                                  exists ? 'cursor-pointer' : 'cursor-not-allowed',
+                                  'border-dashed text-ink-subtle',
+                                  on ? 'border-brand' : 'border-line-control/50',
+                                )
+                              : on
+                                ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
+                                : 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted',
+                          )}
+                        >
+                          {isColourOption(option.name) && swatchOf(value) ? (
+                            <span
+                              aria-hidden="true"
+                              className="me-2 inline-block size-3.5 shrink-0 rounded-full border border-line-control align-middle"
+                              style={{ backgroundColor: swatchOf(value) ?? undefined }}
+                            />
+                          ) : null}
+                          {value}
+                          {!can ? (
+                            <span aria-hidden="true" className="ms-1.5 text-xs font-semibold no-underline">
+                              نفد
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {variant && variant.available && variant.left !== null ? (
+            <p className="flex items-center gap-2 text-sm font-semibold text-warning-ink">
+              <AlertCircleIcon size={16} />
+              <span>
+                بقي <span className="num">{variant.left}</span> فقط
+              </span>
+            </p>
+          ) : null}
+          {variant && variant.available && stockCap !== null && stockCap > 3 && stockCap < 50 ? (
+            <p className="text-sm text-ink-muted">
+              المتوفر <span className="num">{stockCap}</span>
+            </p>
+          ) : null}
+          {variant && !variant.available ? (
+            <p className="flex items-center gap-2 text-sm font-semibold text-danger-ink">
+              <AlertCircleIcon size={16} />
+              هذه القطعة نفدت.
+            </p>
+          ) : null}
+          {variant && !variant.available ? (
+            <NotifyMe slug={slug} productId={product.id} variantId={variant.id} />
+          ) : null}
+        </div>
+
+        {/* The quantity and «أضف إلى السلة»: kept in reach at the foot of a phone's screen */}
+        <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t border-line bg-surface/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl sm:-mx-6 sm:px-6 md:static md:mx-0 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+          {added ? (
+            <Banner
+              tone="success"
+              action={
+                <>
+                  <Button size="sm" onClick={() => navigate(`${base}/cart`)}>
+                    السلة
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => navigate(base)}>
+                    تابع التسوق
+                  </Button>
+                </>
+              }
+            >
+              أُضيفت إلى السلة.
+            </Banner>
+          ) : null}
+          <div className="flex items-center gap-3">
+            <div role="group" aria-label="الكمية" className="flex shrink-0 items-center gap-1">
+              <IconButton
+                variant="secondary"
+                size="lg"
+                label="أنقص"
+                icon={<RemoveIcon />}
+                disabled={shownQty <= 1}
+                onClick={() => setQty(shownQty - 1)}
+              />
+              <output className="num min-w-9 text-center text-lg font-bold">{shownQty}</output>
+              <IconButton
+                variant="secondary"
+                size="lg"
+                label="زد"
+                icon={<AddIcon />}
+                disabled={shownQty >= cap}
+                onClick={() => setQty(shownQty + 1)}
+              />
+            </div>
+            <Button
+              size="lg"
+              className="flex-1"
+              icon={variant ? <CartIcon /> : undefined}
+              disabled={!variant || !variant.available}
+              onClick={() => {
+                if (!variant) return;
+                cart.add({
+                  variantId: variant.id,
+                  productId: product.id,
+                  name: product.name,
+                  label: variant.label,
+                  imageUrl: product.images[0]?.thumbUrl ?? null,
+                  priceMinor: variant.priceMinor ?? 0,
+                  qty: shownQty,
+                  maxQty: variant.maxQty ?? null,
+                });
+                setAdded(true);
+              }}
+            >
+              {variant ? 'أضف إلى السلة' : `اختر ${product.options.find((o) => !chosen[o.name])?.name ?? ''}`}
             </Button>
           </div>
-        ) : null}
+        </div>
+
         {home.store.whatsapp ? (
           <a
-            className="text-sm font-semibold text-brand-ink underline-offset-4 hover:underline"
             href={`https://wa.me/${home.store.whatsapp}?text=${encodeURIComponent(`مرحباً، أسأل عن ${product.name}`)}`}
             target="_blank"
             rel="noreferrer"
+            className={linkButton('secondary', density)}
           >
+            <SendIcon size={16} />
             اسأل المحل على واتساب
           </a>
         ) : null}
-      </div>
-    </article>
+        <ProductNotes product={product} />
+      </article>
+    </>
   );
+}
+
+/** The fields the cart marks itself; a refusal about any other field is read out in the alert */
+const MARKED = /^(name|phone|area|address|code|fulfilment|coupon|lines\.\d+)$/;
+
+/** The alert's sentence: the server's own, plus the refused fields the form has no box for */
+function refusalText(e: unknown, fields: Record<string, string>): string {
+  const loose = Object.entries(fields)
+    .filter(([key]) => !MARKED.test(key))
+    .map(([, text]) => text);
+  return loose.length > 0 ? loose.join(' · ') : errorMessage(e);
 }
 
 function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; base: string; cart: Cart }) {
   const { store } = home;
+  const density = useDensity();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [fulfilment, setFulfilment] = useState<'delivery' | 'pickup'>(store.delivery ? 'delivery' : 'pickup');
@@ -364,8 +952,9 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const [area, setArea] = useState('');
   // The courier's fee: the picked area's when the store charges by area, else the flat one
   const byArea = store.deliveryAreas.length > 0;
-  const fee =
-    fulfilment !== 'delivery'
+  const showPrices = store.showPrices;
+  const listedFee =
+    !showPrices || fulfilment !== 'delivery'
       ? 0
       : byArea
         ? (store.deliveryAreas.find((a) => a.name === area)?.feeMinor ?? 0)
@@ -377,50 +966,145 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const [placed, setPlaced] = useState<ShopOrderPlaced | null>(null);
   const [challenge, setChallenge] = useState<ShopCodeSent | null>(null);
   const [code, setCode] = useState('');
+  const [coupon, setCoupon] = useState<{ code: string; coupon: ShopCoupon } | null>(null);
+  // What the server says the cart costs with the code (its offers and the code's, as the order is priced)
+  const [quote, setQuote] = useState<{ key: string; quote: ShopQuote } | null>(null);
+  const [couponRefused, setCouponRefused] = useState<string | null>(null);
+  // The quote could not be had (a line gone since it was added, the network): the cart says so, not «نحسب…» for ever
+  const [quoteFailed, setQuoteFailed] = useState<string | null>(null);
+  const quoteKey = coupon
+    ? `${coupon.code}|${cart.lines.map((l) => `${l.variantId}:${l.qty}`).join(',')}`
+    : '';
+  useEffect(() => {
+    if (!coupon || coupon.coupon.percentBp === null || !store.showPrices) return;
+    let current = true;
+    setQuoteFailed(null);
+    const key = quoteKey;
+    apiFetch<ShopQuote>(`/v1/shop/${encodeURIComponent(slug)}/quote`, {
+      method: 'POST',
+      body: { lines: cart.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })), coupon: coupon.code },
+    }).then(
+      (answer) => {
+        if (current) setQuote({ key: quoteKey, quote: answer });
+      },
+      (e: unknown) => {
+        if (!current) return;
+        // The code ran out since it was applied: take it off and say so
+        if (e instanceof ApiError && e.fields?.coupon) {
+          setCouponRefused(e.fields.coupon);
+          setCoupon(null);
+        } else {
+          setQuoteFailed(key);
+        }
+      },
+    );
+    return () => {
+      current = false;
+    };
+    // The key stands for the code and the lines
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteKey, slug, store.showPrices]);
   const byCode = store.orderMode === 'shop';
+  // A mobile number: 9 to 15 digits, with an optional + and spaces or dashes between them
+  const phoneDigits = phone.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[\s-]/g, '');
+  const phoneBad = phone.trim() !== '' && !/^\+?\d{9,15}$/.test(phoneDigits);
+  // Why the order button waits, in words
+  const waitingFor = !name.trim()
+    ? 'اكتب اسمك لنتابع.'
+    : !phone.trim()
+      ? 'اكتب رقم جوالك لنتابع.'
+      : phoneBad
+        ? 'رقم الجوال غير صحيح.'
+        : byCode && challenge && code.length < 6
+          ? 'اكتب الرمز المكوّن من 6 أرقام.'
+          : null;
 
   if (placed) {
     return (
       <section
         aria-label="وصل طلبك"
-        className="flex flex-col items-center gap-4 rounded-card bg-surface p-6 text-center"
+        className="mx-auto flex w-full max-w-lg flex-col items-center gap-5 rounded-panel border border-line bg-surface p-6 text-center shadow-e2 motion-safe:animate-rise sm:p-8"
       >
-        <h1 className="text-2xl font-bold">حُفظ طلبك</h1>
-        <p>
-          رقم الطلب{' '}
-          <bdi dir="ltr" className="num font-bold">
-            {placed.number}
-          </bdi>{' '}
-          · <Money minor={placed.totalMinor} currency={placed.currency} className="font-bold" />
-          {placed.deliveryFeeMinor > 0 ? (
+        <IconChip size="lg" tone="success">
+          <CheckCircleIcon size={24} />
+        </IconChip>
+        <div className="flex flex-col gap-1.5">
+          <h1 className="text-2xl font-bold">حُفظ طلبك</h1>
+          <p className="text-ink-muted">
+            {placed.whatsappUrl
+              ? 'أرسله للمحل على واتساب ليؤكده لك.'
+              : 'وصل طلبك إلى المحل، وسيؤكده لك على رقمك.'}
+          </p>
+        </div>
+        <dl className="w-full divide-y divide-line rounded-card border border-line text-start text-sm">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <dt className="text-ink-muted">رقم الطلب</dt>
+            <dd>
+              <bdi dir="ltr" className="num font-bold">
+                {placed.number}
+              </bdi>
+            </dd>
+          </div>
+          {placed.totalMinor !== null ? (
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <dt className="text-ink-muted">المجموع</dt>
+              <dd>
+                <Money minor={placed.totalMinor} currency={placed.currency} className="font-bold" />
+              </dd>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <dt className="text-ink-muted">السعر</dt>
+              <dd>
+                <PriceOnRequest />
+              </dd>
+            </div>
+          )}
+          {placed.deliveryFeeMinor !== null && placed.deliveryFeeMinor > 0 ? (
             <>
-              {' '}
-              + أجرة التوصيل <Money minor={placed.deliveryFeeMinor} currency={placed.currency} />
+              <div className="flex items-center justify-between gap-3 px-4 py-3">
+                <dt className="text-ink-muted">أجرة التوصيل (للمندوب)</dt>
+                <dd>
+                  <Money minor={placed.deliveryFeeMinor} currency={placed.currency} />
+                </dd>
+              </div>
+              {placed.totalMinor !== null ? (
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <dt className="font-semibold">المجموع مع التوصيل</dt>
+                  <dd>
+                    <Money
+                      minor={placed.totalMinor + placed.deliveryFeeMinor}
+                      currency={placed.currency}
+                      className="font-bold"
+                    />
+                  </dd>
+                </div>
+              ) : null}
             </>
           ) : null}
-        </p>
-        {placed.whatsappUrl ? (
-          <>
-            <p className="text-ink-muted">أرسله للمحل على واتساب ليؤكده لك.</p>
+        </dl>
+        <div className="flex w-full flex-col gap-3">
+          {placed.whatsappUrl ? (
             <a
               href={placed.whatsappUrl}
-              className="inline-flex min-h-12 items-center rounded-full bg-brand px-6 font-bold text-on-brand"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={linkButton('primary', density)}
             >
+              <SendIcon />
               أرسل الطلب على واتساب
             </a>
-          </>
-        ) : (
-          <p className="text-ink-muted">وصل طلبك إلى المحل، وسيؤكده لك على رقمك.</p>
-        )}
-        <Link
-          to={placed.trackPath}
-          className="inline-flex min-h-11 items-center rounded-full border-2 border-brand px-6 font-semibold text-brand-ink"
-        >
-          تابع طلبك
-        </Link>
-        <Link to={base} className="text-sm font-semibold text-brand-ink">
+          ) : null}
+          <Link
+            to={placed.trackPath}
+            className={linkButton(placed.whatsappUrl ? 'secondary' : 'primary', density)}
+          >
+            تابع طلبك
+          </Link>
+        </div>
+        <TextLink as={Link} to={base} className="text-sm">
           عد إلى المتجر
-        </Link>
+        </TextLink>
       </section>
     );
   }
@@ -431,8 +1115,9 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
         icon={CartIcon}
         title="السلة فارغة"
         description="اختر ما يعجبك من المتجر وأضفه هنا."
+        className="bg-surface"
         action={
-          <Link to={base} className="font-semibold text-brand-ink">
+          <Link to={base} className={linkButton('primary', density)}>
             إلى المتجر
           </Link>
         }
@@ -476,118 +1161,259 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           area: fulfilment === 'delivery' && byArea ? area || null : null,
           note: note || null,
           lines: cart.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
+          ...(coupon ? { coupon: coupon.code } : {}),
           ...(byCode && challenge ? { challengeId: challenge.challengeId, code } : {}),
         },
       });
       cart.clear();
-      setPlaced(done);
-      if (done.whatsappUrl) openWhatsApp(done.whatsappUrl);
+      // WhatsApp opens in a new tab with the order's page linked in the message; the shop stays here
+      const whatsappUrl = done.whatsappUrl
+        ? withTrackingLink(done.whatsappUrl, `${window.location.origin}${done.trackPath}`)
+        : null;
+      setPlaced({ ...done, whatsappUrl });
+      if (whatsappUrl) openWhatsApp(whatsappUrl);
     } catch (e) {
-      setError(errorMessage(e));
-      setFields(e instanceof ApiError ? (e.fields ?? {}) : {});
+      const refused = e instanceof ApiError ? (e.fields ?? {}) : {};
+      setError(refusalText(e, refused));
+      setFields(refused);
+      // The code the server no longer accepts comes off the cart, with its reason beside the box
+      if (refused.coupon) {
+        setCouponRefused(refused.coupon);
+        setCoupon(null);
+      }
+      // Locked or lapsed: the typed code is no use, a new one is asked for
+      if (e instanceof ApiError && (e.code === 'locked' || /انتهت صلاحية الرمز/.test(refused.code ?? ''))) {
+        setChallenge(null);
+        setCode('');
+      }
     } finally {
       setSending(false);
     }
   }
 
+  const subtotal = cartTotal(cart.lines);
+  // What the code takes off: the server's own figure for these lines (the order carries the same one)
+  const quoted = quote && quote.key === quoteKey ? quote.quote : null;
+  const discount = coupon && quoted ? quoted.discountMinor : 0;
+  const waitingQuote =
+    Boolean(coupon) &&
+    showPrices &&
+    coupon?.coupon.percentBp !== null &&
+    coupon?.coupon.percentBp !== undefined &&
+    !quoted &&
+    quoteFailed !== quoteKey;
+  const failedQuote = Boolean(coupon) && !quoted && quoteFailed === quoteKey;
+  // The server's total when it priced the cart, else the cart's own
+  const merchandise = coupon && quoted ? quoted.totalMinor : subtotal;
+  // «توصيل مجاني فوق مبلغ»: the goods reach the store's line, so no courier fee; short of it, the customer is told by how much
+  const freeOver = store.freeDeliveryOverMinor ?? null;
+  const freeDelivery = listedFee > 0 && freeOver !== null && merchandise >= freeOver;
+  const fee = freeDelivery ? 0 : listedFee;
+  const missingForFree =
+    showPrices && fulfilment === 'delivery' && freeOver !== null && merchandise < freeOver
+      ? freeOver - merchandise
+      : 0;
+  const couponNote = !coupon
+    ? null
+    : coupon.coupon.kind === 'buy_get'
+      ? 'هذا الكود يُطبّق عند استلام الطلب.'
+      : quoted && quoted.discountMinor === 0
+        ? 'الكود لم يزد الخصم: عرض أفضل مطبّق على هذه القطع.'
+        : null;
+
   return (
-    <div className="flex flex-col gap-4 md:grid md:grid-cols-2">
-      <section aria-label="السلة" className="flex flex-col gap-3 rounded-card bg-surface p-4">
-        <h1 className="text-xl font-bold">السلة</h1>
-        <ul className="flex flex-col divide-y divide-line">
-          {cart.lines.map((line) => (
-            <li key={line.variantId} className="flex items-center gap-3 py-3">
-              {line.imageUrl ? (
-                <img src={line.imageUrl} alt="" className="size-16 rounded-control object-cover" />
-              ) : null}
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate font-semibold">{line.name}</span>
-                {line.label ? <span className="text-sm text-ink-muted">{line.label}</span> : null}
-                <Money minor={line.priceMinor * line.qty} currency={store.currency} className="font-bold" />
+    <div className="flex flex-col gap-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] md:items-start lg:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] lg:gap-8">
+      {/* The cart: first on a phone; on a wide screen the summary at the end, kept in view */}
+      <section
+        aria-label="السلة"
+        className="flex flex-col rounded-card border border-line bg-surface shadow-e1 md:sticky md:top-24 md:col-start-2 md:row-start-1"
+      >
+        <div className="flex items-baseline justify-between gap-3 px-5 pt-5 sm:px-6">
+          <h1 className="text-xl font-bold">السلة</h1>
+          <p className="text-sm text-ink-muted">{counted(cartCount(cart.lines), PIECES)}</p>
+        </div>
+        <ul className="flex flex-col divide-y divide-line px-5 sm:px-6">
+          {cart.lines.map((line, index) => (
+            <li key={line.variantId} className="flex items-start gap-3 py-4">
+              <span className="size-14 shrink-0 overflow-hidden rounded-small border border-line">
+                {line.imageUrl ? (
+                  <img src={line.imageUrl} alt="" className="size-full object-cover" />
+                ) : (
+                  <NoPicture name={line.name} sectors={home.store.sectors} />
+                )}
               </span>
-              <span
-                className="flex items-center gap-1"
-                role="group"
-                aria-label={`كمية ${line.name} ${line.label ?? ''}`.trim()}
-              >
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  aria-label="أنقص"
-                  onClick={() => cart.setQty(line.variantId, line.qty - 1)}
-                >
-                  −
-                </Button>
-                <output className="num min-w-6 text-center font-bold">{line.qty}</output>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  aria-label="زد"
-                  disabled={line.qty >= MAX_QTY}
-                  onClick={() => cart.setQty(line.variantId, line.qty + 1)}
-                >
-                  +
-                </Button>
+              <span className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate font-semibold">{line.name}</span>
+                  {line.label ? <span className="text-sm text-ink-muted">{line.label}</span> : null}
+                  {fields[`lines.${index}`] ? (
+                    <span role="alert" className="text-xs font-semibold text-danger-ink">
+                      {fields[`lines.${index}`]}
+                    </span>
+                  ) : null}
+                  {typeof line.maxQty === 'number' &&
+                  line.maxQty > 0 &&
+                  line.qty >= capOf(line) &&
+                  line.maxQty < 50 ? (
+                    <span className="text-xs font-semibold text-warning-ink">
+                      المتوفر <span className="num">{line.maxQty}</span> فقط
+                    </span>
+                  ) : null}
+                </span>
+                <span className="flex items-center justify-between gap-3">
+                  {showPrices ? (
+                    <Money
+                      minor={line.priceMinor * line.qty}
+                      currency={store.currency}
+                      className="text-sm font-bold"
+                    />
+                  ) : (
+                    <PriceOnRequest className="text-sm" />
+                  )}
+                  <span
+                    className="flex shrink-0 items-center gap-1"
+                    role="group"
+                    aria-label={`كمية ${line.name} ${line.label ?? ''}`.trim()}
+                  >
+                    <IconButton
+                      size="xs"
+                      variant="secondary"
+                      label="أنقص"
+                      icon={<RemoveIcon size={16} />}
+                      onClick={() => cart.setQty(line.variantId, line.qty - 1)}
+                    />
+                    <output className="num min-w-7 text-center font-bold">{line.qty}</output>
+                    <IconButton
+                      size="xs"
+                      variant="secondary"
+                      label="زد"
+                      icon={<AddIcon size={16} />}
+                      disabled={line.qty >= capOf(line)}
+                      onClick={() => cart.setQty(line.variantId, line.qty + 1)}
+                    />
+                  </span>
+                </span>
               </span>
             </li>
           ))}
         </ul>
-        <div className="flex items-center justify-between border-t border-line pt-3">
-          <span className="font-semibold">المجموع</span>
-          <Money minor={cartTotal(cart.lines)} currency={store.currency} className="text-xl font-bold" />
+        <div className="flex flex-col gap-2 rounded-b-card border-t border-line bg-surface-total px-5 py-4 sm:px-6">
+          {waitingQuote ? <p className="text-sm text-ink-muted">نحسب خصم الكود…</p> : null}
+          {failedQuote ? (
+            <p role="status" className="text-sm text-ink-muted">
+              تعذّر حساب الخصم الآن، ويُحسب عند إتمام الطلب.
+            </p>
+          ) : null}
+          {discount > 0 ? (
+            <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">
+              <span>خصم الكود</span>
+              <Money minor={-discount} currency={store.currency} />
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between gap-3">
+            <span className={fee > 0 ? 'text-ink-muted' : 'font-semibold'}>المجموع</span>
+            {showPrices ? (
+              <Money
+                minor={merchandise}
+                currency={store.currency}
+                className={fee > 0 ? 'font-semibold' : 'text-xl font-bold'}
+              />
+            ) : (
+              <PriceOnRequest />
+            )}
+          </div>
+          {freeDelivery ? (
+            <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">
+              <span>أجرة التوصيل</span>
+              <span className="font-semibold text-success-ink">مجاني</span>
+            </div>
+          ) : null}
+          {missingForFree > 0 ? (
+            <p className="text-sm text-ink-muted">
+              أضف بقيمة <Money minor={missingForFree} currency={store.currency} className="font-semibold" />{' '}
+              ويصبح التوصيل مجاناً.
+            </p>
+          ) : null}
+          {fee > 0 ? (
+            <>
+              <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">
+                <span>أجرة التوصيل (للمندوب)</span>
+                <Money minor={fee} currency={store.currency} />
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t border-line pt-2">
+                <span className="font-semibold">الإجمالي</span>
+                <Money minor={merchandise + fee} currency={store.currency} className="text-xl font-bold" />
+              </div>
+            </>
+          ) : null}
         </div>
-        {fee > 0 ? (
-          <>
-            <div className="flex items-center justify-between text-sm text-ink-muted">
-              <span>أجرة التوصيل (للمندوب)</span>
-              <Money minor={fee} currency={store.currency} />
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="font-semibold">الإجمالي</span>
-              <Money minor={cartTotal(cart.lines) + fee} currency={store.currency} className="font-bold" />
-            </div>
-          </>
-        ) : null}
       </section>
-      <section aria-label="إتمام الطلب" className="flex flex-col gap-3 rounded-card bg-surface p-4">
+
+      <section
+        aria-label="إتمام الطلب"
+        className="flex flex-col gap-5 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6 md:col-start-1 md:row-start-1"
+      >
         <h2 className="text-xl font-bold">بياناتك</h2>
-        <TextField
-          label="الاسم"
-          value={name}
-          onChange={(e) => setName(e.target.value.slice(0, 80))}
-          error={fields.name}
-        />
-        <TextField
-          label="رقم الجوال"
-          dir="ltr"
-          inputMode="tel"
-          value={phone}
-          onChange={(e) => {
-            setPhone(e.target.value.slice(0, 20));
-            // A code belongs to its number: a new number asks again
-            setChallenge(null);
-          }}
-          error={fields.phone}
-        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextField
+            label="الاسم"
+            value={name}
+            onChange={(e) => setName(e.target.value.slice(0, 80))}
+            error={fields.name}
+          />
+          <TextField
+            label="رقم الجوال"
+            dir="ltr"
+            inputMode="tel"
+            value={phone}
+            onChange={(e) => {
+              setPhone(e.target.value.slice(0, 20));
+              // A code belongs to its number: a new number asks again
+              setChallenge(null);
+            }}
+            error={fields.phone ?? (phoneBad ? 'رقم الجوال غير صحيح، مثال: 0944555666' : undefined)}
+            hint="مثال: 0944555666"
+          />
+        </div>
+        {fields.fulfilment ? (
+          <p role="alert" className="text-sm font-semibold text-danger-ink">
+            {fields.fulfilment}
+          </p>
+        ) : null}
         {store.delivery && store.pickup ? (
-          <div role="group" aria-label="الاستلام" className="grid grid-cols-2 gap-2">
-            {(['delivery', 'pickup'] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                aria-pressed={fulfilment === f}
-                onClick={() => setFulfilment(f)}
-                className={cn(
-                  'min-h-11 rounded-control border-2 font-semibold',
-                  fulfilment === f ? 'border-brand bg-brand-soft text-brand-ink' : 'border-line',
-                )}
-              >
-                {f === 'delivery' ? 'توصيل' : 'استلام من المحل'}
-              </button>
-            ))}
+          <div className="flex flex-col gap-1.5">
+            <p aria-hidden="true" className="text-sm font-semibold text-ink-muted">
+              الاستلام
+            </p>
+            <div role="group" aria-label="الاستلام" className="grid grid-cols-2 gap-3">
+              {(['delivery', 'pickup'] as const).map((f) => {
+                const on = fulfilment === f;
+                const WayIcon = f === 'delivery' ? TruckIcon : StoreIcon;
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setFulfilment(f)}
+                    className={cn(
+                      CONTROL_HEIGHT[density],
+                      // On a phone the picture stands over the words, so «استلام من المحل» never wraps.
+                      'flex flex-col items-center justify-center gap-1 rounded-control border px-3 py-2 text-[0.9375rem] font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none sm:flex-row sm:gap-2.5 sm:py-0',
+                      on
+                        ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
+                        : 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted',
+                    )}
+                  >
+                    <WayIcon className={on ? 'text-brand-ink' : 'text-ink-subtle'} />
+                    {f === 'delivery' ? 'توصيل' : 'استلام من المحل'}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         ) : (
-          <p className="text-sm text-ink-muted">
+          <p className="flex items-center gap-2 text-sm text-ink-muted">
+            {store.delivery ? <TruckIcon size={16} /> : <StoreIcon size={16} />}
             {store.delivery ? 'التوصيل إلى عنوانك' : 'الاستلام من المحل'}
           </p>
         )}
@@ -619,6 +1445,17 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           value={note}
           onChange={(e) => setNote(e.target.value.slice(0, 300))}
         />
+        <CouponBox
+          slug={slug}
+          applied={coupon}
+          onApplied={(value) => {
+            setCouponRefused(null);
+            setCoupon(value);
+          }}
+          onClear={() => setCoupon(null)}
+          refused={couponRefused}
+          note={couponNote}
+        />
         {byCode && challenge ? (
           <TextField
             label="رمز التأكيد"
@@ -636,56 +1473,86 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           />
         ) : null}
         {error ? <Alert tone="error">{error}</Alert> : null}
-        {byCode && !challenge ? (
-          <Button
-            size="lg"
-            loading={sending}
-            disabled={!name.trim() || !phone.trim()}
-            onClick={() => void askCode()}
-          >
-            أرسل رمز التأكيد
-          </Button>
-        ) : (
-          <Button
-            size="lg"
-            loading={sending}
-            disabled={!name.trim() || !phone.trim() || (byCode && code.length < 6)}
-            onClick={() => void send()}
-          >
-            {byCode ? 'أكّد الطلب' : store.whatsapp ? 'اطلب عبر واتساب' : 'أرسل الطلب'}
-          </Button>
-        )}
-        {byCode && challenge ? (
-          <Button variant="ghost" disabled={sending} onClick={() => void askCode()}>
-            لم يصلك؟ أرسل رمزاً جديداً
-          </Button>
-        ) : null}
-        <p className="text-xs text-ink-muted">
-          {byCode
-            ? 'نرسل رمزاً إلى جوالك لنتأكد أن الرقم لك، ثم يصل طلبك إلى المحل مباشرة.'
-            : 'يُحفظ طلبك عند المحل، ثم يفتح واتساب برسالة جاهزة فيها القطع والمجموع. اضغط «إرسال» هناك.'}
-        </p>
+        <div className="flex flex-col gap-2 border-t border-line pt-5">
+          {byCode && !challenge ? (
+            <Button
+              size="lg"
+              fullWidth
+              loading={sending}
+              disabled={Boolean(waitingFor)}
+              onClick={() => void askCode()}
+            >
+              أرسل رمز التأكيد
+            </Button>
+          ) : (
+            <Button
+              size="lg"
+              fullWidth
+              icon={!byCode && store.whatsapp ? <SendIcon /> : undefined}
+              loading={sending}
+              disabled={Boolean(waitingFor)}
+              onClick={() => void send()}
+            >
+              {byCode ? 'أكّد الطلب' : store.whatsapp ? 'اطلب عبر واتساب' : 'أرسل الطلب'}
+            </Button>
+          )}
+          {waitingFor ? <p className="text-center text-sm text-ink-muted">{waitingFor}</p> : null}
+          {byCode && challenge ? (
+            <Button variant="ghost" fullWidth disabled={sending} onClick={() => void askCode()}>
+              لم يصلك؟ أرسل رمزاً جديداً
+            </Button>
+          ) : null}
+          <p className="mt-1 flex items-start gap-2 text-xs text-ink-muted">
+            <InfoIcon size={16} className="shrink-0 text-ink-subtle" />
+            {byCode
+              ? 'نرسل رمزاً إلى جوالك لنتأكد أن الرقم لك، ثم يصل طلبك إلى المحل مباشرة.'
+              : 'يُحفظ طلبك عند المحل، ثم يفتح واتساب برسالة جاهزة فيها القطع والمجموع. اضغط «إرسال» هناك.'}
+          </p>
+        </div>
       </section>
     </div>
   );
 }
+
+/** Where a delivery order is on its way (apart from the store's decision and the sale) */
+const DELIVERY_STEPS = {
+  out: { title: 'خرج طلبك للتوصيل', text: 'المندوب في طريقه إليك. جهّز المبلغ إن كان الدفع عند الاستلام.' },
+  delivered: { title: 'سُلّم طلبك', text: 'شكراً لك! نتمنى أن تعجبك قطعك.' },
+} as const;
 
 const TRACK_STEPS: Record<ShopOrderTrack['status'], { title: string; text: string }> = {
   pending: { title: 'بانتظار تأكيد المحل', text: 'وصل طلبك، وسيراجعه المحل قريباً.' },
   accepted: { title: 'أكّد المحل طلبك', text: 'قطعك محجوزة لك ويجري تجهيزها.' },
   done: { title: 'تمّ التسليم', text: 'شكراً لك! نتمنى أن تعجبك قطعك.' },
   rejected: { title: 'اعتذر المحل عن الطلب', text: 'تواصل مع المحل لتعرف السبب أو اطلب قطعاً أخرى.' },
+  cancel_requested: {
+    title: 'طلبت إلغاء الطلب',
+    text: 'وصل طلب الإلغاء إلى المحل، وسيؤكده لك قريباً.',
+  },
 };
 
+/** The way of an order, as the customer follows it: received, confirmed, handed over. */
+const TRACK_PATH: readonly { status: ShopOrderTrack['status']; label: string }[] = [
+  { status: 'pending', label: 'وصل الطلب' },
+  { status: 'accepted', label: 'أكّده المحل' },
+  { status: 'done', label: 'تمّ التسليم' },
+];
+
+/** A delivery order the store has sent out follows its own way: out for delivery, then delivered */
+const DELIVERY_PATH = ['وصل الطلب', 'أكّده المحل', 'خرج للتوصيل', 'سُلّم'] as const;
+
 /** The customer's page for one order, by the unguessable link given when it was placed. */
-function TrackView({ slug, base }: { slug: string; base: string }) {
+function TrackView({ home, slug, base }: { home: ShopHome; slug: string; base: string }) {
   const { token = '' } = useParams();
+  const density = useDensity();
   const [order, setOrder] = useState<ShopOrderTrack | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    apiFetch<ShopOrderTrack>(`/v1/shop/${encodeURIComponent(slug)}/orders/${encodeURIComponent(token)}`)
+    getOnce<ShopOrderTrack>(`/v1/shop/${encodeURIComponent(slug)}/orders/${encodeURIComponent(token)}`)
       .then((o) => alive && setOrder(o))
       .catch((e: unknown) => alive && setError(errorMessage(e)));
     return () => {
@@ -693,54 +1560,164 @@ function TrackView({ slug, base }: { slug: string; base: string }) {
     };
   }, [slug, token]);
 
-  if (error) return <EmptyState icon={StoreIcon} title="الطلب غير موجود" description={error} />;
-  if (!order) return <FullScreenLoader />;
-  const step = TRACK_STEPS[order.status];
+  if (error) {
+    return <EmptyState icon={StoreIcon} title="الطلب غير موجود" description={error} className="bg-surface" />;
+  }
+  if (!order) {
+    return (
+      <div
+        aria-busy="true"
+        className="mx-auto flex w-full max-w-2xl flex-col gap-5 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6"
+      >
+        <p className="sr-only">لحظة…</p>
+        <Skeleton className="h-7 w-48" />
+        <Skeleton className="h-20 w-full" />
+        <SkeletonText lines={3} />
+      </div>
+    );
+  }
+  const stage = order.deliveryStage ?? null;
+  const step = stage ? DELIVERY_STEPS[stage] : TRACK_STEPS[order.status];
+  const rejected = order.status === 'rejected';
+  const whatsapp = home.store.whatsapp;
+
+  async function askCancel() {
+    setAsking(true);
+    setCancelError(null);
+    try {
+      setOrder(
+        await apiFetch<ShopOrderTrack>(
+          `/v1/shop/${encodeURIComponent(slug)}/orders/${encodeURIComponent(token)}/cancel-request`,
+          { method: 'POST' },
+        ),
+      );
+    } catch (e) {
+      setCancelError(errorMessage(e));
+    } finally {
+      setAsking(false);
+    }
+  }
+  // A cancel request is still the first step: the store has not decided
+  const path: readonly string[] = stage ? DELIVERY_PATH : TRACK_PATH.map((s) => s.label);
+  const reached = stage
+    ? stage === 'out'
+      ? 2
+      : 3
+    : order.status === 'cancel_requested'
+      ? 0
+      : TRACK_PATH.findIndex((s) => s.status === order.status);
+  const StepIcon =
+    rejected || order.status === 'cancel_requested'
+      ? AlertCircleIcon
+      : order.status === 'pending'
+        ? ClockIcon
+        : stage === 'out'
+          ? TruckIcon
+          : CheckCircleIcon;
   return (
-    <section aria-label="طلبك" className="flex flex-col gap-4 rounded-card bg-surface p-5">
-      <h1 className="text-xl font-bold">
-        طلبك{' '}
-        <bdi dir="ltr" className="num">
-          {order.number}
-        </bdi>
-      </h1>
+    <section
+      aria-label="طلبك"
+      className="mx-auto flex w-full max-w-2xl flex-col gap-6 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h1 className="text-xl font-bold">
+          طلبك{' '}
+          <bdi dir="ltr" className="num">
+            {order.number}
+          </bdi>
+        </h1>
+        <Badge>
+          {order.fulfilment === 'delivery'
+            ? `توصيل${order.area ? ` · ${order.area}` : ''}`
+            : 'استلام من المحل'}
+        </Badge>
+      </div>
+      <p className="-mt-3 text-sm text-ink-muted">
+        باسم <span className="font-semibold text-ink">{order.customerName}</span>
+        {order.fulfilment === 'pickup' ? ' · تستلمه من المحل' : ''}
+      </p>
       <div
         role="status"
         className={cn(
-          'rounded-control p-4',
-          order.status === 'rejected' ? 'bg-danger-soft text-danger-ink' : 'bg-brand-soft text-brand-ink',
+          'flex items-start gap-3 rounded-card border p-4',
+          rejected
+            ? 'border-danger/20 bg-danger-soft text-danger-ink'
+            : 'border-brand/20 bg-brand-soft text-brand-ink',
         )}
       >
-        <p className="font-bold">{step.title}</p>
-        <p className="text-sm">{step.text}</p>
+        <StepIcon className="mt-0.5" />
+        <div className="flex flex-col gap-0.5">
+          <p className="font-bold">{step.title}</p>
+          <p className="text-sm">{step.text}</p>
+        </div>
       </div>
-      <ul className="flex flex-col divide-y divide-line">
+      {!rejected ? (
+        <ol aria-label="مراحل الطلب" className={cn('grid gap-2', stage ? 'grid-cols-4' : 'grid-cols-3')}>
+          {path.map((label, i) => (
+            <li key={label} className="flex flex-col gap-2">
+              <span
+                aria-hidden="true"
+                className={cn('h-1.5 rounded-full', i <= reached ? 'bg-brand' : 'bg-surface-muted')}
+              />
+              <span className={cn('text-xs font-semibold', i <= reached ? 'text-ink' : 'text-ink-subtle')}>
+                {label}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <ul className="flex flex-col divide-y divide-line border-y border-line">
         {order.lines.map((l, i) => (
-          <li key={i} className="flex items-center justify-between gap-3 py-2">
-            <span>
-              {l.name}
+          <li key={i} className="flex items-center justify-between gap-3 py-3">
+            <span className="min-w-0">
+              <span className="font-semibold">{l.name}</span>
               {l.label ? <span className="text-ink-muted"> · {l.label}</span> : null}
               <span className="num text-ink-muted"> × {l.qty}</span>
             </span>
-            <Money minor={l.totalMinor} currency={order.currency} />
+            {l.totalMinor !== null ? (
+              <Money minor={l.totalMinor} currency={order.currency} className="shrink-0" />
+            ) : null}
           </li>
         ))}
       </ul>
-      <div className="flex items-center justify-between border-t border-line pt-3">
-        <span className="font-semibold">
-          المجموع · {order.fulfilment === 'delivery' ? 'توصيل' : 'استلام من المحل'}
-        </span>
-        <Money minor={order.totalMinor} currency={order.currency} className="text-lg font-bold" />
-      </div>
-      {order.deliveryFeeMinor > 0 ? (
-        <div className="flex items-center justify-between text-sm text-ink-muted">
-          <span>أجرة التوصيل (للمندوب)</span>
-          <Money minor={order.deliveryFeeMinor} currency={order.currency} />
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-semibold">المجموع</span>
+          {order.totalMinor !== null ? (
+            <Money minor={order.totalMinor} currency={order.currency} className="text-lg font-bold" />
+          ) : (
+            <PriceOnRequest />
+          )}
         </div>
-      ) : null}
-      <Link to={base} className="text-sm font-semibold text-brand-ink">
+        {order.deliveryFeeMinor !== null && order.deliveryFeeMinor > 0 ? (
+          <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">
+            <span>أجرة التوصيل (للمندوب)</span>
+            <Money minor={order.deliveryFeeMinor} currency={order.currency} />
+          </div>
+        ) : null}
+      </div>
+      {cancelError ? <Alert tone="error">{cancelError}</Alert> : null}
+      <div className="flex flex-wrap items-center gap-3">
+        {whatsapp ? (
+          <a
+            href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(`مرحباً، بخصوص طلبي ${order.number}`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={linkButton('secondary', density)}
+          >
+            <SendIcon />
+            تواصل مع المحل
+          </a>
+        ) : null}
+        {order.status === 'pending' ? (
+          <Button variant="ghost" loading={asking} onClick={() => void askCancel()}>
+            اطلب إلغاء الطلب
+          </Button>
+        ) : null}
+      </div>
+      <TextLink as={Link} to={base} className="inline-flex min-h-11 w-fit items-center text-sm">
         عد إلى المتجر
-      </Link>
+      </TextLink>
     </section>
   );
 }

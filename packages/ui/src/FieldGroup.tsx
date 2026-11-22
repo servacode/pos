@@ -1,5 +1,7 @@
 import { useId, type ReactNode } from 'react';
+import { cn } from './cn';
 import { FieldError } from './FieldError';
+import { FIELD_HINT, FIELD_LABEL } from './TextField';
 
 interface FieldGroupProps {
   legend: string;
@@ -8,6 +10,10 @@ interface FieldGroupProps {
   children: ReactNode;
 }
 
+/**
+ * Related controls under one question (a few checkboxes, chips): the legend reads like a field's
+ * label, with the fields' 6 px rhythm between legend, hint, controls and error.
+ */
 export function FieldGroup({ legend, hint, error, children }: FieldGroupProps) {
   const id = useId();
   const hintId = hint ? `${id}-hint` : undefined;
@@ -15,15 +21,15 @@ export function FieldGroup({ legend, hint, error, children }: FieldGroupProps) {
 
   return (
     <fieldset aria-describedby={[errorId, hintId].filter(Boolean).join(' ') || undefined}>
-      <legend className="text-sm font-semibold text-ink">{legend}</legend>
+      <legend className={FIELD_LABEL}>{legend}</legend>
       {hint ? (
-        <p id={hintId} className="mt-1 text-sm text-ink-muted">
+        <p id={hintId} className={cn(FIELD_HINT, 'mt-1.5')}>
           {hint}
         </p>
       ) : null}
-      <div className="mt-3">{children}</div>
+      <div className="mt-1.5">{children}</div>
       {error ? (
-        <FieldError id={errorId} className="mt-2">
+        <FieldError id={errorId} className="mt-1.5">
           {error}
         </FieldError>
       ) : null}

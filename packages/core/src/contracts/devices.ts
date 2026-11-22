@@ -81,14 +81,18 @@ export const devicePublicKeySchema = z
 // ─── Owner: pairing codes ─────────────────────────────────────────────────────
 
 /** POST /v1/devices/pairing-codes (owner) */
-export const createPairingCodeInput = z.object({ branchId: z.uuid('اختر الفرع') });
+export const createPairingCodeInput = z.object({
+  branchId: z.uuid('اختر الفرع'),
+  /** What the device to link is for: the link carries it, so a kitchen screen opens /kitchen, a rep's phone /rep (cashier by default); a rep phone needs a van branch */
+  kind: z.enum(['cashier', 'waiter', 'kitchen_screen', 'call_screen', 'rep_phone']).optional(),
+});
 export type CreatePairingCodeInput = z.input<typeof createPairingCodeInput>;
 
 export interface PairingCodeResponse {
   pairingId: string;
   branchId: string;
   branchName: string;
-  /** What the QR encodes: `<web origin>/link#<qrToken>` */
+  /** What the QR encodes: `<web origin>/link#<qrToken>`, with `?kind=` before the `#` for a hall device */
   qrPayload: string;
   qrToken: string;
   /** 8 characters, shown as two groups of 4 */
