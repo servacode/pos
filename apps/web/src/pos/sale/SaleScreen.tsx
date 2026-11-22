@@ -1405,8 +1405,9 @@ export function SaleScreen(props: SaleScreenProps) {
     setPhoneView('cart');
     setSelected(lineNo);
     window.setTimeout(() => {
-      document
-        .getElementById(`cart-line-${lineNo}`)
+      // The screen may be gone by then (a test torn down, a page left): nothing to scroll
+      globalThis.document
+        ?.getElementById(`cart-line-${lineNo}`)
         ?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
     }, 30);
   };

@@ -155,6 +155,8 @@ describe('the search box is quick', () => {
       'GET /v1/me': { status: 200, body: meWith(['sale.create']) },
     });
     const { user } = renderApp('/');
+    // The frame drawn while the home page loads is swapped for the page's own: open the search on the page
+    await screen.findByRole('heading', { name: /أهلاً/ });
     await user.click((await screen.findAllByRole('button', { name: OPEN }))[0]!);
     await screen.findByRole('combobox', { name: 'ابحث في المتجر' });
     expect(screen.queryByRole('button', { name: 'زبائن' })).not.toBeInTheDocument();
@@ -170,6 +172,8 @@ describe('the search box is quick', () => {
       'GET /v1/me': { status: 200, body: meWith(['sale.create']) },
     });
     const { user } = renderApp('/');
+    // The frame drawn while the home page loads is swapped for the page's own: open the search on the page
+    await screen.findByRole('heading', { name: /أهلاً/ });
     await user.click((await screen.findAllByRole('button', { name: OPEN }))[0]!);
     await user.type(await screen.findByRole('combobox', { name: 'ابحث في المتجر' }), 'رنا');
     await screen.findByText('لا صفحة ولا سجل بهذا الاسم.');

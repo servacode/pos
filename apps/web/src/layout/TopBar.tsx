@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router';
 import {
   AddIcon,
@@ -12,7 +12,8 @@ import {
 } from '@serva/ui';
 import type { NumberFormat } from '../lib/format';
 import { useOnline } from '../pos/useOnline';
-import { CommandPalette, type PaletteIntent } from './CommandPalette';
+import { CommandPalette } from './CommandPalette';
+import { usePaletteState } from './paletteState';
 import { pageOwns, type NavSection } from './nav';
 import { Notifications, type Notice } from './Notifications';
 import { BranchSelect } from './BranchSelect';
@@ -66,10 +67,7 @@ export function TopBar({
   const { pathname } = useLocation();
   const online = useOnline();
   const page = current?.pages.find((p) => pageOwns(p, pathname));
-  const [palette, setPalette] = useState<{ open: boolean; intent: PaletteIntent }>({
-    open: false,
-    intent: 'search',
-  });
+  const [palette, setPalette] = usePaletteState();
   // The keyboard hint is for people who run the store from a desk; a cashier whose menu is a handful
   // of pages never needs it
   const showShortcut = sections.reduce((n, section) => n + section.pages.length, 0) > SHORTCUT_MIN_PAGES;
@@ -99,7 +97,7 @@ export function TopBar({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [canSell]);
+  }, [canSell, setPalette]);
 
   return (
     <div className="sh-top">

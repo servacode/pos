@@ -1918,3 +1918,40 @@ a.sh-trial:hover {
 .sh-page table tbody tr:hover {
   background: color-mix(in oklab, var(--color-brand-soft) 50%, transparent);
 }
+/* The wide search box is for wide screens; below 1280 px it is a square search button (beside the
+   store chip and the page's title), and a phone keeps the bare search icon */
+@media (min-width: 768px) and (max-width: 1279px) {
+  .sh-top .sh-search {
+    flex: none;
+    justify-content: center;
+    width: 46px;
+    min-width: 0;
+    padding: 0;
+  }
+}
+@media (max-width: 767px) {
+  .sh-top .sh-search {
+    flex: none;
+    width: 44px;
+    min-width: 0;
+    height: 44px;
+    margin-inline-start: auto;
+    border: 0;
+    background: none;
+  }
+}
+/* Where the top bar shows only the store chip (768–1599 px), the chip keeps its full width and the
+   search box gives way, so they never lie over each other */
+@media (min-width: 768px) and (max-width: 1599px) {
+  .sh-top .sh-crumb {
+    flex: none;
+    min-width: max-content;
+  }
+}
+@media (min-width: 1280px) and (max-width: 1599px) {
+  .sh-top .sh-search {
+    flex: 1 1 400px;
+    min-width: 0;
+    max-width: 440px;
+  }
+}

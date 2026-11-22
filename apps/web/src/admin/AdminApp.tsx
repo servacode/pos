@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router';
 import { AuthProvider } from '../auth/AuthProvider';
 import { GuestOnly, RequireAuth } from '../auth/guards';
 import { useAuth } from '../auth/useAuth';
+import { PaletteStateProvider } from '../layout/paletteState';
 import { PageLoading } from '../layout/PageLoading';
 import { ShellSkeleton } from '../layout/ShellSkeleton';
 import { NotFoundPage } from '../pages/NotFoundPage';
@@ -244,178 +245,180 @@ export function AdminApp() {
   return (
     <AuthProvider>
       <PrefetchSections />
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route element={<GuestOnly />}>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          </Route>
-          {/* A visitor who is not signed in sees the landing page at the root; a signed-in user, the home page */}
-          <Route path="/" element={<Front />} />
-          <Route element={<RequireAuth />}>
-            <Route path="/devices" element={page(<DevicesPage />)} />
-            <Route path="/products" element={page(<ProductsPage />)} />
-            <Route path="/products/import" element={<Navigate to="/import?type=products" replace />} />
-            <Route path="/products/:id" element={page(<ProductRoute />)} />
-            <Route path="/categories" element={page(<CategoriesPage />)} />
-            <Route path="/promotions" element={page(<PromotionsPage />)} />
-            <Route
-              path="/cheques"
-              element={page(
-                <SectorGate sectors={CHEQUE_SECTORS}>
-                  <ChequesPage />
-                </SectorGate>,
-              )}
-            />
-            <Route path="/installments" element={page(<InstalmentPlansPage />)} />
-            <Route path="/installments/due" element={page(<InstalmentWorklistPage />)} />
-            <Route path="/installments/settings" element={page(<InstalmentSettingsPage />)} />
-            <Route path="/installments/:id" element={page(<InstalmentPlanPage />)} />
-            <Route path="/customers" element={page(<CustomersPage />)} />
-            <Route path="/messages" element={page(<BroadcastsPage />)} />
-            <Route path="/purchases" element={page(<PurchasesPage />)} />
-            <Route path="/suppliers" element={page(<SuppliersPage />)} />
-            <Route path="/inventory" element={page(<InventoryPage />)} />
-            <Route path="/inventory/count" element={page(<StocktakePhonePage />)} />
-            <Route
-              path="/expiry"
-              element={page(
-                <SectorGate sectors={EXPIRY_SECTORS}>
-                  <ExpiryPage />
-                </SectorGate>,
-              )}
-            />
-            <Route
-              path="/recall"
-              element={page(
-                <SectorGate sectors={EXPIRY_SECTORS}>
-                  <RecallPage />
-                </SectorGate>,
-              )}
-            />
-            <Route
-              path="/expiring-soon"
-              element={page(
-                <SectorGate sectors={MEDICINAL_SECTORS}>
-                  <ExpiringSoonPage />
-                </SectorGate>,
-              )}
-            />
-            <Route
-              path="/shortages"
-              element={page(
-                <SectorGate sectors={MEDICINAL_SECTORS}>
-                  <ShortagesPage />
-                </SectorGate>,
-              )}
-            />
-            <Route
-              path="/controlled-register"
-              element={page(
-                <SectorGate sectors={['pharmacy']}>
-                  <ControlledRegisterPage />
-                </SectorGate>,
-              )}
-            />
-            <Route path="/online-store" element={page(<OnlineStorePage />)} />
-            <Route path="/prices" element={page(<BulkPricesPage />)} />
-            <Route path="/price-history" element={page(<PriceHistoryPage />)} />
-            <Route path="/price-list" element={page(<PriceListPage />)} />
-            <Route path="/import" element={page(<ImportPage />)} />
-            <Route path="/transfers" element={page(<TransfersPage />)} />
-            <Route path="/purchase-orders" element={page(<PurchaseOrdersPage />)} />
-            <Route path="/purchase-orders/new" element={page(<PurchaseOrderFormPage />)} />
-            <Route path="/purchase-orders/:id" element={page(<PurchaseOrderPage />)} />
-            <Route path="/purchase-orders/:id/edit" element={page(<PurchaseOrderFormPage />)} />
-            <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
-            <Route path="/damaged-stock" element={page(<DamagedStockPage />)} />
-            <Route path="/reports" element={page(<ReportsHomePage />)} />
-            <Route path="/reports/sales" element={page(<SalesReportPage />)} />
-            <Route path="/reports/below-cost" element={page(<BelowCostPage />)} />
-            <Route path="/reports/food-cost" element={page(<FoodCostPage />)} />
-            <Route path="/reports/waste" element={page(<WasteReportPage />)} />
-            <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
-            <Route
-              path="/reports/cancellations"
-              element={page(
-                <SectorGate sectors={HALL_SECTORS}>
-                  <CancellationsPage />
-                </SectorGate>,
-              )}
-            />
-            <Route
-              path="/serials"
-              element={page(
-                <SectorGate sectors={SERIAL_SECTORS}>
-                  <SerialsPage />
-                </SectorGate>,
-              )}
-            />
-            <Route
-              path="/warranty"
-              element={page(
-                <SectorGate sectors={WARRANTY_SECTORS}>
-                  <WarrantyPage />
-                </SectorGate>,
-              )}
-            />
-            <Route
-              path="/rentals"
-              element={page(
-                <SectorGate sectors={RENTAL_SECTORS}>
-                  <RentalsPage />
-                </SectorGate>,
-              )}
-            />
-            <Route
-              path="/maintenance"
-              element={page(
-                <SectorGate sectors={RENTAL_SECTORS}>
-                  <MaintenancePage />
-                </SectorGate>,
-              )}
-            />
-            <Route
-              path="/contract-prices"
-              element={page(
-                <SectorGate sectors={CONTRACT_PRICE_SECTORS}>
-                  <ContractPricesPage />
-                </SectorGate>,
-              )}
-            />
-            <Route path="/reports/debt-ageing" element={page(<DebtAgeingPage />)} />
-            <Route path="/labels" element={page(<LabelsPage />)} />
-            <Route path="/tax-rates" element={page(<TaxRatesPage />)} />
-            <Route path="/quotations" element={page(<QuotationsPage />)} />
-            <Route path="/quotations/:id" element={page(<QuotationPage />)} />
-            <Route path="/customers/:id" element={page(<CustomerPage />)} />
-            <Route path="/customers/:id/statement" element={page(<StatementPage type="customer" />)} />
-            <Route path="/suppliers/:id/statement" element={page(<StatementPage type="supplier" />)} />
-            <Route path="/expenses" element={page(<ExpensesPage />)} />
-            <Route path="/branches" element={page(<BranchesPage />)} />
-            <Route path="/staff" element={page(<StaffPage />)} />
-            <Route path="/me/pin" element={page(<PinPage />)} />
-            <Route path="/welcome" element={page(<WelcomePage />)} />
-            <Route path="/settings" element={page(<SettingsPage />)} />
-            <Route path="/subscription" element={page(<SubscriptionPage />)} />
-            {/* A parent path with no page of its own opens its first child, not «غير موجود» */}
-            <Route path="/sales" element={<Navigate to="/sales/today" replace />} />
-            <Route path="/me" element={<Navigate to="/me/pin" replace />} />
-            <Route path="/sales/today" element={page(<DayReportPage />)} />
-            <Route path="/sales/invoices" element={page(<InvoicesPage />)} />
-            <Route path="/shifts" element={page(<ShiftsPage />)} />
-            <Route path="/shifts/:id" element={page(<ShiftReportPage />)} />
-            <Route path="/evidence" element={page(<EvidencePage />)} />
-            <Route path="/accounting/*" element={page(<Accounting />)} />
-            <Route path="/distribution/*" element={page(<Distribution />)} />
-            <Route path="/reports/distribution" element={page(<DistributionReports />)} />
-          </Route>
-          <Route element={<RequireAuth />}>
-            <Route path="*" element={<NotFoundPage />} />
-          </Route>
-        </Routes>
-      </Suspense>
+      <PaletteStateProvider>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route element={<GuestOnly />}>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            </Route>
+            {/* A visitor who is not signed in sees the landing page at the root; a signed-in user, the home page */}
+            <Route path="/" element={<Front />} />
+            <Route element={<RequireAuth />}>
+              <Route path="/devices" element={page(<DevicesPage />)} />
+              <Route path="/products" element={page(<ProductsPage />)} />
+              <Route path="/products/import" element={<Navigate to="/import?type=products" replace />} />
+              <Route path="/products/:id" element={page(<ProductRoute />)} />
+              <Route path="/categories" element={page(<CategoriesPage />)} />
+              <Route path="/promotions" element={page(<PromotionsPage />)} />
+              <Route
+                path="/cheques"
+                element={page(
+                  <SectorGate sectors={CHEQUE_SECTORS}>
+                    <ChequesPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route path="/installments" element={page(<InstalmentPlansPage />)} />
+              <Route path="/installments/due" element={page(<InstalmentWorklistPage />)} />
+              <Route path="/installments/settings" element={page(<InstalmentSettingsPage />)} />
+              <Route path="/installments/:id" element={page(<InstalmentPlanPage />)} />
+              <Route path="/customers" element={page(<CustomersPage />)} />
+              <Route path="/messages" element={page(<BroadcastsPage />)} />
+              <Route path="/purchases" element={page(<PurchasesPage />)} />
+              <Route path="/suppliers" element={page(<SuppliersPage />)} />
+              <Route path="/inventory" element={page(<InventoryPage />)} />
+              <Route path="/inventory/count" element={page(<StocktakePhonePage />)} />
+              <Route
+                path="/expiry"
+                element={page(
+                  <SectorGate sectors={EXPIRY_SECTORS}>
+                    <ExpiryPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/recall"
+                element={page(
+                  <SectorGate sectors={EXPIRY_SECTORS}>
+                    <RecallPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/expiring-soon"
+                element={page(
+                  <SectorGate sectors={MEDICINAL_SECTORS}>
+                    <ExpiringSoonPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/shortages"
+                element={page(
+                  <SectorGate sectors={MEDICINAL_SECTORS}>
+                    <ShortagesPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/controlled-register"
+                element={page(
+                  <SectorGate sectors={['pharmacy']}>
+                    <ControlledRegisterPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route path="/online-store" element={page(<OnlineStorePage />)} />
+              <Route path="/prices" element={page(<BulkPricesPage />)} />
+              <Route path="/price-history" element={page(<PriceHistoryPage />)} />
+              <Route path="/price-list" element={page(<PriceListPage />)} />
+              <Route path="/import" element={page(<ImportPage />)} />
+              <Route path="/transfers" element={page(<TransfersPage />)} />
+              <Route path="/purchase-orders" element={page(<PurchaseOrdersPage />)} />
+              <Route path="/purchase-orders/new" element={page(<PurchaseOrderFormPage />)} />
+              <Route path="/purchase-orders/:id" element={page(<PurchaseOrderPage />)} />
+              <Route path="/purchase-orders/:id/edit" element={page(<PurchaseOrderFormPage />)} />
+              <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
+              <Route path="/damaged-stock" element={page(<DamagedStockPage />)} />
+              <Route path="/reports" element={page(<ReportsHomePage />)} />
+              <Route path="/reports/sales" element={page(<SalesReportPage />)} />
+              <Route path="/reports/below-cost" element={page(<BelowCostPage />)} />
+              <Route path="/reports/food-cost" element={page(<FoodCostPage />)} />
+              <Route path="/reports/waste" element={page(<WasteReportPage />)} />
+              <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
+              <Route
+                path="/reports/cancellations"
+                element={page(
+                  <SectorGate sectors={HALL_SECTORS}>
+                    <CancellationsPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/serials"
+                element={page(
+                  <SectorGate sectors={SERIAL_SECTORS}>
+                    <SerialsPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/warranty"
+                element={page(
+                  <SectorGate sectors={WARRANTY_SECTORS}>
+                    <WarrantyPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/rentals"
+                element={page(
+                  <SectorGate sectors={RENTAL_SECTORS}>
+                    <RentalsPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/maintenance"
+                element={page(
+                  <SectorGate sectors={RENTAL_SECTORS}>
+                    <MaintenancePage />
+                  </SectorGate>,
+                )}
+              />
+              <Route
+                path="/contract-prices"
+                element={page(
+                  <SectorGate sectors={CONTRACT_PRICE_SECTORS}>
+                    <ContractPricesPage />
+                  </SectorGate>,
+                )}
+              />
+              <Route path="/reports/debt-ageing" element={page(<DebtAgeingPage />)} />
+              <Route path="/labels" element={page(<LabelsPage />)} />
+              <Route path="/tax-rates" element={page(<TaxRatesPage />)} />
+              <Route path="/quotations" element={page(<QuotationsPage />)} />
+              <Route path="/quotations/:id" element={page(<QuotationPage />)} />
+              <Route path="/customers/:id" element={page(<CustomerPage />)} />
+              <Route path="/customers/:id/statement" element={page(<StatementPage type="customer" />)} />
+              <Route path="/suppliers/:id/statement" element={page(<StatementPage type="supplier" />)} />
+              <Route path="/expenses" element={page(<ExpensesPage />)} />
+              <Route path="/branches" element={page(<BranchesPage />)} />
+              <Route path="/staff" element={page(<StaffPage />)} />
+              <Route path="/me/pin" element={page(<PinPage />)} />
+              <Route path="/welcome" element={page(<WelcomePage />)} />
+              <Route path="/settings" element={page(<SettingsPage />)} />
+              <Route path="/subscription" element={page(<SubscriptionPage />)} />
+              {/* A parent path with no page of its own opens its first child, not «غير موجود» */}
+              <Route path="/sales" element={<Navigate to="/sales/today" replace />} />
+              <Route path="/me" element={<Navigate to="/me/pin" replace />} />
+              <Route path="/sales/today" element={page(<DayReportPage />)} />
+              <Route path="/sales/invoices" element={page(<InvoicesPage />)} />
+              <Route path="/shifts" element={page(<ShiftsPage />)} />
+              <Route path="/shifts/:id" element={page(<ShiftReportPage />)} />
+              <Route path="/evidence" element={page(<EvidencePage />)} />
+              <Route path="/accounting/*" element={page(<Accounting />)} />
+              <Route path="/distribution/*" element={page(<Distribution />)} />
+              <Route path="/reports/distribution" element={page(<DistributionReports />)} />
+            </Route>
+            <Route element={<RequireAuth />}>
+              <Route path="*" element={<NotFoundPage />} />
+            </Route>
+          </Routes>
+        </Suspense>
+      </PaletteStateProvider>
     </AuthProvider>
   );
 }
