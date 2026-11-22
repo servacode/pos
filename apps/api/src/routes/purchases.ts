@@ -60,7 +60,12 @@ import {
   updatePurchaseOrder,
 } from '../services/purchase-orders';
 import { correctPurchase } from '../services/purchase-correction';
-import { attachPurchasePhoto, removePurchasePhoto, supplierDues } from '../services/purchase-dues';
+import {
+  attachPurchasePhoto,
+  readPurchasePhoto,
+  removePurchasePhoto,
+  supplierDues,
+} from '../services/purchase-dues';
 import { assertDatesOpen } from '../services/period-close';
 import {
   cancelTransfer,
@@ -175,6 +180,26 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(201).send(photo);
     },
   );
+  // Private: the photo shows the supplier's prices, so it needs the token (the page loads it with a fetch)
+  app.get('/v1/purchases/:id/attachments/:attachmentId', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const attachment = uuidSchema.safeParse((request.params as { attachmentId?: string }).attachmentId);
+    if (!attachment.success) throw new AppError(404, 'not_found', 'هذه الصورة غير موجودة.');
+    const thumb = (request.query as { size?: string }).size === 'thumb';
+    const photo = await readPurchasePhoto(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الفاتورة'),
+      attachment.data,
+      thumb,
+    );
+    return reply
+      .header('content-type', photo.contentType)
+      .header('cache-control', 'private, max-age=3600')
+      .header('x-content-type-options', 'nosniff')
+      .header('content-security-policy', "default-src 'none'")
+      .send(photo.body);
+  });
   app.delete('/v1/purchases/:id/attachments/:attachmentId', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
     const attachment = uuidSchema.safeParse((request.params as { attachmentId?: string }).attachmentId);

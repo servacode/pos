@@ -409,8 +409,8 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
         .orderBy(asc(purchaseAttachments.createdAt), asc(purchaseAttachments.id))
     ).map((a) => ({
       id: a.id,
-      url: `/v1/images/${row.tenant_id}/${a.uploadId}`,
-      thumbUrl: `/v1/images/${row.tenant_id}/${a.uploadId}?size=thumb`,
+      url: `/v1/purchases/${id}/attachments/${a.id}`,
+      thumbUrl: `/v1/purchases/${id}/attachments/${a.id}?size=thumb`,
     })),
     correctedBy: row.reversal_id
       ? { id: row.reversal_id, number: row.reversal_number!, date: row.reversal_date! }

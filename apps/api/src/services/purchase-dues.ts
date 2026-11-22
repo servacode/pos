@@ -15,7 +15,7 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
-import { sniffImage, imageUrl } from './catalog/images';
+import { sniffImage, purchaseAttachmentUrl } from './catalog/images';
 import { baseCurrency, storeDay, supplierBalances } from './purchases';
 
 /**
@@ -124,7 +124,13 @@ export function attachPurchasePhoto(
     const [same] = await tx
       .select({ id: uploads.id })
       .from(uploads)
-      .where(and(eq(uploads.tenantId, tenantId), eq(uploads.sha256, sha256)))
+      .where(
+        and(
+          eq(uploads.tenantId, tenantId),
+          eq(uploads.sha256, sha256),
+          eq(uploads.kind, 'purchase_attachment'),
+        ),
+      )
       .limit(1);
     let uploadId = same?.id;
     if (!uploadId) {
@@ -179,8 +185,8 @@ export function attachPurchasePhoto(
     );
     return {
       id: attachmentId,
-      url: imageUrl(tenantId, uploadId),
-      thumbUrl: imageUrl(tenantId, uploadId, true),
+      url: purchaseAttachmentUrl(purchaseId, attachmentId),
+      thumbUrl: purchaseAttachmentUrl(purchaseId, attachmentId, true),
     };
   });
 }
@@ -219,5 +225,41 @@ export function removePurchasePhoto(
       },
       meta,
     );
+  });
+}
+
+/** The bytes of one invoice photo: same permission and branch scope as adding it; 404 for anything else */
+export function readPurchasePhoto(
+  db: Database,
+  auth: AccessClaims,
+  purchaseId: string,
+  attachmentId: string,
+  thumb: boolean,
+): Promise<{ contentType: string; body: Buffer }> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
+    const [purchase] = await tx
+      .select({ branchId: purchases.branchId })
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId));
+    if (!purchase || !inScope(scope, purchase.branchId)) {
+      throw new AppError(404, 'not_found', 'هذه الفاتورة غير موجودة.');
+    }
+    const [row] = await tx
+      .select({ contentType: uploads.contentType, data: thumb ? uploads.thumb : uploads.data })
+      .from(purchaseAttachments)
+      .innerJoin(
+        uploads,
+        and(eq(uploads.tenantId, purchaseAttachments.tenantId), eq(uploads.id, purchaseAttachments.uploadId)),
+      )
+      .where(
+        and(
+          eq(purchaseAttachments.id, attachmentId),
+          eq(purchaseAttachments.purchaseId, purchaseId),
+          eq(uploads.kind, 'purchase_attachment'),
+        ),
+      );
+    if (!row) throw new AppError(404, 'not_found', 'هذه الصورة غير موجودة.');
+    return { contentType: row.contentType, body: row.data };
   });
 }

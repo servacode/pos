@@ -1,14 +1,41 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MAX_PURCHASE_ATTACHMENTS, type PurchaseAttachment } from '@serva/core';
 import { Alert, Button, CloseIcon } from '@serva/ui';
-import { errorMessage } from '../../lib/api';
+import { apiDownload, errorMessage } from '../../lib/api';
 import { resizeImage } from '../../lib/images';
 import { addPurchasePhoto, removePurchasePhoto } from './api';
 
 /**
  * Round 62: the photos of the supplier's paper invoice. A picture is made small in the browser (like a product's), kept
  * with the store's data, and opens full size in its own tab. Posting nothing: it only describes the invoice.
+ * The photo shows the supplier's prices, so the server gives it only with the token: an <img> cannot carry one, so each
+ * picture is fetched and shown from a local object URL (released when it changes or the screen goes).
  */
+function Thumb({ photo, label }: { photo: PurchaseAttachment; label: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    let made: string | null = null;
+    setSrc(null);
+    apiDownload(photo.thumbUrl)
+      .then(({ blob }) => {
+        if (!live) return;
+        made = URL.createObjectURL(blob);
+        setSrc(made);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [photo.thumbUrl]);
+  return src ? (
+    <img src={src} alt={label} className="h-24 w-24 rounded-control object-cover" />
+  ) : (
+    <span aria-hidden="true" className="block h-24 w-24 rounded-control bg-surface-muted" />
+  );
+}
+
 export function PurchasePhotos({
   purchaseId,
   photos,
@@ -34,6 +61,21 @@ export function PurchasePhotos({
     } finally {
       setBusy(false);
       if (input.current) input.current.value = '';
+    }
+  }
+  // The tab opens at once (a popup after a wait is blocked) and then shows the photo from a local object URL
+  async function open(photo: PurchaseAttachment) {
+    setError(null);
+    const tab = window.open('', '_blank');
+    try {
+      const { blob } = await apiDownload(photo.url);
+      const url = URL.createObjectURL(blob);
+      if (tab) tab.location.href = url;
+      else window.open(url, '_blank');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      tab?.close();
+      setError(errorMessage(e));
     }
   }
   async function remove(photo: PurchaseAttachment) {
@@ -75,13 +117,14 @@ export function PurchasePhotos({
         <ul className="flex flex-wrap gap-3" aria-label="صور الفاتورة">
           {photos.map((p, i) => (
             <li key={p.id} className="relative">
-              <a href={p.url} target="_blank" rel="noopener noreferrer" aria-label={`افتح الصورة ${i + 1}`}>
-                <img
-                  src={p.thumbUrl}
-                  alt={`صورة الفاتورة ${i + 1}`}
-                  className="h-24 w-24 rounded-control object-cover"
-                />
-              </a>
+              <button
+                type="button"
+                aria-label={`افتح الصورة ${i + 1}`}
+                onClick={() => void open(p)}
+                className="block rounded-control"
+              >
+                <Thumb photo={p} label={`صورة الفاتورة ${i + 1}`} />
+              </button>
               <button
                 type="button"
                 aria-label={`احذف الصورة ${i + 1}`}

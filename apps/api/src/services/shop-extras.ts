@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   MAX_IMAGE_BYTES,
   MAX_THUMB_BYTES,
@@ -351,7 +351,13 @@ export function setStoreImage(
     const [same] = await tx
       .select({ id: uploads.id })
       .from(uploads)
-      .where(and(eq(uploads.tenantId, auth.tenantId), eq(uploads.sha256, sha256)))
+      .where(
+        and(
+          eq(uploads.tenantId, auth.tenantId),
+          eq(uploads.sha256, sha256),
+          inArray(uploads.kind, ['product_image', 'shop_logo', 'shop_cover']),
+        ),
+      )
       .limit(1);
     let uploadId = same?.id;
     if (!uploadId) {

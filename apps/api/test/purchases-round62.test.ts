@@ -291,9 +291,14 @@ describe('purchases, round 62: the photo of the paper invoice', () => {
     const again = (await get(store, `/v1/purchases/${made.id}`)).json<PurchaseDetail>();
     expect(again.attachments).toHaveLength(1);
     expect(again.attachments?.[0]?.url).toBe(ok.json<{ url: string }>().url);
-    const served = await app.inject({ method: 'GET', url: again.attachments![0]!.url });
+    const served = await get(store, again.attachments![0]!.url);
     expect(served.statusCode).toBe(200);
     expect(served.headers['content-type']).toBe('image/png');
+    expect(served.headers['cache-control']).toBe('private, max-age=3600');
+    expect(served.headers['x-content-type-options']).toBe('nosniff');
+    expect(served.headers['content-security-policy']).toBe("default-src 'none'");
+    expect((await get(store, `${again.attachments![0]!.url}?size=thumb`)).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: again.attachments![0]!.url })).statusCode).toBe(401);
     const text = Buffer.from('not a picture at all').toString('base64');
     const bad = await post(store, `/v1/purchases/${made.id}/attachments`, {
       contentType: 'image/png',
@@ -528,6 +533,10 @@ describe('round 62: permissions and the other store', () => {
     const send = (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
       app.inject({ method, url, headers: h, ...(payload ? { payload } : {}) });
     expect((await send('GET', '/v1/suppliers/due')).statusCode).toBe(403);
+    expect(
+      (await send('GET', `/v1/purchases/${made.id}/attachments/00000000-0000-4000-8000-000000000000`))
+        .statusCode,
+    ).toBe(403);
     expect((await send('POST', `/v1/purchases/${made.id}/attachments`, photo)).statusCode).toBe(403);
     expect(
       (await send('DELETE', `/v1/purchases/${made.id}/attachments/00000000-0000-4000-8000-000000000000`))
@@ -566,5 +575,53 @@ describe('round 62: permissions and the other store', () => {
     }
     // Nothing of it reaches the other store's invoice list
     expect((await get(other, `/v1/purchases/${made.id}`)).statusCode).toBe(404);
+  });
+});
+
+describe('round 62: the invoice photo is private', () => {
+  const png = (n: number) =>
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, n]).toString('base64');
+
+  it('is not public, is served to the owner only, and a product picture of the same bytes stays public', async () => {
+    const store = await openStore(app);
+    const other = await openStore(app, '0912345679');
+    const variantId = await product(store, 'فستان');
+    const s = await supplier(store, 'مورد');
+    const made = await buy(store, { supplierId: s.id, lines: [{ variantId, qty: 1000, costMinor: 50_000 }] });
+    const bytes = png(9);
+    const photo = { contentType: 'image/png', data: bytes, thumb: bytes, width: 1, height: 1 };
+    const att = (await post(store, `/v1/purchases/${made.id}/attachments`, photo)).json<{
+      id: string;
+      url: string;
+      thumbUrl: string;
+    }>();
+    expect(att.url).toBe(`/v1/purchases/${made.id}/attachments/${att.id}`);
+    const [up] = await ownerDb()<
+      { id: string }[]
+    >`select upload_id as id from purchase_attachments where id = ${att.id}`;
+    const publicUrl = `/v1/images/${store.tenantId}/${up!.id}`;
+    expect((await app.inject({ method: 'GET', url: publicUrl })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `${publicUrl}?size=thumb` })).statusCode).toBe(404);
+    const mine = await get(store, att.thumbUrl);
+    expect(mine.statusCode).toBe(200);
+    expect(mine.rawPayload.equals(Buffer.from(bytes, 'base64'))).toBe(true);
+    expect((await get(other, att.url)).statusCode).toBe(404);
+    expect(
+      (await get(store, `/v1/purchases/${made.id}/attachments/00000000-0000-4000-8000-000000000000`))
+        .statusCode,
+    ).toBe(404);
+
+    // The same bytes as a product picture: its own public upload; the invoice photo stays private
+    const product2 = await post(store, '/v1/products', {
+      nameAr: 'قميص',
+      variants: [{ price: { currency: 'SYP', priceMinor: 100_000 } }],
+    });
+    const productId = product2.json<ProductDetail>().id;
+    const img = await post(store, `/v1/products/${productId}/images`, photo);
+    expect(img.statusCode, img.body).toBe(201);
+    const imageUrl = img.json<{ url: string }>().url;
+    expect(imageUrl).not.toBe(publicUrl);
+    expect((await app.inject({ method: 'GET', url: imageUrl })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: publicUrl })).statusCode).toBe(404);
   });
 });

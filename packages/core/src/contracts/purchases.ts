@@ -168,6 +168,7 @@ export interface PurchaseLineRow {
   serials: string[];
 }
 
+/** url and thumbUrl are relative API paths that need the token (fetch them, an <img> cannot) */
 export interface PurchaseAttachment {
   id: string;
   url: string;
@@ -260,6 +261,7 @@ export interface PurchaseListResponse {
  *   GET  /v1/suppliers/due?days=7       SupplierDueResponse   (purchases.manage, round 62)
  *   POST /v1/purchases/{id}/attachments           purchaseAttachmentInput → PurchaseAttachment (201, purchases.manage)
  *   DELETE /v1/purchases/{id}/attachments/{attachmentId}   → 204
+ *   GET  /v1/purchases/{id}/attachments/{attachmentId}[?size=thumb]   → the picture's bytes (purchases.manage; private, never under /v1/images)
  *
  * «مستحق هذا الأسبوع»: the credit invoices still owed whose due date falls within `days` days (or has passed). What is still
  * owed of an invoice is worked out the way a shop thinks of it: payments settle the oldest invoices first, so the supplier's

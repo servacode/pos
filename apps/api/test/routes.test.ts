@@ -46,6 +46,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/purchases': 'signed-in',
   'POST /v1/purchases': 'signed-in',
   'GET /v1/purchases/:id': 'signed-in',
+  'GET /v1/purchases/:id/attachments/:attachmentId': 'signed-in',
   'POST /v1/purchases/:id/attachments': 'signed-in',
   'DELETE /v1/purchases/:id/attachments/:attachmentId': 'signed-in',
   'POST /v1/purchases/:id/correct': 'signed-in',
@@ -1405,6 +1406,22 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       { n: string }[]
     >`select count(*)::text as n from purchase_attachments where purchase_id = ${id}`;
     expect(row!.n).toBe('0');
+  },
+  // The private invoice photo: another store gets 404 (never the bytes)
+  'GET /v1/purchases/:id/attachments/:attachmentId': async (app, { a, b }) => {
+    const id = await purchaseOf(app, a);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 5]).toString('base64');
+    const made = await app.inject({
+      method: 'POST',
+      url: `/v1/purchases/${id}/attachments`,
+      headers: owner(a),
+      payload: { contentType: 'image/png', data: png, thumb: png, width: 1, height: 1 },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const url = `/v1/purchases/${id}/attachments/${made.json<{ id: string }>().id}`;
+    expect((await app.inject({ method: 'GET', url, headers: owner(a) })).statusCode).toBe(200);
+    const res = await app.inject({ method: 'GET', url, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
   },
   'DELETE /v1/purchases/:id/attachments/:attachmentId': async (app, { a, b }) => {
     const id = await purchaseOf(app, a);
