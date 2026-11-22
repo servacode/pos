@@ -440,7 +440,7 @@ describe('coupon codes', () => {
 });
 
 describe('the coupon at the till', () => {
-  it('reaches the till only on the order that carries it, never as a promotion for every sale', async () => {
+  it('reaches the till on the order that carries it and as a stopped offer opened only by its code, never as a promotion for every sale', async () => {
     const store = await openStore(app);
     const p = await item(store);
     await saveShop(store);
@@ -474,7 +474,9 @@ describe('the coupon at the till', () => {
     const promos = Object.fromEntries(sets.promotions!.upserts.map((x) => [x.name as string, x]));
     expect(promos['للجميع']).toMatchObject({ archived: false });
     expect(promos['خصم الصيف']).toMatchObject({ archived: true });
-    expect(promos['خصم الصيف']).not.toHaveProperty('couponCode');
+    // ...but it carries its code, so a cashier who types it opens it, offline too (round A5, owner-approved)
+    expect(promos['خصم الصيف']).toMatchObject({ couponCode: 'SUMMER10' });
+    expect(promos['للجميع']).toMatchObject({ couponCode: null });
     // The order carries the offer as it was when the customer placed it
     expect(sets.online_orders!.upserts[0]).toMatchObject({
       number: 'ONL-000001',
