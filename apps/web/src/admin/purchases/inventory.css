@@ -283,19 +283,19 @@
 }
 
 /* the serial numbers a count picks the missing pieces from (round 60) */
-.sx .ix-serials {
-  border: 1px solid var(--line);
+.ix-serials {
+  border: 1px solid var(--color-line);
   border-radius: 12px;
   padding: 8px 12px 12px;
   margin: 0;
   min-width: 0;
 }
-.sx .ix-serials legend {
+.ix-serials legend {
   padding: 0 6px;
   font-weight: 600;
   font-size: 14px;
 }
-.sx .ix-serial-list {
+.ix-serial-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
   gap: 0 12px;
@@ -310,32 +310,40 @@
   gap: 4px 8px;
   align-items: baseline;
   margin: 0;
-  color: var(--ink-muted);
+  color: var(--color-ink-muted);
   font-size: 14px;
   line-height: 22px;
 }
 .sx .ix-method b {
-  color: var(--ink);
+  color: var(--color-ink);
 }
 
 /* round 62: the picked numbers, and the search / paste tools of the serial picker */
-.sx .ix-serial-chosen {
+.ix-serial-chosen {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 12px;
 }
-.sx .ix-serial-chip {
+.ix-serial-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   min-height: 32px;
-  padding: 0 10px;
+  padding: 0 10px 0 12px;
   border-radius: 999px;
-  background: var(--brand-soft, #e6f0ff);
-  color: var(--ink);
+  background: var(--color-brand-soft);
+  color: var(--color-ink);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
-.sx .ix-serial-tools {
+.ix-serial-chip .x {
+  color: var(--color-ink-muted);
+  font-size: 16px;
+  line-height: 1;
+}
+.ix-serial-tools {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 8px 12px;
@@ -343,7 +351,7 @@
   margin-bottom: 8px;
 }
 @media (max-width: 640px) {
-  .sx .ix-serial-tools {
+  .ix-serial-tools {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -355,7 +363,7 @@
   flex-direction: column;
   gap: 6px;
   padding-top: 12px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--color-line);
 }
 .sx .ix-hero .ix-hero-note .note {
   margin: 0;
@@ -366,14 +374,20 @@
   margin: 0;
   padding: 12px 16px;
   font-size: 14px;
-  color: var(--ink-muted);
+  color: var(--color-ink-muted);
 }
 
-/* round 64: «ما معنى هذه الأرقام؟» in the card head, the month's profit as one line under the tiles */
-.sx .ix-hero .ix-hero-head {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: flex-end;
+/* round 65: «ما معنى هذه الأرقام؟» closes the valuation notes (no empty head band), the size grid fills its card's width */
+.sx .ix-hero .ix-defs {
+  padding-top: 4px;
+}
+.sx .ix-gridtable {
+  width: 100%;
+  table-layout: auto;
+}
+.sx .ix-gridtable td,
+.sx .ix-gridtable th[scope='col'] {
+  min-width: 64px;
 }
 .sx .ix-hero .ix-profit {
   display: flex;
@@ -382,4 +396,11 @@
 }
 .sx .ix-hero .ix-profit .note {
   margin: 0;
+}
+
+/* round 65: the mark on a stock row whose serial numbers do not match its stock */
+.sx .ix-drift {
+  display: flex;
+  width: fit-content;
+  margin-top: 4px;
 }

@@ -41,7 +41,7 @@ export function PaperFields({
   const input = useRef<HTMLInputElement>(null);
   const room = MAX_PURCHASE_ATTACHMENTS - photos.length;
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
       <div className="flex flex-col gap-2">
         <NumberField
           label={percent ? 'خصم المورد (نسبة مئوية %)' : `خصم المورد (${unit})`}
@@ -69,7 +69,7 @@ export function PaperFields({
         onValueChange={onCharges}
         error={chargesError}
       />
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1.5 md:col-span-2">
         <span className="text-sm font-semibold text-ink">صورة الورقة</span>
         <input
           ref={input}

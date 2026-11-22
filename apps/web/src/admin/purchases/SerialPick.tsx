@@ -112,7 +112,10 @@ export function SerialPick({
               onClick={() => onChange(picked.filter((p) => p !== serial))}
               aria-label={`أزل ${serial}`}
             >
-              <bdi dir="ltr">{serial}</bdi> ×
+              <bdi dir="ltr">{serial}</bdi>
+              <span className="x" aria-hidden="true">
+                ×
+              </span>
             </button>
           ))}
         </div>

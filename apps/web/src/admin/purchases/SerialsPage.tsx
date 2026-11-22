@@ -20,9 +20,18 @@ import { splitSerials } from './SerialPick';
 import './inventory.css';
 
 /** A document number over its date, or a dash when there is none. */
-function DocCell({ number, date }: { number: string | null; date: string | null }) {
+function DocCell({
+  number,
+  date,
+  missing,
+}: {
+  number: string | null;
+  date: string | null;
+  /** What to say when there is no document (e.g. a serial added by hand); a dash when absent */
+  missing?: string;
+}) {
   const digits = useDigits();
-  if (!number) return <span className="sx-sub">—</span>;
+  if (!number) return <span className="sx-sub">{missing ?? '—'}</span>;
   return (
     <span className="flex flex-col items-start">
       <bdi dir="ltr" className="sx-n">
@@ -296,7 +305,7 @@ export function SerialsPage() {
     {
       key: 'in',
       header: 'الاستلام',
-      cell: (r) => <DocCell number={r.purchaseNumber} date={r.receivedOn} />,
+      cell: (r) => <DocCell number={r.purchaseNumber} date={r.receivedOn} missing="أُضيف يدوياً" />,
     },
     {
       key: 'out',
@@ -481,39 +490,43 @@ export function SerialsPage() {
               <span className="sx-wait">{q.trim() ? 'ما يطابق بحثك.' : 'آخر ما استُلم أولاً.'}</span>
             )}
           </div>
-          <ul className="sx-cards sm:hidden" aria-label="الأجهزة بأرقامها">
-            {(items ?? []).map((r) => (
-              <li key={r.serial} className="ix-icard">
-                <bdi dir="ltr" className="n sx-n">
-                  {r.serial}
-                </bdi>
-                <span className="v">{statusBadge(r)}</span>
-                <span className="q">{r.name}</span>
-                <span className="q" style={{ gridColumn: '1 / -1' }}>
-                  {r.purchaseNumber ? (
-                    <span className="flex items-center gap-1">
-                      استُلم <DocCell number={r.purchaseNumber} date={r.receivedOn} />
-                    </span>
-                  ) : null}
-                  {r.saleNumber ? (
-                    <span className="flex items-center gap-1">
-                      بيع <DocCell number={r.saleNumber} date={r.soldOn} />
-                    </span>
-                  ) : null}
-                  {r.warrantyUntil ? <span>الكفالة حتى {dayText(r.warrantyUntil, digits)}</span> : null}
-                </span>
-                {r.flags.length > 0 ? <span className="c">{flagsCell(r)}</span> : null}
-                {fixCell(r) ? <div className="c">{fixCell(r)}</div> : null}
-              </li>
-            ))}
-            {items && items.length === 0 ? (
-              <li className="sx-card ix-empty">
-                <BarcodeIcon size={32} />
-                <h3>لا رقم مطابق.</h3>
-                <p>الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع.</p>
-              </li>
-            ) : null}
-          </ul>
+          <div className="sm:hidden">
+            <ul className="sx-cards" aria-label="الأجهزة بأرقامها">
+              {(items ?? []).map((r) => (
+                <li key={r.serial} className="ix-icard">
+                  <bdi dir="ltr" className="n sx-n">
+                    {r.serial}
+                  </bdi>
+                  <span className="v">{statusBadge(r)}</span>
+                  <span className="q">{r.name}</span>
+                  <span className="q" style={{ gridColumn: '1 / -1' }}>
+                    {r.purchaseNumber ? (
+                      <span className="flex items-center gap-1">
+                        استُلم <DocCell number={r.purchaseNumber} date={r.receivedOn} />
+                      </span>
+                    ) : (
+                      <span className="sx-sub">أُضيف يدوياً</span>
+                    )}
+                    {r.saleNumber ? (
+                      <span className="flex items-center gap-1">
+                        بيع <DocCell number={r.saleNumber} date={r.soldOn} />
+                      </span>
+                    ) : null}
+                    {r.warrantyUntil ? <span>الكفالة حتى {dayText(r.warrantyUntil, digits)}</span> : null}
+                  </span>
+                  {r.flags.length > 0 ? <span className="c">{flagsCell(r)}</span> : null}
+                  {fixCell(r) ? <div className="c">{fixCell(r)}</div> : null}
+                </li>
+              ))}
+              {items && items.length === 0 ? (
+                <li className="sx-card ix-empty">
+                  <BarcodeIcon size={32} />
+                  <h3>لا رقم مطابق.</h3>
+                  <p>الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع.</p>
+                </li>
+              ) : null}
+            </ul>
+          </div>
           <div className="hidden sm:block">
             <SxTable
               caption="الأجهزة بأرقامها"

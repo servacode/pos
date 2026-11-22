@@ -316,14 +316,21 @@ export function ExpiryPage() {
           {r.name}
           {/* On a phone the batch, its day and its branch ride under the name */}
           {r.batchNo || r.expiryDate ? (
-            <span className="sx-subline sm:hidden">
-              {r.batchNo ? (
-                <bdi dir="ltr" className="sx-n">
-                  {r.batchNo}
-                </bdi>
-              ) : null}
-              {r.expiryDate ? <bdi className="sx-n"> · {dayText(r.expiryDate, digits)}</bdi> : null}
-            </span>
+            <div className="sm:hidden">
+              <span className="sx-subline">
+                {r.batchNo ? (
+                  <bdi dir="ltr" className="sx-n">
+                    {r.batchNo}
+                  </bdi>
+                ) : null}
+                {r.batchNo && r.expiryDate ? ' · ' : null}
+                {r.expiryDate ? (
+                  <bdi dir="ltr" className="sx-n">
+                    {dayText(r.expiryDate, digits)}
+                  </bdi>
+                ) : null}
+              </span>
+            </div>
           ) : null}
         </>
       ),

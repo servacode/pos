@@ -364,7 +364,8 @@ describe('HomePage', () => {
       expect(await screen.findByText(/منها قسائم مستردّة/)).toBeInTheDocument();
       const recalled = await screen.findByRole('link', { name: /دفعة موقوفة عن البيع/ });
       // The row says which batch it is
-      expect(recalled).toHaveTextContent('B7 · مضاد: دفعة موقوفة عن البيع');
+      expect(recalled).toHaveTextContent('دفعة موقوفة عن البيع');
+      expect(recalled).toHaveTextContent('B7 · مضاد');
       expect(recalled).toHaveAttribute('href', '/recall');
       expect(recalled.className).toContain('bg-danger-soft');
     });
@@ -393,9 +394,9 @@ describe('HomePage', () => {
       });
       renderApp('/');
 
-      const expired = await screen.findByRole('link', { name: 'Ba · مضاد a: دفعة منتهية الصلاحية' });
+      const expired = await screen.findByRole('link', { name: /دفعة منتهية الصلاحية\s*Ba · مضاد a/ });
       expect(expired.className).toContain('bg-danger-soft');
-      const near = await screen.findByRole('link', { name: /Bb · مضاد b: دفعة يقترب انتهاؤها/ });
+      const near = await screen.findByRole('link', { name: /دفعة يقترب انتهاؤها\s*Bb · مضاد b/ });
       expect(near.className).toContain('bg-warning-soft');
     });
 

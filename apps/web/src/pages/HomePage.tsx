@@ -27,6 +27,7 @@ import {
   ExpandIcon,
   formatQuantity,
   GiftIcon,
+  SerialIcon,
   IconChip,
   InboxIcon,
   Money,
@@ -56,7 +57,8 @@ import { getSummary as getInstalmentSummary } from '../admin/installments/api';
 import { dueSoon } from '../admin/cheques/ChequesPage';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
 import { ContractAttention, seesContractAttention } from './ContractAttention';
-import { SerialAttention, seesSerialAttention } from './SerialAttention';
+import { seesSerialAttention } from './SerialAttention';
+import { getSerialDrift } from '../admin/purchases/api';
 import { getDayReport, getDayTotals } from '../admin/reports/api';
 import {
   EARLY_HOUR,
@@ -984,6 +986,8 @@ interface WaitingArgs {
   noPhoto?: number;
   /** Pieces that ran low in all, when the list holds only the first 100 of them */
   lowTotal?: number;
+  /** Products whose serial numbers do not match their stock (a row of its own); `+` when the list was cut */
+  drift?: { count: number; more: boolean };
 }
 
 /** What «ما ينتظرك» counts, shared by its list and by the tab that carries its total */
@@ -996,6 +1000,7 @@ function waitingFigures({
   seesStock,
   seesExpiry,
   noPhoto = 0,
+  drift,
 }: WaitingArgs) {
   const { newOrders: online, cancelRequests, holds } = splitPending(orders.data?.items ?? []);
   const accepted = toSell?.data?.items.length ?? 0;
@@ -1019,6 +1024,7 @@ function waitingFigures({
     stock.length +
     (expiring > 0 ? 1 : 0) +
     (expired > 0 ? 1 : 0) +
+    ((drift?.count ?? 0) > 0 ? 1 : 0) +
     (recalled > 0 ? 1 : 0);
   return {
     holds,
@@ -1031,6 +1037,8 @@ function waitingFigures({
     recalled,
     loading,
     noPhoto,
+    drift: drift?.count ?? 0,
+    driftMore: drift?.more ?? false,
     total,
     // What the list shows, the grey «بلا صورة» row too: the tab's badge and «عرض الكل» say one number
     listed: total + (noPhoto > 0 ? 1 : 0),
@@ -1038,11 +1046,28 @@ function waitingFigures({
   };
 }
 
-/** «SYR-C · حقنة 5 مل: دفعة موقوفة…»: the row says which batch it is (the first two, then «…») */
-function batchNamed(rows: { name: string; batchNo: string | null }[], text: string): string {
-  const names = rows.slice(0, 2).map((row) => (row.batchNo ? `${row.batchNo} · ${row.name}` : row.name));
-  if (names.length === 0) return text;
-  return `${names.join('، ')}${rows.length > 2 ? '…' : ''}: ${text}`;
+/**
+ * «دفعة منتهية الصلاحية» on its own line, then the first batch under it («SYR-C · حقنة 5 مل» and «و2 أخرى»): the
+ * sentence reads straight through, and the Latin batch number is isolated so it cannot scatter the Arabic around it.
+ */
+function batchNamed(rows: { name: string; batchNo: string | null }[], text: string): ReactNode {
+  const [first] = rows;
+  if (!first) return text;
+  return (
+    <>
+      <span className="block">{text}</span>
+      <span className="block text-sm font-normal opacity-90">
+        {first.batchNo ? (
+          <>
+            <bdi dir="ltr">{first.batchNo}</bdi> · {first.name}
+          </>
+        ) : (
+          first.name
+        )}
+        {rows.length > 1 ? ` و${rows.length - 1} أخرى` : ''}
+      </span>
+    </>
+  );
 }
 
 /** How many rows «تحتاج انتباهك» shows before «عرض الكل» */
@@ -1062,6 +1087,8 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
     loading,
     noPhoto,
     empty,
+    drift,
+    driftMore,
   } = waitingFigures(args);
   const batches = args.expiry.data?.items ?? [];
   const recalledRows = batches.filter((row) => row.blocked);
@@ -1179,12 +1206,23 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
       <WaitingRow
         key="expiring"
         to="/expiry"
-        count={expiring}
+        count={null}
         tone="warning"
         icon={<CalendarIcon />}
         action="راجع الدفعات"
       >
-        {batchNamed(expiringRows, expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها')}
+        {batchNamed(
+          expiringRows,
+          expiring === 1 ? 'دفعة يقترب انتهاؤها' : `${expiring} دفعات تقترب من الانتهاء`,
+        )}
+      </WaitingRow>,
+    );
+  if (drift > 0)
+    rows.push(
+      <WaitingRow key="drift" to="/serials" count={null} tone="warning" icon={<SerialIcon />} action="راجعها">
+        {drift === 1
+          ? 'صنف أرقامه التسلسلية لا تطابق المخزون'
+          : `${driftMore ? `${drift}+` : drift} أصناف أرقامها التسلسلية لا تطابق المخزون`}
       </WaitingRow>,
     );
   if (noPhoto > 0)
@@ -1772,6 +1810,7 @@ export function HomePage() {
     () => getSalesBreakdown({ from: shiftDay(today, 6), to: today, by: 'product', branchId: scope }),
     { cache: 'home' },
   );
+  const serialDrift = useReport(seesSerialAttention(me) ? 'home:serial-drift' : null, getSerialDrift);
   const expiry = useReport(seesExpiry ? `home:expiry${scopeKey}` : null, () => listExpiry(30, false, scope), {
     cache: 'home',
   });
@@ -1871,6 +1910,7 @@ export function HomePage() {
     seesExpiry,
     noPhoto,
     lowTotal: merch.data?.total ?? 0,
+    drift: { count: serialDrift.data?.items.length ?? 0, more: serialDrift.data?.truncated ?? false },
   };
   // A store that has never sold and has nothing waiting gets the way in first, not an empty «تحتاج انتباهك»
   const quietFresh =
@@ -2048,7 +2088,6 @@ export function HomePage() {
                 />
               ) : null}
               {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
-              {seesSerialAttention(me) ? <SerialAttention me={me} /> : null}
             </div>
             {seesSales && !brandNew && !thinChart ? dayPanels : null}
           </div>

@@ -290,7 +290,7 @@ describe('«أسباب التالف / الهدر» in the till settings', () => 
     const { user } = renderApp('/settings');
     const form = await screen.findByRole('form', { name: 'الصندوق' });
     const box = within(form).getByLabelText('أسباب التالف / الهدر');
-    expect(box).toHaveValue('انتهت صلاحيتو، انكسر، خربان، عينة');
+    expect(box).toHaveValue('انتهت صلاحيته، انكسر، تالف، عينة');
     await user.clear(box);
     await user.type(box, 'سرقة، تنظيف');
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));

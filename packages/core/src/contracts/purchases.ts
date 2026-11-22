@@ -479,7 +479,7 @@ export const stocktakeInput = z.object({
         batchNo: optionalText(40, 'رقم الدفعة طويل'),
         expiryDate: isoDateSchema.nullable().optional(),
         /**
-         * Round 38: the line is a waste («تالف / هدر») and this is why («انتهت صلاحيتو»…). It only labels the
+         * Round 38: the line is a waste («تالف / هدر») and this is why («انتهت صلاحيته»…). It only labels the
          * line for the waste report; the posting is the count's own.
          */
         wasteReason: optionalText(40, 'السبب طويل'),
@@ -509,7 +509,7 @@ export interface StocktakeLineRow {
 }
 
 /** The reasons a store starts with at the till's «تالف / هدر» until the owner writes its own */
-export const DEFAULT_WASTE_REASONS: readonly string[] = ['انتهت صلاحيتو', 'انكسر', 'خربان', 'عينة'];
+export const DEFAULT_WASTE_REASONS: readonly string[] = ['انتهت صلاحيته', 'انكسر', 'تالف', 'عينة'];
 
 /** The reasons the till offers: the store's own list, or the defaults when it never set one */
 export function wasteReasonsOf(stored: readonly string[] | null | undefined): string[] {

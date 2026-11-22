@@ -37,6 +37,13 @@
 /apps/api/src/services/serials.ts @servacode
 /apps/api/src/services/sales-orders.ts @servacode
 /apps/api/src/services/purchases.ts @servacode
+/apps/api/src/services/purchases-common.ts @servacode
+/apps/api/src/services/purchases-suppliers.ts @servacode
+/apps/api/src/services/purchases-create.ts @servacode
+/apps/api/src/services/purchases-payments.ts @servacode
+/apps/api/src/services/purchases-stock.ts @servacode
+/apps/api/src/services/purchases-transfers.ts @servacode
+/apps/api/src/services/purchases-returns.ts @servacode
 /apps/api/src/services/purchase-order-receipt.ts @servacode
 /apps/api/src/services/purchase-usd.ts @servacode
 

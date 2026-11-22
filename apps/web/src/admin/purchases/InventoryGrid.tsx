@@ -135,7 +135,7 @@ export function InventoryGrid({
             </h3>
             {open ? (
               <div className="relative overflow-x-auto">
-                <table className="border-separate border-spacing-1.5">
+                <table className="ix-gridtable border-separate border-spacing-1.5">
                   <thead>
                     <tr>
                       <th className="pe-3 text-start text-xs font-semibold whitespace-nowrap text-ink-subtle">

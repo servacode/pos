@@ -1,75 +1,45 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import {
-  wasteReasonsOf,
-  type InventoryResponse,
-  type InventoryRow,
-  type ProfitReport,
-  type StocktakeDetail,
-  type StocktakeListRow,
+import type {
+  InventoryResponse,
+  InventoryRow,
+  ProfitReport,
+  StocktakeDetail,
+  StocktakeListRow,
 } from '@serva/core';
-import {
-  Alert,
-  AlertCircleIcon,
-  BarcodeIcon,
-  Button,
-  CheckCircleIcon,
-  Dialog,
-  DeleteIcon,
-  displayNumber,
-  formatQuantity,
-  ListIcon,
-  SearchField,
-  SegmentedControl,
-  Select,
-  StockIcon,
-  TextField,
-  useDigits,
-} from '@serva/ui';
+import { Alert, BarcodeIcon, Button, DeleteIcon, ListIcon, SegmentedControl, useDigits } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { errorMessage } from '../../lib/api';
-import { sortByOptions } from '../../lib/optionOrder';
 import { useIsPhone } from '../../lib/useIsPhone';
-import { countStock, negativeNote } from '../../lib/stockCounts';
-import { lookupBarcode } from '../catalog/api';
+import { countStock } from '../../lib/stockCounts';
 import { downloadCsv } from '../exportCsv';
-import { Paged } from '../pager';
 import { ReportScreen } from '../reports/parts';
-import {
-  Amt,
-  DownloadGlyph,
-  PageTop,
-  Panel,
-  SalesPage,
-  StatusPill,
-  SxTable,
-  type SxColumn,
-} from '../sales/ui';
-import { soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
+import { useReport } from '../reports/useReport';
+import { seesSerialAttention } from '../../pages/SerialAttention';
+import { Amt, PageTop, SalesPage } from '../sales/ui';
 import {
   createStocktake,
   getInventory,
+  getSerialDrift,
   getProfit,
   listStocktakes,
   newDocumentId,
   qtyOf,
   storeToday,
 } from './api';
+import { InventoryCounting } from './InventoryCounting';
+import { InventoryFilters } from './InventoryFilters';
 import { InventoryGrid } from './InventoryGrid';
-import { SerialDriftChip } from './SerialDriftChip';
-import { SerialEntry, SerialPick } from './SerialPick';
-import { countProblem, differenceWord, reviewCount } from './stocktakeReview';
+import { InventoryHero } from './InventoryHero';
+import { InventoryList } from './InventoryList';
+import { InventoryPast } from './InventoryPast';
+import { InventoryReview } from './InventoryReview';
+import { InventoryWasteDialog } from './InventoryWasteDialog';
+import { belowReorder, safeCell, type Sort, type StockFilter } from './inventoryShared';
+import { countProblem, reviewCount } from './stocktakeReview';
+import { useInventoryScan } from './useInventoryScan';
+import { useInventoryWaste } from './useInventoryWaste';
 import './inventory.css';
-
-/** A name that starts with = + - @ would be read by Excel as a formula: a quote in front keeps it text */
-const safeCell = (text: string) => (/^[=+\-@]/.test(text) ? `'${text}` : text);
-
-/** The piece has a reorder level and the shelf is at or under it */
-const belowReorder = (r: InventoryRow) =>
-  r.minStockQty !== null && r.minStockQty !== undefined && r.minStockQty > 0 && r.qty <= r.minStockQty;
-
-type StockFilter = 'all' | 'low' | 'nocost' | 'reorder';
-type Sort = 'name' | 'value' | 'qty';
 
 /**
  * «المخزون والأرباح» (10 › الكلفة والربح): what each item's stock is worth at its average cost, the
@@ -97,31 +67,13 @@ export function InventoryPage() {
   const [countBranch, setCountBranch] = useState('');
   const [countId, setCountId] = useState(newDocumentId);
   const [result, setResult] = useState<StocktakeDetail | null>(null);
-  // Which serial numbers left, for a tracked product that came up short (round 60): by item, in a count and in a waste
+  // Which serial numbers left, for a tracked product that came up short (round 60): by item, in a count
   const [countSerials, setCountSerials] = useState<Record<string, string[]>>({});
-  const [wasteSerials, setWasteSerials] = useState<string[]>([]);
   // The page shows the stock, or the counts already made (a tab of its own, so the list is not a very long page)
   const [part, setPart] = useState<'stock' | 'counts'>('stock');
-  // The month's profit is open on a wide screen and folded on a phone (the list is what the phone came for)
-  const [profitOpen, setProfitOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   // The count is looked over (counted, expected, difference) before it is recorded
   const [reviewing, setReviewing] = useState(false);
-  // «سجّل هدراً» (03 › الخضار والمخابز: تسجيل الهدر): what spoiled, out of stock at its cost
-  const [wasteKey, setWasteKey] = useState('');
-  const [wasteQty, setWasteQty] = useState('');
-  // Why it was thrown away (round 38): the store's reasons, kept on the count's line for the waste report
-  const [wasteWhy, setWasteWhy] = useState('');
-  // The picker narrows by typing (a store has hundreds of pieces); the write-off is confirmed first
-  const [wasteQuery, setWasteQuery] = useState('');
-  const [wasteAsk, setWasteAsk] = useState(false);
-  const [wasteId, setWasteId] = useState(newDocumentId);
-  // What went wrong with the waste: told inside its window, not behind it
-  const [wasteError, setWasteError] = useState<string | null>(null);
-  // Counting by scanning (03 › الألبسة: الجرد بالمسح): each scan adds one piece (or its pack)
-  const [scan, setScan] = useState('');
-  const [scanned, setScanned] = useState<{ variantId: string; name: string } | null>(null);
-  const [scanError, setScanError] = useState<string | null>(null);
   // What the table shows: a search by name, one branch, a filter and an order
   const [query, setQuery] = useState('');
   const [branchShown, setBranchShown] = useState('');
@@ -134,8 +86,6 @@ export function InventoryPage() {
   const [past, setPast] = useState<StocktakeListRow[] | null>(null);
   const [pastNext, setPastNext] = useState<string | null>(null);
   const [pastError, setPastError] = useState<string | null>(null);
-  // «سجّل هدراً» opens from a button, in a window of its own
-  const [wasteOpen, setWasteOpen] = useState(false);
   // «?count=id,id» (the home page's «ناقص» chips): the count opens on these items only
   const [params] = useSearchParams();
   const [only, setOnly] = useState<ReadonlySet<string> | null>(() => {
@@ -173,6 +123,9 @@ export function InventoryPage() {
 
   const base = stock?.baseCurrency ?? me.settings.baseCurrency;
   const items = useMemo(() => stock?.items ?? [], [stock]);
+  // Products whose serial numbers do not match their stock wear a mark on their own row
+  const drift = useReport(seesSerialAttention(me) ? 'stock:serial-drift' : null, getSerialDrift);
+  const driftIds = useMemo(() => new Set((drift.data?.items ?? []).map((d) => d.variantId)), [drift.data]);
   // The branches the list really has (a van, a branch the account no longer lists), named by the server
   const branchList = useMemo(() => {
     const seen = new Map<string, { id: string; name: string; kind: string }>();
@@ -291,42 +244,7 @@ export function InventoryPage() {
     );
   }
 
-  async function addScan() {
-    const code = scan.trim();
-    setScan('');
-    if (!code) return;
-    setScanError(null);
-    try {
-      const hit = await lookupBarcode(code);
-      const row = countItems.find((r) => r.variantId === hit.variantId);
-      if (!row) {
-        const elsewhere = items.some((r) => r.variantId === hit.variantId);
-        setScanned(null);
-        setScanError(
-          elsewhere
-            ? `«${code}» ليس في مخزون هذا الفرع. اختر فرعه من الجرد أولاً.`
-            : `لا صنف بالباركود ${code}.`,
-        );
-        return;
-      }
-      setCounts((c) => ({
-        ...c,
-        [hit.variantId]: String(((qtyOf(c[hit.variantId] ?? '') ?? 0) + hit.barcode.packQty) / 1000),
-      }));
-      setScanned({ variantId: hit.variantId, name: row.name });
-      // The counted row comes into view and flashes once
-      requestAnimationFrame(() => {
-        const el = document.getElementById(`ix-row-${hit.variantId}`);
-        el?.scrollIntoView?.({ block: 'center' });
-        el?.classList.remove('ix-flash');
-        void el?.offsetWidth;
-        el?.classList.add('ix-flash');
-      });
-    } catch {
-      setScanned(null);
-      setScanError(`لا صنف بالباركود ${code}.`);
-    }
-  }
+  const scanning = useInventoryScan(items, countItems, setCounts);
 
   async function saveCount() {
     const lines = Object.entries(counts)
@@ -365,330 +283,25 @@ export function InventoryPage() {
     }
   }
 
-  const wasteRow = items.find((r) => `${r.branchId}:${r.variantId}` === wasteKey);
-  // Pieces of one item keep a fixed branch order: the main branch (the first code) first, the rest by name
-  const branchRank = new Map(
-    [...branchList]
-      .sort(
-        (a, b) =>
-          Number(b.id === firstBranch) - Number(a.id === firstBranch) || a.name.localeCompare(b.name, 'ar'),
-      )
-      .map((b, i) => [b.id, i]),
-  );
-  const byBranch = [...items].sort(
-    (a, b) => (branchRank.get(a.branchId) ?? 0) - (branchRank.get(b.branchId) ?? 0),
-  );
-  const wasteOptions = sortByOptions(byBranch).filter((r) => {
-    const typed = wasteQuery.trim().toLowerCase();
-    return !typed || `${r.branchId}:${r.variantId}` === wasteKey || r.name.toLowerCase().includes(typed);
+  const waste = useInventoryWaste({
+    items,
+    stock,
+    branchList,
+    firstBranch,
+    digits,
+    timeZone,
+    setSaving,
+    setError,
+    setResult,
+    load,
+    loadPast,
   });
-  /** What is wrong with the typed waste, or null: nothing leaves that is not on the shelf */
-  function wasteProblem(): string | null {
-    const qty = qtyOf(wasteQty);
-    if (!wasteRow || !qty || qty <= 0) return 'اختر الصنف واكتب كمية الهدر.';
-    if (wasteRow.qty <= 0) return 'لا مخزون لهذا الصنف ليخرج منه هدر.';
-    // A piece item is counted in whole pieces; only a weighed one takes a fraction
-    if (wasteRow.allowsFraction === false && qty % 1000 !== 0) {
-      return 'هذا الصنف يُعدّ بالقطعة: اكتب عدداً صحيحاً.';
-    }
-    if (qty > wasteRow.qty) {
-      return `الموجود من هذا الصنف ${formatQuantity(wasteRow.qty, digits)} فقط. اكتب كمية أقل.`;
-    }
-    if (wasteRow.tracksSerial && wasteSerials.length !== Math.ceil(qty / 1000)) {
-      return `هذا الصنف له أرقام تسلسلية: اختر ${Math.ceil(qty / 1000)} رقماً للقطع التالفة.`;
-    }
-    return null;
-  }
-
-  function askWaste() {
-    const problem = wasteProblem();
-    setWasteError(problem);
-    setWasteAsk(!problem);
-  }
-
-  async function saveWaste() {
-    const row = wasteRow;
-    const qty = qtyOf(wasteQty);
-    setWasteAsk(false);
-    const problem = wasteProblem();
-    if (problem || !row || !qty) {
-      setWasteError(problem);
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    setWasteError(null);
-    try {
-      setResult(
-        await createStocktake({
-          id: wasteId,
-          branchId: row.branchId,
-          date: storeToday(timeZone),
-          // The write-off is worked out from the list the owner is looking at: what moved after it is counted
-          ...(stock?.asOf ? { countedAt: stock.asOf } : {}),
-          note: 'هدر',
-          lines: [
-            {
-              variantId: row.variantId,
-              countedQty: Math.max(0, row.qty - qty),
-              wasteReason: wasteWhy || wasteReasonsOf(stock?.wasteReasons)[0]!,
-              ...(row.tracksSerial && wasteSerials.length > 0 ? { serials: wasteSerials } : {}),
-            },
-          ],
-        }),
-      );
-      setWasteKey('');
-      setWasteSerials([]);
-      setWasteQty('');
-      setWasteQuery('');
-      setWasteId(newDocumentId());
-      setWasteOpen(false);
-      load();
-      loadPast(null);
-    } catch (e) {
-      setWasteError(errorMessage(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const showWaste = canCount && !counting && items.length > 0;
-  const costOfSales = profit?.costOfSalesMinor ?? 0;
-  const margin =
-    profit && profit.netSalesMinor > 0 && costOfSales > 0
-      ? (profit.grossProfitMinor / profit.netSalesMinor) * 100
-      : null;
 
-  // The month's gross profit sits inside the figures card: one line, and the details open under it
-  const profitBlock = profit ? (
-    <div className="ix-profit">
-      <p className="note">
-        ربح هذا الشهر (مجمل): <Amt minor={profit.grossProfitMinor} currency={base} className="font-bold" />{' '}
-        <button
-          type="button"
-          className="sx-linkbtn"
-          aria-expanded={profitOpen}
-          onClick={() => setProfitOpen((now) => !now)}
-        >
-          {profitOpen ? 'أخفِ التفاصيل' : 'التفاصيل'}
-        </button>
-      </p>
-      {profitOpen ? (
-        <>
-          <p className="sx-wait">من الدفاتر، من أول الشهر حتى اليوم، بعد المرتجع وبدون الضريبة.</p>
-          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Figure term="صافي المبيعات هذا الشهر">
-              <Amt minor={profit.netSalesMinor} currency={base} />
-            </Figure>
-            <Figure term="كلفة المبيعات">
-              <Amt minor={profit.costOfSalesMinor} currency={base} />
-            </Figure>
-            <Figure term="مجمل الربح">
-              <Amt minor={profit.grossProfitMinor} currency={base} />
-            </Figure>
-          </dl>
-          {margin !== null ? (
-            <p className="sx-note tight">
-              هامش <bdi className="sx-n font-semibold">{displayNumber(margin.toFixed(1), digits)}%</bdi> من
-              صافي المبيعات
-            </p>
-          ) : profit.netSalesMinor > 0 && costOfSales === 0 ? (
-            <p className="ix-warn" role="note" style={{ marginTop: 12 }}>
-              <AlertCircleIcon size={20} />
-              الكلفة غير مسجلة لهذه المبيعات: الهامش غير دقيق، فلا نعرضه.
-            </p>
-          ) : null}
-          {profit.stockLossMinor ? (
-            <p className="sx-note tight">
-              {profit.stockLossMinor > 0 ? 'تلف وفقد' : 'زيادة جرد'}:{' '}
-              <Amt minor={Math.abs(profit.stockLossMinor)} currency={base} />
-            </p>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  ) : null;
-
-  const stateOf = (r: InventoryRow) =>
-    r.qty < 0 ? (
-      <StatusPill kind="danger">سالب</StatusPill>
-    ) : r.qty === 0 ? (
-      <StatusPill kind="danger">نفد</StatusPill>
-    ) : null;
-  const qtyCell = (r: InventoryRow) => (
-    <span className="inline-flex items-center gap-2">
-      {stateOf(r)}
-      <span className="flex flex-col items-end">
-        <bdi dir="ltr" className="sx-n">
-          {formatQuantity(r.qty, digits)}
-        </bdi>
-        {r.sellableQty !== undefined && r.qty > 0 && r.sellableQty < r.qty ? (
-          <span className="sx-subline">
-            متوفر <bdi className="sx-n">{formatQuantity(r.sellableQty, digits)}</bdi>
-          </span>
-        ) : null}
-      </span>
-    </span>
-  );
-  const unitCell = (r: InventoryRow) =>
-    r.unitCostMinor === null || r.unitCostMinor === 0 ? (
-      <span className="sx-sub" title="الكلفة غير مسجلة">
-        —
-      </span>
-    ) : (
-      <Amt minor={Math.round(r.unitCostMinor)} currency={base} className="sx-mute" />
-    );
-  const countInput = (r: InventoryRow) => (
-    <TextField
-      label={`المعدود من ${r.name}`}
-      hideLabel
-      inputMode="decimal"
-      dir="ltr"
-      placeholder="—"
-      value={counts[r.variantId] ?? ''}
-      onChange={(e) => setCounts((c) => ({ ...c, [r.variantId]: e.target.value }))}
-      error={countProblem(counts[r.variantId] ?? '') ?? undefined}
-      className="ix-counted"
-      inputClassName="num"
-    />
-  );
-
-  const columns: SxColumn<InventoryRow>[] = [
-    ...(counting
-      ? [
-          {
-            key: 'counted',
-            header: 'المعدود',
-            cell: (r: InventoryRow) => <span id={`ix-row-${r.variantId}`}>{countInput(r)}</span>,
-          } satisfies SxColumn<InventoryRow>,
-        ]
-      : []),
-    {
-      key: 'name',
-      header: 'الصنف',
-      lead: true,
-      cell: (r) => (
-        <>
-          {r.name}
-          {manyBranches ? <span className="sx-subline">{branchLabel(r)}</span> : null}
-        </>
-      ),
-    },
-    { key: 'qty', header: 'الكمية', numeric: true, cell: qtyCell },
-    { key: 'unit', header: 'كلفة الوحدة', numeric: true, cell: unitCell },
-    ...(counting
-      ? []
-      : [
-          {
-            key: 'reorder',
-            header: 'حد الطلب',
-            numeric: true,
-            hideBelowLg: true,
-            cell: (r: InventoryRow) =>
-              r.minStockQty ? (
-                <span className="inline-flex items-center gap-2">
-                  {belowReorder(r) ? <StatusPill kind="warn">تحت الحد</StatusPill> : null}
-                  <bdi dir="ltr" className="sx-n">
-                    {formatQuantity(r.minStockQty, digits)}
-                  </bdi>
-                </span>
-              ) : (
-                <span className="sx-sub">—</span>
-              ),
-          } satisfies SxColumn<InventoryRow>,
-        ]),
-    {
-      key: 'value',
-      header: 'القيمة',
-      numeric: true,
-      strong: true,
-      cell: (r) => <Amt minor={r.valueMinor} currency={base} />,
-    },
-  ];
-
-  const reviewColumns: SxColumn<ReturnType<typeof reviewCount>[number]>[] = [
-    { key: 'name', header: 'الصنف', lead: true, cell: (l) => l.name },
-    {
-      key: 'counted',
-      header: 'المعدود',
-      numeric: true,
-      cell: (l) => <bdi className="sx-n">{formatQuantity(l.countedQty, digits)}</bdi>,
-    },
-    {
-      key: 'expected',
-      header: 'المتوقع',
-      numeric: true,
-      cell: (l) => <bdi className="sx-n">{formatQuantity(l.expectedQty, digits)}</bdi>,
-    },
-    {
-      key: 'diff',
-      header: 'الفرق',
-      numeric: true,
-      cell: (l) => (
-        <span className="inline-flex items-center gap-2">
-          <StatusPill kind={l.diffQty < 0 ? 'danger' : l.diffQty > 0 ? 'warn' : 'ok'}>
-            {differenceWord(l.diffQty)}
-          </StatusPill>
-          <bdi dir="ltr" className="sx-n">
-            {formatQuantity(Math.abs(l.diffQty), digits)}
-          </bdi>
-        </span>
-      ),
-    },
-    {
-      key: 'value',
-      header: 'قيمة الفرق',
-      numeric: true,
-      strong: true,
-      cell: (l) => <Amt minor={Math.abs(l.diffValueMinor)} currency={base} />,
-    },
-  ];
-
-  const pastColumns: SxColumn<StocktakeListRow>[] = [
-    {
-      key: 'number',
-      header: 'الرقم',
-      lead: true,
-      cell: (r) => (
-        <bdi dir="ltr" className="sx-n">
-          {r.number}
-        </bdi>
-      ),
-    },
-    { key: 'date', header: 'التاريخ', cell: (r) => <span className="sx-mute sx-n">{r.date}</span> },
-    {
-      key: 'kind',
-      header: 'النوع',
-      cell: (r) => (
-        <StatusPill kind={r.kind === 'count' ? 'ok' : 'warn'}>
-          {r.kind === 'waste' ? 'هدر' : r.kind === 'shortage' ? 'نقص تحويل' : 'جرد'}
-        </StatusPill>
-      ),
-    },
-    { key: 'branch', header: 'الفرع', hideBelowLg: true, cell: (r) => r.branchName },
-    { key: 'by', header: 'بواسطة', hideBelowLg: true, cell: (r) => r.by || '—' },
-    {
-      key: 'items',
-      header: 'الأصناف',
-      numeric: true,
-      cell: (r) => <span className="sx-n">{r.items.toLocaleString('en-US')}</span>,
-    },
-    {
-      key: 'diff',
-      header: 'الفرق بالقيمة',
-      numeric: true,
-      strong: true,
-      cell: (r) =>
-        r.diffValueMinor === 0 ? (
-          <span className="sx-sub">مطابق</span>
-        ) : (
-          <Amt minor={r.diffValueMinor} currency={base} neg={r.diffValueMinor < 0} />
-        ),
-    },
-  ];
-
-  const countedOf = (list: readonly InventoryRow[]) =>
-    list.filter((r) => qtyOf(counts[r.variantId] ?? '') !== null).length;
+  const showList = (next: StockFilter) => {
+    setFilter(next);
+    setView('list');
+  };
 
   return (
     <ReportScreen me={me} access={['cost.view']} title="المخزون والأرباح">
@@ -704,14 +317,7 @@ export function InventoryPage() {
             counting ? null : (
               <>
                 {showWaste ? (
-                  <Button
-                    variant="secondary"
-                    icon={<DeleteIcon />}
-                    onClick={() => {
-                      setWasteError(null);
-                      setWasteOpen(true);
-                    }}
-                  >
+                  <Button variant="secondary" icon={<DeleteIcon />} onClick={waste.openWaste}>
                     سجّل هدراً
                   </Button>
                 ) : null}
@@ -769,370 +375,89 @@ export function InventoryPage() {
           />
         ) : null}
         {counting ? (
-          <>
-            <Panel title="العدّ بالمسح">
-              <p className="sx-wait" style={{ marginBottom: 12 }}>
-                امسح كل قطعة على الرف بقارئ الباركود فتُعدّ وحدها، أو اكتب ما عددته لكل صنف في الجدول. ما
-                تتركه فارغاً لا يُغيَّر.
-              </p>
-              <form
-                aria-label="العدّ بالمسح"
-                className="flex flex-wrap items-end gap-3"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void addScan();
-                }}
-              >
-                {manyBranches ? (
-                  <Select
-                    label="الفرع الذي تعدّه"
-                    value={countBranch}
-                    disabled={countedNumber > 0}
-                    onChange={(e) => setCountBranch(e.target.value)}
-                    className="w-full sm:w-56"
-                    hint={countedNumber > 0 ? 'ألغِ الجرد لتغيير الفرع.' : undefined}
-                  >
-                    {branchList.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.kind === 'van' ? `${b.name} (مندوب)` : b.name}
-                      </option>
-                    ))}
-                  </Select>
-                ) : null}
-                <TextField
-                  label="امسح الباركود"
-                  dir="ltr"
-                  autoFocus
-                  autoComplete="off"
-                  value={scan}
-                  onChange={(e) => setScan(e.target.value.slice(0, 40))}
-                  className="w-full sm:w-72"
-                  inputClassName="num"
-                  startAdornment={<BarcodeIcon className="ms-3" />}
-                />
-                {scanned ? (
-                  <p role="status" className="sx-st ok" style={{ fontSize: 14 }}>
-                    <CheckCircleIcon />
-                    {scanned.name}: <bdi className="num">{counts[scanned.variantId] ?? ''}</bdi>
-                  </p>
-                ) : null}
-                {scanError ? (
-                  <p className="sx-st fill danger" style={{ fontSize: 14 }}>
-                    <AlertCircleIcon />
-                    {scanError}
-                  </p>
-                ) : null}
-              </form>
-            </Panel>
-            <div className="ix-countbar" role="group" aria-label="تقدّم الجرد">
-              <span className="p">
-                عُدّ <bdi className="sx-n">{countedOf(countItems)}</bdi> من{' '}
-                <bdi className="sx-n">{countItems.length}</bdi> صنفاً
-                {manyBranches ? ` في ${branchList.find((b) => b.id === countBranch)?.name ?? ''}` : ''}
-              </span>
-              {countedNumber === 0 ? (
-                <span className="h">اعدّ صنفاً واحداً على الأقل ليُفتح «راجع الجرد».</span>
-              ) : null}
-              <span className="ix-acts">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setCounting(false);
-                    setReviewing(false);
-                    setCounts({});
-                  }}
-                >
-                  إلغاء
-                </Button>
-                {reviewing ? (
-                  <>
-                    <Button variant="secondary" onClick={() => setReviewing(false)}>
-                      ارجع للتعديل
-                    </Button>
-                    <Button
-                      icon={<ListIcon />}
-                      onClick={() => void saveCount()}
-                      loading={saving}
-                      disabled={serialsMissing}
-                    >
-                      سجّل الجرد
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    icon={<ListIcon />}
-                    disabled={countedNumber === 0 || countProblems}
-                    onClick={() => setReviewing(true)}
-                  >
-                    راجع الجرد
-                  </Button>
-                )}
-              </span>
-            </div>
-          </>
+          <InventoryCounting
+            manyBranches={manyBranches}
+            branchList={branchList}
+            countBranch={countBranch}
+            onCountBranch={setCountBranch}
+            countedNumber={countedNumber}
+            countedOfBranch={countItems.filter((r) => qtyOf(counts[r.variantId] ?? '') !== null).length}
+            countTotal={countItems.length}
+            counts={counts}
+            scan={scanning.scan}
+            onScan={scanning.setScan}
+            scanned={scanning.scanned}
+            scanError={scanning.scanError}
+            onAddScan={() => void scanning.addScan()}
+            reviewing={reviewing}
+            setReviewing={setReviewing}
+            saving={saving}
+            serialsMissing={serialsMissing}
+            countProblems={countProblems}
+            onSave={() => void saveCount()}
+            onCancel={() => {
+              setCounting(false);
+              setReviewing(false);
+              setCounts({});
+            }}
+          />
         ) : null}
         {reviewing ? (
-          <Panel title="راجع الجرد قبل التسجيل" flush>
-            <p className="sx-wait" style={{ padding: '0 16px 12px' }}>
-              ما عددته مقابل ما يتوقعه النظام. الزيادة تدخل المخزون والنقص يخرج منه بكلفته.
-            </p>
-            <p className="sx-note tight" style={{ margin: '0 16px 12px', paddingTop: 0, borderTop: 0 }}>
-              {reviewTotal === 0 && reviewShort === 0 ? (
-                'لا فرق في القيمة.'
-              ) : (
-                <span className="flex flex-wrap gap-x-3 gap-y-1">
-                  <span>
-                    نقص <Amt minor={reviewShort} currency={base} className="font-bold" />
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span>
-                    زيادة <Amt minor={reviewOver} currency={base} className="font-bold" />
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span>
-                    الصافي <Amt minor={Math.abs(reviewTotal)} currency={base} className="font-bold" />
-                    {reviewTotal < 0 ? ' نقصاً' : reviewTotal > 0 ? ' زيادة' : ''}
-                  </span>
-                </span>
-              )}
-            </p>
-            <SxTable
-              bare
-              caption="فروق الجرد"
-              columns={reviewColumns}
-              rows={review}
-              rowKey={(l) => l.variantId}
-              empty={
-                <div className="ix-empty">
-                  <StockIcon size={32} />
-                  <h3>لم تعدّ أي صنف.</h3>
-                </div>
-              }
-            />
-            {needSerials.length > 0 || needNew.length > 0 ? (
-              <div className="flex flex-col gap-3" style={{ padding: 16 }}>
-                <p className="sx-wait">
-                  هذه الأصناف لها أرقام تسلسلية: اختر الأرقام التي خرجت من الرف، فتتفق قائمة الأرقام مع الجرد.
-                </p>
-                {needSerials.map((l) => (
-                  <SerialPick
-                    key={l.variantId}
-                    name={l.name}
-                    variantId={l.variantId}
-                    branchId={countBranch}
-                    pieces={Math.ceil(-l.diffQty / 1000)}
-                    picked={countSerials[l.variantId] ?? []}
-                    onChange={(list) => setCountSerials((c) => ({ ...c, [l.variantId]: list }))}
-                  />
-                ))}
-                {needNew.length > 0 ? (
-                  <p className="sx-wait">
-                    وجدت قطعاً أكثر من الدفتر لصنف له أرقام تسلسلية: اكتب رقم كل قطعة زائدة (أو امسحه). رقم
-                    سجّلته ضائعاً سابقاً ثم وجدته يعود إلى المخزون من هنا.
-                  </p>
-                ) : null}
-                {needNew.map((l) => (
-                  <SerialEntry
-                    key={l.variantId}
-                    name={l.name}
-                    pieces={Math.ceil(l.diffQty / 1000)}
-                    picked={countSerials[l.variantId] ?? []}
-                    onChange={(list) => setCountSerials((c) => ({ ...c, [l.variantId]: list }))}
-                  />
-                ))}
-              </div>
-            ) : null}
-          </Panel>
+          <InventoryReview
+            review={review}
+            reviewShort={reviewShort}
+            reviewOver={reviewOver}
+            reviewTotal={reviewTotal}
+            needSerials={needSerials}
+            needNew={needNew}
+            base={base}
+            digits={digits}
+            countBranch={countBranch}
+            countSerials={countSerials}
+            setCountSerials={setCountSerials}
+          />
         ) : null}
         {!counting && part === 'stock' ? (
-          <>
-            <section aria-label="أرقام المخزون" className="sx-card sx-strip ix-hero">
-              <div className="ix-hero-head">
-                <StockDefinitions />
-              </div>
-              <div>
-                <span className="sx-eyebrow">قيمة المخزون بالكلفة</span>
-                <span className="v big">
-                  {stock ? <Amt minor={stock.totalValueMinor} currency={base} /> : '…'}
-                </span>
-                <span className="note">
-                  {stock ? (
-                    <>
-                      {clothing ? 'المقاسات والألوان' : 'عدد الأصناف'}: <span className="sx-n">{kinds}</span>
-                    </>
-                  ) : null}
-                </span>
-              </div>
-              <div>
-                <span className="sx-eyebrow">القطع في المخزون</span>
-                <span className="v sx-n">{stock ? formatQuantity(netPieces, digits) : '…'}</span>
-                <span className="note">
-                  {belowZero > 0 ? 'الصافي بعد طرح ما نزل تحت الصفر' : 'ما على الرفوف في كل الفروع'}
-                </span>
-              </div>
-              <div>
-                <span className="sx-eyebrow">{soldOutLabel(clothing)}</span>
-                <span className={`v sx-n${stock && soldOut > 0 ? ' warn' : ''}`}>
-                  {stock ? soldOut : '…'}
-                </span>
-                <span className="note">
-                  {stock ? (
-                    soldOut ? (
-                      <>
-                        {soldOutSentence(soldOut, soldOutProducts, clothing)}
-                        {belowZero > 0 ? <span className="block">{negativeNote(belowZero)}</span> : null}{' '}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFilter('low');
-                            setView('list');
-                          }}
-                        >
-                          اعرضها
-                        </button>
-                      </>
-                    ) : (
-                      'في كل صنف قطع على الرف'
-                    )
-                  ) : null}
-                </span>
-              </div>
-              <div className="ix-hero-note">
-                <p className="ix-method" role="note">
-                  <b>طريقة التقييم: المتوسط المرجّح للكلفة.</b>
-                  <span>كل شراء جديد يدخل في متوسط الكلفة، وما يُباع أو يخرج يُحسب به.</span>
-                </p>
-                {reorderKinds > 0 ? (
-                  <p className="note">
-                    <bdi className="sx-n">{reorderKinds.toLocaleString('en-US')}</bdi> من الأصناف عند حد الطلب
-                    أو تحته.{' '}
-                    <button
-                      type="button"
-                      className="sx-linkbtn"
-                      onClick={() => {
-                        setFilter('reorder');
-                        setView('list');
-                      }}
-                    >
-                      اعرضها
-                    </button>
-                  </p>
-                ) : null}
-                <SerialDriftChip me={me} />
-                {profitBlock}
-              </div>
-            </section>
-            {noCostKinds > 0 ? (
-              <p className="ix-warn" role="note">
-                <AlertCircleIcon size={20} />
-                <span>
-                  {noCostKinds.toLocaleString('en-US')} من الأصناف لا كلفة مسجّلة لها، فقيمة المخزون والهامش
-                  أقل من الحقيقة.{' '}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFilter('nocost');
-                      setView('list');
-                    }}
-                  >
-                    اعرض الأصناف بلا كلفة
-                  </button>
-                </span>
-              </p>
-            ) : null}
-            {deadPieces > 0 ? (
-              <p className="sx-note tight" style={{ margin: 0, padding: 0, border: 0 }}>
-                منها <bdi className="sx-n">{formatQuantity(deadPieces, digits)}</bdi> قطعة منتهية أو موقوفة لا
-                تُباع.{' '}
-                <Link to="/expiry" className="sx-linkbtn">
-                  اعرضها في الصلاحية
-                </Link>
-              </p>
-            ) : null}
-          </>
+          <InventoryHero
+            me={me}
+            stock={stock}
+            profit={profit}
+            base={base}
+            digits={digits}
+            clothing={clothing}
+            kinds={kinds}
+            netPieces={netPieces}
+            soldOut={soldOut}
+            soldOutProducts={soldOutProducts}
+            belowZero={belowZero}
+            reorderKinds={reorderKinds}
+            noCostKinds={noCostKinds}
+            deadPieces={deadPieces}
+            onShowList={showList}
+          />
         ) : null}
         {part === 'stock' || counting ? (
           <section aria-label="الأصناف في المخزون" className="flex flex-col gap-3">
-            <div className="sx-card sx-filterbar print:hidden">
-              <div className="sx-search">
-                <SearchField label="ابحث عن صنف" value={query} onValueChange={setQuery} />
-              </div>
-              {/* The grid only means something when a product has options; «المقاس واللون» is a clothing store's words */}
-              {!counting && items.some((r) => r.attributes && r.attributes.length > 0) ? (
-                <SegmentedControl
-                  label="طريقة العرض"
-                  value={view}
-                  onValueChange={setView}
-                  options={[
-                    { value: 'list', label: 'قائمة' },
-                    { value: 'grid', label: clothing ? 'شبكة المقاس واللون' : 'شبكة الخيارات' },
-                  ]}
-                />
-              ) : null}
-              {!counting && manyBranches ? (
-                <Select
-                  label="الفرع"
-                  hideLabel
-                  value={branchShown}
-                  onChange={(e) => setBranchShown(e.target.value)}
-                  className="w-full sm:w-48"
-                >
-                  <option value="">كل الفروع</option>
-                  {branchList.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.kind === 'van' ? `${b.name} (مندوب)` : b.name}
-                    </option>
-                  ))}
-                </Select>
-              ) : null}
-              {!counting && view === 'list' ? (
-                <div role="radiogroup" aria-label="التصفية" className="sx-chips scroll">
-                  {(
-                    [
-                      ['all', 'الكل'],
-                      ['low', 'نفد أو سالب'],
-                      ['nocost', 'بلا كلفة'],
-                      ...(reorderKinds > 0 || filter === 'reorder'
-                        ? ([['reorder', 'تحت حد الطلب']] as const)
-                        : []),
-                    ] as const
-                  ).map(([key, text]) => (
-                    <label key={key} className="sx-chip">
-                      <input
-                        type="radio"
-                        name="stock-filter"
-                        checked={filter === key}
-                        onChange={() => setFilter(key)}
-                      />
-                      {text}
-                    </label>
-                  ))}
-                </div>
-              ) : null}
-              {!counting && view === 'list' ? (
-                <Select
-                  label="الترتيب"
-                  hideLabel
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value as Sort)}
-                  className="w-full sm:w-44"
-                >
-                  <option value="name">الترتيب: بالاسم</option>
-                  <option value="value">الأعلى قيمة أولاً</option>
-                  <option value="qty">الأقل كمية أولاً</option>
-                </Select>
-              ) : null}
-              {!counting ? (
-                <Button
-                  variant="ghost"
-                  icon={<DownloadGlyph size={20} />}
-                  disabled={shown.length === 0}
-                  onClick={exportStock}
-                >
-                  صدّر إلى إكسل
-                </Button>
-              ) : null}
-            </div>
+            <InventoryFilters
+              counting={counting}
+              query={query}
+              onQuery={setQuery}
+              hasOptions={items.some((r) => r.attributes && r.attributes.length > 0)}
+              view={view}
+              onView={setView}
+              clothing={clothing}
+              manyBranches={manyBranches}
+              branchShown={branchShown}
+              onBranch={setBranchShown}
+              branchList={branchList}
+              filter={filter}
+              onFilter={setFilter}
+              reorderKinds={reorderKinds}
+              sort={sort}
+              onSort={setSort}
+              exportDisabled={shown.length === 0}
+              onExport={exportStock}
+            />
             {only ? (
               <p className="flex flex-wrap items-center gap-3 text-sm text-ink-muted">
                 <span>تعرض الصفحة الأصناف الناقصة فقط.</span>
@@ -1155,248 +480,46 @@ export function InventoryPage() {
                   : {})}
               />
             ) : (
-              <Paged
-                key={`${filter}|${needle}|${branchShown}|${sort}|${counting}|${countBranch}`}
-                rows={shown}
-                size={counting ? 100000 : 50}
-                noun="الأصناف"
-                render={(page) => (
-                  <>
-                    {phone && page.length > 0 ? (
-                      <ul className="sx-cards" aria-label="المخزون على الهاتف">
-                        {page.map((r) => (
-                          <li
-                            key={`${r.branchId}:${r.variantId}`}
-                            className="ix-icard"
-                            id={`ix-card-${r.variantId}`}
-                          >
-                            <span className="n">
-                              {r.name}
-                              {manyBranches ? <span className="sx-subline">{branchLabel(r)}</span> : null}
-                            </span>
-                            <span className="v">
-                              <Amt minor={r.valueMinor} currency={base} />
-                            </span>
-                            <span className="q">{qtyCell(r)}</span>
-                            <span className="u">{unitCell(r)}</span>
-                            {counting ? <span className="c">{countInput(r)}</span> : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <SxTable
-                        caption="المخزون"
-                        columns={columns}
-                        rows={page}
-                        rowKey={(r) => `${r.branchId}:${r.variantId}`}
-                        loading={!stock && !error}
-                        empty={
-                          items.length > 0 ? (
-                            <div className="ix-empty">
-                              <StockIcon size={32} />
-                              <h3>لا صنف يطابق البحث.</h3>
-                              <p>جرّب اسماً آخر أو فرعاً آخر.</p>
-                            </div>
-                          ) : (
-                            <div className="ix-empty">
-                              <StockIcon size={32} />
-                              <h3>لا مخزون بعد.</h3>
-                              <p>سجّل فاتورة شراء فيدخل المخزون بكلفته.</p>
-                              <Link to="/purchases" className="sx-fbtn">
-                                سجّل فاتورة شراء
-                              </Link>
-                            </div>
-                          )
-                        }
-                      />
-                    )}
-                  </>
-                )}
+              <InventoryList
+                shown={shown}
+                items={items}
+                stock={stock}
+                error={error}
+                counting={counting}
+                pagerKey={`${filter}|${needle}|${branchShown}|${sort}|${counting}|${countBranch}`}
+                phone={phone}
+                manyBranches={manyBranches}
+                branchLabel={branchLabel}
+                base={base}
+                digits={digits}
+                counts={counts}
+                setCounts={setCounts}
+                driftIds={driftIds}
               />
             )}
           </section>
         ) : null}
         {!counting && canCount && part === 'counts' && (past?.length ?? 0) > 0 ? (
-          <Panel title="الجرد السابق" flush>
-            {phone ? (
-              <ul className="sx-cards" aria-label="الجرد السابق على الهاتف" style={{ padding: 12 }}>
-                {(past ?? []).map((r) => (
-                  <li key={r.id} className="ix-icard">
-                    <span className="n">
-                      <bdi dir="ltr" className="sx-n">
-                        {r.number}
-                      </bdi>
-                      <span className="sx-subline">
-                        <span className="sx-n">{r.date}</span> · {r.branchName}
-                        {r.by ? ` · ${r.by}` : ''}
-                      </span>
-                    </span>
-                    <span className="v">
-                      {r.diffValueMinor === 0 ? (
-                        <span className="sx-sub">مطابق</span>
-                      ) : (
-                        <Amt minor={r.diffValueMinor} currency={base} neg={r.diffValueMinor < 0} />
-                      )}
-                    </span>
-                    <span className="q">
-                      <StatusPill kind={r.kind === 'count' ? 'ok' : 'warn'}>
-                        {r.kind === 'waste' ? 'هدر' : r.kind === 'shortage' ? 'نقص تحويل' : 'جرد'}
-                      </StatusPill>
-                      <span>
-                        <bdi className="sx-n">{r.items.toLocaleString('en-US')}</bdi> صنفاً
-                      </span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <SxTable
-                bare
-                caption="الجرد السابق"
-                columns={pastColumns}
-                rows={past ?? []}
-                rowKey={(r) => r.id}
-                error={pastError ?? undefined}
-                onRetry={() => loadPast(null)}
-              />
-            )}
-            {pastNext ? (
-              <div className="flex justify-center" style={{ padding: 12 }}>
-                <Button variant="secondary" onClick={() => loadPast(pastNext)}>
-                  اعرض الأقدم
-                </Button>
-              </div>
-            ) : null}
-          </Panel>
+          <InventoryPast
+            past={past ?? []}
+            pastNext={pastNext}
+            pastError={pastError}
+            phone={phone}
+            base={base}
+            loadPast={loadPast}
+          />
         ) : null}
       </SalesPage>
       {showWaste ? (
-        <Dialog
-          open={wasteOpen}
-          onOpenChange={(open) => !open && !saving && setWasteOpen(false)}
-          size="md"
-          title="سجّل هدراً"
-          description="ما تلف يخرج من المخزون بكلفته، ويظهر في «تلف وفقد»."
-        >
-          <form
-            aria-label="سجّل هدراً"
-            className="flex flex-col gap-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              askWaste();
-            }}
-          >
-            <SearchField
-              label="ابحث عن الصنف التالف"
-              value={wasteQuery}
-              onValueChange={(v) => {
-                setWasteQuery(v);
-                setWasteAsk(false);
-                setWasteError(null);
-              }}
-            />
-            <Select
-              label="الصنف التالف"
-              value={wasteKey}
-              onChange={(e) => {
-                setWasteSerials([]);
-                setWasteKey(e.target.value);
-                setWasteAsk(false);
-                setWasteError(null);
-              }}
-            >
-              <option value="">اختر الصنف</option>
-              {wasteOptions.map((r) => (
-                <option key={`${r.branchId}:${r.variantId}`} value={`${r.branchId}:${r.variantId}`}>
-                  {manyBranches ? `${r.name} · ${branchLabel(r)}` : r.name}
-                </option>
-              ))}
-            </Select>
-            <TextField
-              label="كمية الهدر"
-              inputMode="decimal"
-              dir="ltr"
-              value={wasteQty}
-              hint={
-                wasteRow && wasteRow.qty > 0
-                  ? `الموجود من «${wasteRow.name}»: ${formatQuantity(wasteRow.qty, digits)}`
-                  : undefined
-              }
-              onChange={(e) => {
-                setWasteSerials([]);
-                setWasteQty(e.target.value);
-                setWasteAsk(false);
-                setWasteError(null);
-              }}
-              inputClassName="num"
-            />
-            {wasteRow?.tracksSerial && qtyOf(wasteQty) && qtyOf(wasteQty)! > 0 ? (
-              <SerialPick
-                name={wasteRow.name}
-                variantId={wasteRow.variantId}
-                branchId={wasteRow.branchId}
-                pieces={Math.ceil(qtyOf(wasteQty)! / 1000)}
-                picked={wasteSerials}
-                onChange={(list) => {
-                  setWasteSerials(list);
-                  setWasteAsk(false);
-                  setWasteError(null);
-                }}
-              />
-            ) : null}
-            <Select
-              label="السبب"
-              value={wasteWhy || wasteReasonsOf(stock?.wasteReasons)[0]!}
-              onChange={(e) => setWasteWhy(e.target.value)}
-            >
-              {wasteReasonsOf(stock?.wasteReasons).map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </Select>
-            {wasteError ? <Alert tone="error">{wasteError}</Alert> : null}
-            {wasteAsk && wasteRow ? (
-              <Alert tone="warning">
-                <div className="flex flex-col gap-3">
-                  <span>
-                    سيخرج <bdi className="num font-semibold">{wasteQty}</bdi> من «{wasteRow.name}» من المخزون
-                    بكلفته. هذا لا يُسترجع من هنا.
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="danger" loading={saving} onClick={() => void saveWaste()}>
-                      أكّد الهدر
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setWasteAsk(false)}>
-                      رجوع
-                    </Button>
-                  </div>
-                </div>
-              </Alert>
-            ) : null}
-            <div className="ix-foot">
-              <Button type="button" variant="ghost" disabled={saving} onClick={() => setWasteOpen(false)}>
-                إلغاء
-              </Button>
-              <Button type="submit" variant="danger" loading={saving}>
-                سجّل الهدر
-              </Button>
-            </div>
-          </form>
-        </Dialog>
+        <InventoryWasteDialog
+          w={waste}
+          stock={stock}
+          saving={saving}
+          digits={digits}
+          manyBranches={manyBranches}
+          branchLabel={branchLabel}
+        />
       ) : null}
     </ReportScreen>
-  );
-}
-
-/** One figure of the month's profit: its name, then the amount. */
-function Figure({ term, children }: { term: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <dt className="sx-eyebrow">{term}</dt>
-      <dd className="text-xl font-bold text-ink" style={{ margin: 0 }}>
-        {children}
-      </dd>
-    </div>
   );
 }
