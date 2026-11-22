@@ -29,7 +29,7 @@ import { batchBalance, recordBatchMovements, refreshBatches, trackedVariants } f
 import { costPending, loadValues, saveValues, stockKey } from './costing';
 import { postEntry, type DraftLine } from './posting';
 import { undoReceipt } from './purchase-order-receipt';
-import { moveStock, nextNumber } from './purchases';
+import { effectiveDue, moveStock, nextNumber } from './purchases';
 
 /**
  * «صحّح الفاتورة» (round 36, decision 12). A posted purchase is never edited; the correction is a document
@@ -320,7 +320,12 @@ export async function correctPurchase(
       currency: (purchase.currency ?? currency) as PurchaseCurrencyCode,
       rate: purchase.rate,
       purchaseOrderId: orderId,
-      dueDate: purchase.dueDate,
+      dueDate:
+        (
+          await tx.execute<{ due: string | null }>(
+            sql`select (${effectiveDue})::text as due from purchases p where p.id = ${purchase.id}`,
+          )
+        )[0]?.due ?? purchase.dueDate,
       lines: lines.map((l) => ({
         variantId: l.variantId,
         productId: owners.get(l.variantId) ?? '',

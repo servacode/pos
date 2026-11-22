@@ -670,6 +670,103 @@ describe('serial tracking at the till and on the server', () => {
       ).toEqual(['AD-1', 'AD-2', 'AD-3']);
     });
 
+    it('round 64: the drift list is seen by whoever can fix it or manage the catalog, nobody else', async () => {
+      const store = await openStore(app);
+      const a15 = await phone(store);
+      await received(store, a15, ['PM-1', 'PM-2']);
+      await count(store, a15.variantId, 1000, { serialsLater: true });
+      const seen = async (perms: string) => {
+        await owner.db.execute(
+          sql`update roles set permissions = ${perms}::text[] where tenant_id = ${store.tenantId}`,
+        );
+        return app.inject({ method: 'GET', url: '/v1/serials/drift', headers: as(store) });
+      };
+      expect((await seen('{inventory.adjust}')).statusCode).toBe(200);
+      expect((await seen('{catalog.manage}')).statusCode).toBe(200);
+      expect((await seen('{sales.create}')).statusCode).toBe(403);
+      // The fix needs inventory.adjust: a catalog manager sees the list, and cannot change it
+      await seen('{catalog.manage}');
+      expect((await fix(store, 'PM-2', 'lost')).statusCode).toBe(403);
+      await seen('{inventory.adjust}');
+      expect((await fix(store, 'PM-2', 'lost')).statusCode).toBe(200);
+    });
+
+    it('round 64: a number in the damaged branch is counted like the stock there, a half piece is a difference', async () => {
+      const store = await openStore(app);
+      const a15 = await phone(store);
+      await received(store, a15, ['DG-1', 'DG-2']);
+      expect(await drift(store)).toEqual([]);
+      const branchId = await branchOf(store);
+      const [damaged] = await owner.db.execute<{ id: string }>(sql`
+        insert into branches (tenant_id, code, name, kind, parent_branch_id)
+        values (${store.tenantId}, '090', 'تالف', 'damaged', ${branchId}) returning id`);
+      // One piece moves to the damaged branch with its number
+      await owner.db.execute(sql`
+        update stock_levels set qty = qty - 1000 where tenant_id = ${store.tenantId} and branch_id = ${branchId}`);
+      await owner.db.execute(sql`
+        insert into stock_levels (tenant_id, branch_id, variant_id, qty)
+        values (${store.tenantId}, ${damaged!.id}, ${a15.variantId}, 1000)`);
+      await owner.db.execute(sql`
+        update serials set branch_id = ${damaged!.id} where tenant_id = ${store.tenantId} and serial = 'DG-2'`);
+      expect(await drift(store)).toEqual([]);
+      // Half a piece more in the shop: the pieces round the same, the difference still shows
+      await owner.db.execute(sql`
+        update stock_levels set qty = qty + 500 where tenant_id = ${store.tenantId} and branch_id = ${branchId}`);
+      expect(await drift(store)).toEqual([
+        { variantId: a15.variantId, name: expect.any(String), stockPieces: 1.5, serialPieces: 1 },
+      ]);
+    });
+
+    it('round 64: the drift list shows the other lenient paths too, and a second add of one number is refused', async () => {
+      const store = await openStore(app);
+      const a15 = await phone(store);
+      await received(store, a15, ['LP-1', 'LP-2']);
+      // A till that wrote off a piece offline, a rep van count and a transfer shortage all land as a stock level
+      // that is lower than the numbers in stock: the list names the product with both figures
+      await owner.db.execute(sql`
+        update stock_levels set qty = qty - 1000 where tenant_id = ${store.tenantId} and variant_id = ${a15.variantId}`);
+      expect(await drift(store)).toEqual([
+        { variantId: a15.variantId, name: expect.any(String), stockPieces: 1, serialPieces: 2 },
+      ]);
+      expect((await fix(store, 'LP-2', 'lost')).statusCode).toBe(200);
+      expect(await drift(store)).toEqual([]);
+      // Stock with no numbers: adding the same number twice is a 4xx, never a 500
+      await owner.db.execute(sql`
+        update stock_levels set qty = qty + 1000 where tenant_id = ${store.tenantId} and variant_id = ${a15.variantId}`);
+      const add = () =>
+        app.inject({
+          method: 'POST',
+          url: '/v1/serials/fix',
+          headers: as(store),
+          payload: { serial: 'lp-9', status: 'in_stock', variantId: a15.variantId },
+        });
+      expect((await add()).statusCode).toBe(200);
+      const again = await add();
+      expect(again.statusCode).toBe(400);
+      expect(again.statusCode).toBeLessThan(500);
+    });
+
+    it('round 64: more than 100 products out of step: the list holds 100 and says it is cut', async () => {
+      const store = await openStore(app);
+      for (let i = 0; i < 101; i += 1) await phone(store, `هاتف ${i}`);
+      // Stock of 1 piece with no number on every one of them
+      await owner.db.execute(sql`
+        insert into stock_levels (tenant_id, branch_id, variant_id, qty)
+        select v.tenant_id, (select id from branches where tenant_id = ${store.tenantId} and kind = 'store' limit 1), v.id, 1000
+        from variants v where v.tenant_id = ${store.tenantId}`);
+      const res = await app.inject({ method: 'GET', url: '/v1/serials/drift', headers: as(store) });
+      expect(res.statusCode, res.body).toBe(200);
+      const body = res.json<{ items: unknown[]; truncated: boolean }>();
+      expect(body.items).toHaveLength(100);
+      expect(body.truncated).toBe(true);
+      // A short list is not marked
+      await owner.db.execute(sql`delete from stock_levels where tenant_id = ${store.tenantId}`);
+      const none = (await app.inject({ method: 'GET', url: '/v1/serials/drift', headers: as(store) })).json<{
+        truncated: boolean;
+      }>();
+      expect(none.truncated).toBe(false);
+    });
+
     it('the picker finds a number by part of it and says when the list was cut', async () => {
       const store = await openStore(app);
       const a15 = await phone(store);

@@ -1989,6 +1989,35 @@ export const purchaseAttachments = pgTable(
   ],
 );
 
+/**
+ * Round 64: a correction of a supplier invoice's due date. The purchase is append-only, so a mistyped date or a renegotiated
+ * term is a new row here; the latest row of an invoice is its due date (a null date clears it), the invoice's own column
+ * is what it was posted with. The log keeps every change with who made it and why.
+ */
+export const purchaseDueChanges = pgTable(
+  'purchase_due_changes',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    purchaseId: uuid('purchase_id').notNull(),
+    /** The new due date; null: the invoice has no due date any more */
+    dueDate: date('due_date'),
+    /** What it was before this change (for the log) */
+    previousDueDate: date('previous_due_date'),
+    reason: text('reason'),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'purchase_due_changes_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.purchaseId], foreignColumns: [purchases.tenantId, purchases.id] }),
+    index('purchase_due_changes_purchase_idx').on(t.tenantId, t.purchaseId, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
 export const purchaseLines = pgTable(
   'purchase_lines',
   {

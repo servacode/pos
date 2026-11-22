@@ -10,6 +10,7 @@ import {
   purchaseAttachmentInput,
   purchaseInput,
   purchaseCorrectionInput,
+  purchaseDueChangeInput,
   purchaseListQuery,
   purchaseOrderInput,
   purchaseOrderListQuery,
@@ -60,6 +61,7 @@ import {
   updatePurchaseOrder,
 } from '../services/purchase-orders';
 import { correctPurchase } from '../services/purchase-correction';
+import { changePurchaseDue } from '../services/purchase-due-change';
 import {
   attachPurchasePhoto,
   readPurchasePhoto,
@@ -105,7 +107,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/suppliers/due', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     const q = parseBody(supplierDueQuery, request.query);
-    return supplierDues(app.db, request.auth, q.days ?? 7, app.clock.now());
+    return supplierDues(app.db, request.auth, q.days ?? 7, app.clock.now(), q.all !== undefined);
   });
   app.post('/v1/suppliers', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
@@ -163,6 +165,17 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/purchases/:id', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return readPurchase(app.db, request.auth, idOf(request.params, 'هذه الفاتورة'));
+  });
+  // Round 64: a due date corrected after posting (a log row and an audit entry; nothing is posted)
+  app.patch('/v1/purchases/:id/due', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return changePurchaseDue(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الفاتورة'),
+      parseBody(purchaseDueChangeInput, request.body),
+      meta(request),
+    );
   });
   // Round 62: the photo of the supplier's paper invoice (it posts nothing; a new photo replaces the old one)
   app.post(

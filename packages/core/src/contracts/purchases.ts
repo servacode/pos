@@ -258,16 +258,34 @@ export interface PurchaseListResponse {
 }
 
 /**
- *   GET  /v1/suppliers/due?days=7       SupplierDueResponse   (purchases.manage, round 62)
+ *   GET  /v1/suppliers/due?days=7[&all=1]  SupplierDueResponse   (purchases.manage, round 62; all: round 64)
  *   POST /v1/purchases/{id}/attachments           purchaseAttachmentInput → PurchaseAttachment (201, purchases.manage)
  *   DELETE /v1/purchases/{id}/attachments/{attachmentId}   → 204
  *   GET  /v1/purchases/{id}/attachments/{attachmentId}[?size=thumb]   → the picture's bytes (purchases.manage; private, never under /v1/images)
  *
  * «مستحق هذا الأسبوع»: the credit invoices still owed whose due date falls within `days` days (or has passed). What is still
  * owed of an invoice is worked out the way a shop thinks of it: payments settle the oldest invoices first, so the supplier's
- * balance is what the newest invoices leave open.
+ * balance is what the newest invoices leave open. A supplier's debt is the store's, not a branch's (payments are not tied to a
+ * branch), so the open amount of an invoice is worked out over all the supplier's invoices; a user limited to some branches sees
+ * the rows of their branches' invoices, with those amounts (round 64).
  */
-export const supplierDueQuery = z.object({ days: z.coerce.number().int().min(0).max(90).optional() });
+export const supplierDueQuery = z.object({
+  days: z.coerce.number().int().min(0).max(90).optional(),
+  /** Round 64: «كل المستحقات»: every open invoice that has a due date, whatever the day */
+  all: z.enum(['1', 'true']).optional(),
+});
+
+/**
+ *   PATCH /v1/purchases/{id}/due   purchaseDueChangeInput → { purchaseId, dueDate, previousDueDate }   (purchases.manage, round 64)
+ *
+ * A due date corrected after posting (a mistyped day, a renegotiated term). Nothing is posted: the change is a row in a log
+ * beside the append-only invoice (latest wins; null clears the date) and the audit log keeps who, from what, and why.
+ */
+export const purchaseDueChangeInput = z.object({
+  dueDate: isoDateSchema.nullable(),
+  reason: optionalText(200, 'السبب طويل'),
+});
+export type PurchaseDueChangeInput = z.output<typeof purchaseDueChangeInput>;
 
 export interface SupplierDueRow {
   purchaseId: string;

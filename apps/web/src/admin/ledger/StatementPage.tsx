@@ -32,6 +32,7 @@ import { useReport } from '../reports/useReport';
 import { CustomerMoneyDialog } from '../customers/CustomerMoneyDialog';
 import { getStatement } from './api';
 import { statementCsv, statementWhat } from './csv';
+import { PurchasePaperNote } from './PurchasePaperNote';
 import '../customers/customers.css';
 
 const COPY = {
@@ -172,6 +173,7 @@ function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; 
                     <DocNumber value={l.number} />
                   </>
                 ) : null}
+                <PurchasePaperNote line={l} base={base} />
               </td>
               <td className="py-1 text-end">
                 {l.debitMinor ? <Money minor={l.debitMinor} currency={base} /> : ''}
@@ -260,6 +262,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
               <DocNumber value={l.number} />
             </span>
           ) : null}
+          <PurchasePaperNote line={l} base={base} />
           <span className="text-xs text-ink-muted sm:hidden">{dayText(l.date, digits)}</span>
         </div>
       ),
@@ -464,6 +467,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
                         <DocNumber value={l.number} />
                       </>
                     ) : null}
+                    <PurchasePaperNote line={l} base={base} />
                   </span>
                   <span className="num end font-semibold">
                     <span className="text-xs text-ink-muted">

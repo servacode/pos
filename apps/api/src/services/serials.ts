@@ -1,12 +1,5 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import type {
-  SaleLine,
-  SerialDriftRow,
-  SerialFixInput,
-  SerialFlag,
-  SerialRow,
-  UnassignedSerialSale,
-} from '@serva/core';
+import type { SaleLine, SerialFixInput, SerialFlag, SerialRow, UnassignedSerialSale } from '@serva/core';
 import { addMonthsIso, toLatinDigits } from '@serva/core';
 import type { SyncFlag } from '@serva/sync';
 import {
@@ -761,39 +754,5 @@ export function stockSerials(
       .orderBy(serials.serial)
       .limit(1001);
     return { items: rows.slice(0, 1000).map((r) => r.serial), truncated: rows.length > 1000 };
-  });
-}
-
-/**
- * Round 62: the products that track serial numbers whose stock and «في المحل» numbers disagree (a phone written off
- * with no number named, a surplus counted without numbers, a sale that left without one). Computed on read, nothing
- * is stored; the serial page shows it and puts the numbers right with «تصحيح».
- */
-export function serialDrift(db: Database, auth: AccessClaims): Promise<{ items: SerialDriftRow[] }> {
-  return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'catalog.manage');
-    const rows = await tx.execute<{ variant_id: string; name: string; stock: string; n: string }>(sql`
-      select v.id as variant_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
-             coalesce(st.qty, 0)::text as stock, coalesce(sr.n, 0)::text as n
-      from variants v
-      join products p on p.tenant_id = v.tenant_id and p.id = v.product_id and p.tracks_serial
-      left join (
-        select l.variant_id, sum(l.qty) as qty from stock_levels l
-        join branches b on b.tenant_id = l.tenant_id and b.id = l.branch_id and b.kind <> 'damaged'
-        group by l.variant_id) st on st.variant_id = v.id
-      left join (
-        select variant_id, count(*) as n from serials where status = 'in_stock' group by variant_id) sr
-        on sr.variant_id = v.id
-      where round(coalesce(st.qty, 0) / 1000.0) <> coalesce(sr.n, 0)
-      order by name
-      limit 100`);
-    return {
-      items: rows.map((r) => ({
-        variantId: r.variant_id,
-        name: r.name,
-        stockPieces: Math.round(Number(r.stock) / 1000),
-        serialPieces: Number(r.n),
-      })),
-    };
   });
 }

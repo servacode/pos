@@ -49,6 +49,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/purchases/:id/attachments/:attachmentId': 'signed-in',
   'POST /v1/purchases/:id/attachments': 'signed-in',
   'DELETE /v1/purchases/:id/attachments/:attachmentId': 'signed-in',
+  'PATCH /v1/purchases/:id/due': 'signed-in',
   'POST /v1/purchases/:id/correct': 'signed-in',
   'GET /v1/purchase-orders': 'signed-in',
   'GET /v1/purchase-orders/suggest': 'signed-in',
@@ -1443,6 +1444,21 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       { n: string }[]
     >`select count(*)::text as n from purchase_attachments where purchase_id = ${id}`;
     expect(row!.n).toBe('1');
+  },
+  // Round 64: another store cannot change an invoice's due date: 404, and no change row is made
+  'PATCH /v1/purchases/:id/due': async (app, { a, b }) => {
+    const id = await purchaseOf(app, a);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/purchases/${id}/due`,
+      headers: owner(b),
+      payload: { dueDate: '2030-01-01' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { n: string }[]
+    >`select count(*)::text as n from purchase_due_changes where purchase_id = ${id}`;
+    expect(row!.n).toBe('0');
   },
   // Round 36: another store's purchase cannot be corrected: 404, and nothing is reversed
   'POST /v1/purchases/:id/correct': async (app, { a, b }) => {

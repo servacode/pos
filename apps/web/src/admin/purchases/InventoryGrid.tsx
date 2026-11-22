@@ -126,9 +126,11 @@ export function InventoryGrid({
                 </span>
               ) : null}
               {minus > 0 && onCount ? (
-                <Button size="sm" variant="secondary" onClick={() => onCount(minusIds)}>
-                  صحّح بالجرد
-                </Button>
+                <span className="ms-auto">
+                  <Button size="sm" variant="secondary" onClick={() => onCount(minusIds)}>
+                    صحّح بالجرد
+                  </Button>
+                </span>
               ) : null}
             </h3>
             {open ? (

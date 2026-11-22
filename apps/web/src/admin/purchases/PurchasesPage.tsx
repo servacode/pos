@@ -80,6 +80,9 @@ import { SanityDialog } from './SanityDialog';
 import { PurchaseDetailDialog } from './PurchaseDetailDialog';
 import { SafeWarning } from './SafeWarning';
 import { DuePanel } from './DuePanel';
+import { DueMark } from './DueMark';
+import { PaperFields } from './PaperFields';
+import { dueById, useSupplierDues } from './useSupplierDues';
 import { resizeImage } from '../../lib/images';
 import { baseQtyOf, moneyText, packSummary, withPackChange } from './packLines';
 import { purchaseWarnings, referenceCosts, usualUnitOf, type CostReference } from './purchaseSanity';
@@ -145,7 +148,7 @@ function spanRange(span: Span, today: string): { from?: string; to?: string } {
 
 const PAGE_SIZE = 50;
 /** A phone shows cards that are tall: twenty to a page keeps the list short (round 60) */
-const PHONE_PAGE_SIZE = 20;
+const PHONE_PAGE_SIZE = 12;
 
 /**
  * «المشتريات» (08 › فاتورة شراء): the purchases (paged, searched and filtered by the server), a new
@@ -162,7 +165,7 @@ export function PurchasesPage() {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'list' | 'buy' | 'pay' | 'supplier'>('list');
   // «ابحث في المتجر» sends a purchase number here as ?q=PUR-…
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const [typed, setTyped] = useState(params.get('q') ?? '');
   const [q, setQ] = useState(typed);
   const [span, setSpan] = useState<Span>('all');
@@ -242,13 +245,33 @@ export function PurchasesPage() {
   }, [orderId]);
 
   // «دفعة» on a supplier's row sends its id here as ?pay=…: the payment window opens on that supplier
+  // Round 64: «ادفع» on a due invoice sends ?pay=…&amount=… (the invoice's open amount): the window opens with it typed
   const payId = params.get('pay');
-  const payOpened = useRef(false);
+  const payAmount = Number(params.get('amount'));
+  const payKey = payId ? `${payId}/${payAmount}` : null;
+  const payOpened = useRef<string | null>(null);
   useEffect(() => {
-    if (!payId || payOpened.current || !suppliers) return;
-    payOpened.current = true;
+    if (!payKey || payOpened.current === payKey || !suppliers) return;
+    payOpened.current = payKey;
     if (suppliers.items.some((x) => x.id === payId && !x.archived)) setMode('pay');
-  }, [payId, suppliers]);
+  }, [payKey, payId, suppliers]);
+  const closePay = () => {
+    setMode('list');
+    if (params.has('pay') || params.has('amount')) {
+      payOpened.current = null;
+      setParams(
+        (old) => {
+          const next = new URLSearchParams(old);
+          next.delete('pay');
+          next.delete('amount');
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  };
+  const dues = useSupplierDues(monthTick);
+  const dueOpen = useMemo(() => dueById(dues), [dues]);
 
   const base = suppliers?.baseCurrency ?? me.settings.baseCurrency;
   // After a save the form closes and the page is left scrolled down: bring the success message into view
@@ -264,11 +287,11 @@ export function PurchasesPage() {
   }, [retry, loadSuppliers]);
   const done = (message: string) => {
     setNotice(message);
-    setMode('list');
     setOrder(null);
     setCorrection(null);
     setKept(null);
     dropCorrection();
+    closePay();
     reload();
   };
   const startCorrection = (c: KeptCorrection) => {
@@ -383,6 +406,16 @@ export function PurchasesPage() {
     },
     { key: 'supplier', header: 'المورد', cell: (p) => p.supplierName },
     { key: 'status', header: 'الدفع', cell: (p) => <InvoiceStatus row={p} /> },
+    {
+      key: 'due',
+      header: 'الاستحقاق',
+      cell: (p) =>
+        p.payment === 'credit' && !p.correctedBy ? (
+          <DueMark dueDate={p.dueDate} today={today} open={dueOpen.has(p.id)} />
+        ) : (
+          <span className="sx-sub">—</span>
+        ),
+    },
     {
       key: 'total',
       header: 'المبلغ',
@@ -608,7 +641,7 @@ export function PurchasesPage() {
                 </span>
               </div>
             </section>
-            <DuePanel tick={monthTick} />
+            <DuePanel dues={dues} />
             {owing.length > 0 && !phone ? (
               <Panel
                 title="أكبر المستحقات للموردين"
@@ -684,12 +717,24 @@ export function PurchasesPage() {
                         <span className={`t ${p.correctedBy ? 'sx-sub' : ''}`}>
                           <Amt minor={p.totalMinor} currency={base} />
                         </span>
-                        {p.reference || (p.currency === 'USD' && p.foreignTotalMinor) ? (
+                        {(p.payment === 'credit' && !p.correctedBy && p.dueDate) ||
+                        p.reference ||
+                        (p.currency === 'USD' && p.foreignTotalMinor) ? (
                           <span className="x">
-                            {p.reference ? `رقمها عند المورد ${p.reference}` : null}
+                            {p.payment === 'credit' && !p.correctedBy && p.dueDate ? (
+                              <>
+                                تستحق <DueMark dueDate={p.dueDate} today={today} open={dueOpen.has(p.id)} />
+                              </>
+                            ) : null}
+                            {p.reference ? (
+                              <>
+                                {p.payment === 'credit' && !p.correctedBy && p.dueDate ? ' · ' : ''}
+                                رقمها عند المورد {p.reference}
+                              </>
+                            ) : null}
                             {p.currency === 'USD' && p.foreignTotalMinor ? (
                               <>
-                                {p.reference ? ' · ' : ''}
+                                {' · '}
                                 <Amt minor={p.foreignTotalMinor} currency="USD" />
                               </>
                             ) : null}
@@ -741,9 +786,10 @@ export function PurchasesPage() {
           <PaymentForm
             suppliers={suppliers.items.filter((x) => !x.archived)}
             {...(payId ? { initialSupplierId: payId } : {})}
+            {...(payAmount > 0 ? { initialAmountMinor: payAmount } : {})}
             base={base}
             onSaved={(n) => done(`سُجّل سند الدفع ${n}.`)}
-            onCancel={() => setMode('list')}
+            onCancel={closePay}
           />
         ) : null}
       </SalesPage>
@@ -997,8 +1043,8 @@ function PurchaseForm({
   // …the paper's discount and extra charges, and a photo of the paper (sent once the invoice is saved)
   const [discount, setDiscount] = useState('');
   const [charges, setCharges] = useState('');
-  const [photo, setPhoto] = useState<File | null>(null);
-  const photoInput = useRef<HTMLInputElement>(null);
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [percent, setPercent] = useState(false);
   const [lines, setLines] = useState<Line[]>(() =>
     draft ? linesOfDraft(draft) : order ? linesOfOrder(order) : [],
   );
@@ -1080,7 +1126,10 @@ function PurchaseForm({
   const used = lines.flatMap((_, i) => (parsed[i]!.qty === 0 ? [] : [i]));
   const skipped = lines.length - used.length;
   const gross = used.reduce((sum, i) => sum + (parsed[i]!.cost ?? 0), 0);
-  const discountN = discount.trim() ? moneyOf(discount) : 0;
+  const discountTyped = discount.trim() ? moneyOf(discount) : 0;
+  // A percent is of the paper's total; the amount it comes to is what is sent (the server knows amounts only)
+  const discountN =
+    percent && discountTyped !== null ? Math.round((gross * discountTyped) / 10_000) : discountTyped;
   const chargesN = charges.trim() ? moneyOf(charges) : 0;
   const adjustWrong =
     discountN === null ||
@@ -1177,7 +1226,7 @@ function PurchaseForm({
         });
         // The invoice is posted; the photo of its paper goes up after it, and a failure there never undoes it
         let photoFailed = false;
-        if (photo) {
+        for (const photo of photos) {
           try {
             await addPurchasePhoto(made.id, await resizeImage(photo));
           } catch {
@@ -1257,7 +1306,9 @@ function PurchaseForm({
             title="المورد والتاريخ"
             description="من أين جاءت البضاعة، ومتى، وبأي رقم كتبها المورد."
           />
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div
+            className={`grid grid-cols-1 gap-4 ${payment === 'credit' ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-3'}`}
+          >
             <Select
               label="المورد"
               value={supplierId}
@@ -1282,22 +1333,20 @@ function PurchaseForm({
               value={reference}
               onChange={(e) => setReference(e.target.value)}
             />
-          </div>
-          {payment === 'credit' ? (
-            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+            {payment === 'credit' ? (
               <DateField
                 label="تاريخ الاستحقاق"
                 value={dueDate ?? ''}
                 onChange={(iso) => setDueTyped(iso || '')}
                 error={s.fields.dueDate}
+                hint={
+                  termsDays !== null && dueTyped === null
+                    ? `من أيام سداد المورد (${termsDays})`
+                    : 'اختياري: تظهر في «مستحق هذا الأسبوع»'
+                }
               />
-              <p className="self-end text-sm text-ink-muted md:col-span-2">
-                {termsDays !== null && dueTyped === null
-                  ? `من أيام سداد المورد (${termsDays}). غيّره إن اتفقتما على موعد آخر.`
-                  : 'اختياري: متى تدفع هذه الفاتورة. تظهر في «مستحق هذا الأسبوع».'}
-              </p>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
           <CurrencyTerms
             label="عملة الفاتورة"
             currency={currency}
@@ -1555,55 +1604,30 @@ function PurchaseForm({
             title="الخصم والرسوم والورقة"
             description="ما كتبه المورد على ورقته: خصم نقدي، أو أجور شحن. تتوزّع على كلفة الأصناف، فيبقى سعر البيع والمخزون صحيحين."
           />
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <NumberField
-              label={`خصم المورد (${usd ? 'دولار' : 'ليرة'})`}
-              hint="اختياري"
-              decimals={2}
-              value={discount}
-              onValueChange={setDiscount}
-              error={
-                s.fields.discountMinor ??
-                (discountN === null
-                  ? 'اكتب مبلغاً صحيحاً'
-                  : (discountN ?? 0) > gross
-                    ? 'أكبر من مجموع الفاتورة'
-                    : undefined)
-              }
-            />
-            <NumberField
-              label={`رسوم إضافية: شحن وغيره (${usd ? 'دولار' : 'ليرة'})`}
-              hint="اختياري"
-              decimals={2}
-              value={charges}
-              onValueChange={setCharges}
-              error={s.fields.chargesMinor ?? (chargesN === null ? 'اكتب مبلغاً صحيحاً' : undefined)}
-            />
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-semibold text-ink">صورة الورقة</span>
-              <input
-                ref={photoInput}
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                aria-label="صورة فاتورة المورد الورقية"
-                tabIndex={-1}
-                onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-              />
-              <span className="flex flex-wrap items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={() => photoInput.current?.click()}>
-                  {photo ? 'غيّر الصورة' : 'أرفق صورة'}
-                </Button>
-                {photo ? (
-                  <span className="min-w-0 truncate text-sm text-ink-muted" dir="ltr">
-                    {photo.name}
-                  </span>
-                ) : (
-                  <span className="text-sm text-ink-subtle">اختياري</span>
-                )}
-              </span>
-            </div>
-          </div>
+          <PaperFields
+            unit={usd ? 'دولار' : 'ليرة'}
+            discount={discount}
+            onDiscount={setDiscount}
+            percent={percent}
+            onPercent={setPercent}
+            discountError={
+              s.fields.discountMinor ??
+              (discountTyped === null
+                ? 'اكتب رقماً صحيحاً'
+                : (discountN ?? 0) > gross
+                  ? percent
+                    ? 'أكبر من 100%'
+                    : 'أكبر من مجموع الفاتورة'
+                  : undefined)
+            }
+            discountAmount={percent ? (discountN ?? 0) : null}
+            charges={charges}
+            onCharges={setCharges}
+            chargesError={s.fields.chargesMinor ?? (chargesN === null ? 'اكتب مبلغاً صحيحاً' : undefined)}
+            photos={photos}
+            onPhotos={setPhotos}
+            renderMoney={(m) => <Money minor={m} currency={invoiceCurrency} />}
+          />
         </Card>
         <Card>
           <CardHeader icon={<CashIcon />} title="الدفع" description="كيف دُفع ثمن البضاعة." />
@@ -1744,11 +1768,14 @@ function dollarsOnly(supplier: SupplierRow | undefined): boolean {
 function PaymentForm({
   suppliers,
   initialSupplierId,
+  initialAmountMinor,
   base,
   onSaved,
   onCancel,
 }: {
   suppliers: SupplierRow[];
+  /** An amount to start with (the open amount of a due invoice) */
+  initialAmountMinor?: number;
   /** The supplier the window opens on (from a supplier's row), else the first one that is owed */
   initialSupplierId?: string;
   base: SupplierListResponse['baseCurrency'];
@@ -1763,7 +1790,7 @@ function PaymentForm({
   const [supplierId, setSupplierId] = useState(
     (suppliers.find((x) => x.id === initialSupplierId) ?? owing[0] ?? suppliers[0])?.id ?? '',
   );
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(initialAmountMinor ? moneyText(initialAmountMinor) : '');
   const [method, setMethod] = useState<'cash' | 'bank' | 'cheque'>('cash');
   const [date, setDate] = useState(todayDay);
   const [bank, setBank] = useState('');

@@ -53,6 +53,16 @@ export interface PartyStatementLine {
   usdDebitMinor?: number;
   usdCreditMinor?: number;
   usdBalanceMinor?: number;
+  /**
+   * Round 64: a supplier's purchase line also carries what the paper says: the day it falls due (as corrected), the discount and
+   * the extra charges, and the supplier's own number. Absent on every other line.
+   */
+  purchase?: {
+    dueDate: string | null;
+    discountMinor?: number;
+    chargesMinor?: number;
+    reference?: string | null;
+  };
 }
 
 export interface PartyStatement {

@@ -3,7 +3,8 @@ import { serialFixInput, serialQuery, stockSerialsQuery } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
-import { fixSerial, lookupSerials, serialDrift, stockSerials, unassignedSales } from '../services/serials';
+import { fixSerial, lookupSerials, stockSerials, unassignedSales } from '../services/serials';
+import { serialDrift } from '../services/serial-drift';
 import { parseBody } from './validation';
 
 /** Serial numbers and IMEIs (packages/core › contracts/purchases.ts SerialRow). */

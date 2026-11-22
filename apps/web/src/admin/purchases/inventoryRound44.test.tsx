@@ -142,7 +142,7 @@ describe('the shelf count of a store with two branches', () => {
     renderApp('/inventory');
     expect(await screen.findByText(/لا كلفة مسجّلة لها/)).toBeInTheDocument();
     // The month's profit is folded (round 62): it opens by a press
-    await userEvent.click(await screen.findByRole('button', { name: 'اعرض' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'التفاصيل' }));
     expect(await screen.findByText(/الكلفة غير مسجلة لهذه المبيعات/)).toBeInTheDocument();
     expect(screen.queryByText(/100/)).not.toBeInTheDocument();
   });

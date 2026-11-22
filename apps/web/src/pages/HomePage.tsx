@@ -56,6 +56,7 @@ import { getSummary as getInstalmentSummary } from '../admin/installments/api';
 import { dueSoon } from '../admin/cheques/ChequesPage';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
 import { ContractAttention, seesContractAttention } from './ContractAttention';
+import { SerialAttention, seesSerialAttention } from './SerialAttention';
 import { getDayReport, getDayTotals } from '../admin/reports/api';
 import {
   EARLY_HOUR,
@@ -2047,6 +2048,7 @@ export function HomePage() {
                 />
               ) : null}
               {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
+              {seesSerialAttention(me) ? <SerialAttention me={me} /> : null}
             </div>
             {seesSales && !brandNew && !thinChart ? dayPanels : null}
           </div>

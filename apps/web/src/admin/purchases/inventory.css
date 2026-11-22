@@ -368,3 +368,18 @@
   font-size: 14px;
   color: var(--ink-muted);
 }
+
+/* round 64: «ما معنى هذه الأرقام؟» in the card head, the month's profit as one line under the tiles */
+.sx .ix-hero .ix-hero-head {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+.sx .ix-hero .ix-profit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sx .ix-hero .ix-profit .note {
+  margin: 0;
+}

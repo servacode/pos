@@ -16,7 +16,7 @@ import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { sniffImage, purchaseAttachmentUrl } from './catalog/images';
-import { baseCurrency, storeDay, supplierBalances } from './purchases';
+import { baseCurrency, effectiveDue, storeDay } from './purchases';
 
 /**
  * Round 62: «مستحق هذا الأسبوع» and the photo of the paper invoice (contracts/purchases.ts).
@@ -30,20 +30,28 @@ const addDays = (day: string, days: number): string => {
 };
 
 /**
- * The credit invoices still owed that fall due within `days` days (or already have). A supplier's payments are not tied to
- * invoices, so what is open is worked out the way a shop thinks of it: payments settle the oldest invoices first, which
- * leaves the supplier's balance sitting on the newest ones. A supplier owed nothing (or owing the store) shows nothing.
+ * The credit invoices still owed that fall due within `days` days (or already have; `all`: whatever the day). A supplier's
+ * payments are not tied to invoices, so what is open is worked out the way a shop thinks of it: payments settle the oldest
+ * invoices first, which leaves the supplier's balance sitting on the newest ones. A supplier owed nothing (or owing the store)
+ * shows nothing. Round 64: only suppliers that have an invoice due in range are looked at (their balance and invoices, newest
+ * down to their oldest due one), not every supplier, and the due date is the latest correction of it.
+ *
+ * Branches: the supplier's debt belongs to the store and payments carry no branch, so the open amount of an invoice is worked
+ * out over all the supplier's invoices of every branch; a user limited to some branches sees only the rows of invoices of
+ * those branches, with the amounts that follow from that.
  */
 export function supplierDues(
   db: Database,
   auth: AccessClaims,
   days: number,
   now: Date,
+  all = false,
 ): Promise<SupplierDueResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const today = await storeDay(tx, now);
     const until = addDays(today, days);
+    const inRange = all ? sql`true` : sql`(${effectiveDue}) <= ${until}::date`;
     const rows = await tx.execute<{
       id: string;
       number: string;
@@ -54,18 +62,32 @@ export function supplierDues(
       open: string;
       branch_id: string;
     }>(sql`
-      with owed as (
-        select p.tenant_id, p.id, p.number, p.reference, p.supplier_id, p.due_date, p.total_minor, p.branch_id, b.balance,
+      with cand as (
+        select p.supplier_id, min(p.business_date) as from_date
+        from purchases p
+        where p.payment = 'credit' and (${effectiveDue}) is not null and ${inRange}
+          and not exists (select 1 from purchase_reversals r where r.tenant_id = p.tenant_id and r.purchase_id = p.id)
+        group by p.supplier_id
+      ), bal as (
+        select l.party_id as supplier_id, sum(l.credit_minor - l.debit_minor) as balance
+        from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+        where a.code = '2100' and l.party_type = 'supplier' and l.party_id in (select supplier_id from cand)
+        group by l.party_id
+        having sum(l.credit_minor - l.debit_minor) > 0
+      ), owed as (
+        select p.tenant_id, p.id, p.number, p.reference, p.supplier_id, (${effectiveDue}) as due_date, p.total_minor,
+               p.branch_id, b.balance,
                sum(p.total_minor) over (partition by p.supplier_id order by p.business_date desc, p.number desc) as cum
         from purchases p
-        join (${supplierBalances}) b on b.supplier_id = p.supplier_id and b.balance > 0
+        join cand c on c.supplier_id = p.supplier_id and p.business_date >= c.from_date
+        join bal b on b.supplier_id = p.supplier_id
         where p.payment = 'credit'
           and not exists (select 1 from purchase_reversals r where r.tenant_id = p.tenant_id and r.purchase_id = p.id)
       )
       select o.id, o.number, o.reference, o.supplier_id, s.name as supplier_name, o.due_date::text as due_date,
              least(o.total_minor, greatest(0, o.balance - (o.cum - o.total_minor)))::text as open, o.branch_id
       from owed o join suppliers s on s.tenant_id = o.tenant_id and s.id = o.supplier_id
-      where o.due_date is not null and o.due_date <= ${until}::date
+      where o.due_date is not null ${all ? sql`` : sql`and o.due_date <= ${until}::date`}
         and least(o.total_minor, greatest(0, o.balance - (o.cum - o.total_minor))) > 0
       order by o.due_date, o.number`);
     const mine = rows.filter((r) => inScope(scope, r.branch_id));

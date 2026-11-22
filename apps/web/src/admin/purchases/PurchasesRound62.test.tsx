@@ -35,7 +35,7 @@ describe('the new invoice: due date, discount, charges', () => {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: owner() },
         'GET /v1/suppliers': { status: 200, body: suppliers },
-        'GET /v1/suppliers/due?days=7': {
+        'GET /v1/suppliers/due?all=1': {
           status: 200,
           body: { items: [], totalMinor: 0, overdueMinor: 0, baseCurrency: 'SYP' },
         },
@@ -86,7 +86,7 @@ describe('the new invoice: due date, discount, charges', () => {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: owner() },
         'GET /v1/suppliers': { status: 200, body: suppliers },
-        'GET /v1/suppliers/due?days=7': {
+        'GET /v1/suppliers/due?all=1': {
           status: 200,
           body: { items: [], totalMinor: 0, overdueMinor: 0, baseCurrency: 'SYP' },
         },
@@ -136,7 +136,7 @@ describe('«مستحق هذا الأسبوع»', () => {
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': { status: 200, body: owner() },
       'GET /v1/suppliers': { status: 200, body: { ...suppliers, totalOwedMinor: 500_000 } },
-      'GET /v1/suppliers/due?days=7': {
+      'GET /v1/suppliers/due?all=1': {
         status: 200,
         body: {
           items: [
@@ -169,7 +169,7 @@ describe('«مستحق هذا الأسبوع»', () => {
     });
     renderApp('/suppliers');
     const list = await screen.findByRole('list', { name: 'فواتير الموردين المستحقة' });
-    expect(within(list).getAllByRole('link')).toHaveLength(2);
+    expect(within(list).getAllByRole('link')).toHaveLength(4);
     expect(within(list).getByText('متأخرة')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'مستحق هذا الأسبوع' })).toBeInTheDocument();
   });
@@ -179,7 +179,7 @@ describe('«مستحق هذا الأسبوع»', () => {
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': { status: 200, body: owner() },
       'GET /v1/suppliers': { status: 200, body: suppliers },
-      'GET /v1/suppliers/due?days=7': {
+      'GET /v1/suppliers/due?all=1': {
         status: 200,
         body: { items: [], totalMinor: 0, overdueMinor: 0, baseCurrency: 'SYP' },
       },

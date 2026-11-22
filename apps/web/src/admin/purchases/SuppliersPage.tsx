@@ -32,6 +32,8 @@ import {
 } from './OpeningBalanceFields';
 import { SupplierForm, termsDaysOf } from './PurchasesPage';
 import { DuePanel } from './DuePanel';
+import { DueMark } from './DueMark';
+import { dueBySupplier, useSupplierDues } from './useSupplierDues';
 import './purchases.css';
 
 /**
@@ -52,6 +54,9 @@ export function SuppliersPage() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<SupplierRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const dues = useSupplierDues();
+  const nextDue = useMemo(() => dueBySupplier(dues), [dues]);
+  const today = storeToday(me.tenant.timezone);
 
   // Only the newest answer is kept: a slow earlier read never overwrites a later one
   const latest = useRef(0);
@@ -157,6 +162,15 @@ export function SuppliersPage() {
       cell: owedCell,
     },
     {
+      key: 'due',
+      header: 'أقرب استحقاق',
+      hideBelowLg: true,
+      cell: (s) => {
+        const d = nextDue.get(s.id);
+        return d ? <DueMark dueDate={d.dueDate} today={today} open /> : <span className="sx-sub">—</span>;
+      },
+    },
+    {
       key: 'actions',
       header: <span className="sr-only">إجراءات</span>,
       cell: (s) => (
@@ -230,7 +244,7 @@ export function SuppliersPage() {
             </span>
           </div>
         </section>
-        <DuePanel />
+        <DuePanel dues={dues} />
         <div className="sx-card sx-filterbar print:hidden">
           <div className="sx-search">
             <SearchField label="ابحث بالاسم أو الجوال" value={search} onValueChange={setSearch} />
@@ -266,6 +280,11 @@ export function SuppliersPage() {
                       'بلا جوال'
                     )}
                     {s.lastPurchaseOn ? <> · آخر شراء {dayText(s.lastPurchaseOn, digits)}</> : null}
+                    {nextDue.get(s.id) ? (
+                      <>
+                        {' · '}يستحق <DueMark dueDate={nextDue.get(s.id)!.dueDate} today={today} open />
+                      </>
+                    ) : null}
                   </span>
                 </button>
               </li>

@@ -31,6 +31,7 @@ import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { lockedThrough } from './period-close';
 import { postEntry, type DraftLine } from './posting';
+import { purchaseExtras } from './purchase-statement';
 
 /**
  * Statements, expenses, manual journal entries and the profit and loss (29 › المحاسبة المتقدمة;
@@ -189,13 +190,22 @@ export async function partyStatement(
           return { ...l, usdDebitMinor: debit, usdCreditMinor: credit, usdBalanceMinor: usdRunning };
         })
       : run.lines;
+    // Round 64: a supplier's purchase lines also carry the paper's due date, discount and charges
+    const extras = type === 'supplier' ? await purchaseExtras(tx, run.lines) : new Map();
+    const shown = extras.size
+      ? lines.map((l) =>
+          extras.has(l.sourceId) && l.sourceType === 'purchase'
+            ? { ...l, purchase: extras.get(l.sourceId) }
+            : l,
+        )
+      : lines;
     return {
       type,
       party: { id: party.id, name: party.name, phone: party.phone },
       from: range.from,
       to: range.to,
       openingMinor,
-      lines,
+      lines: shown,
       totalDebitMinor: run.totalDebitMinor,
       totalCreditMinor: run.totalCreditMinor,
       closingMinor: run.closingMinor,

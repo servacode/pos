@@ -7,6 +7,7 @@ import { ApiError, errorMessage } from '../../lib/api';
 import { correctPurchase, getPurchase } from './api';
 import { draftOfDetail } from './correctionDraft';
 import { PAYMENT_TEXT } from './pui';
+import { DueEditor } from './DueEditor';
 import { PurchasePhotos } from './PurchasePhotos';
 import { useQuietFocus } from './quietFocus';
 
@@ -122,12 +123,17 @@ export function PurchaseDetailDialog({
                 </bdi>
               </>
             ) : null}
-            {detail.dueDate ? (
-              <>
-                {' · '}تستحق في {dayText(detail.dueDate, digits)}
-              </>
-            ) : null}
           </p>
+          {detail.payment === 'credit' && !detail.correctedBy ? (
+            <DueEditor
+              purchaseId={detail.id}
+              dueDate={detail.dueDate ?? null}
+              minDate={detail.date}
+              onChanged={(dueDate) => setDetail((d) => (d ? { ...d, dueDate } : d))}
+            />
+          ) : detail.dueDate ? (
+            <p className="text-sm text-ink-muted">تستحق في {dayText(detail.dueDate, digits)}</p>
+          ) : null}
           {detail.correctedBy ? (
             <Alert tone="info">
               صُحّحت هذه الفاتورة بالمستند{' '}

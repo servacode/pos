@@ -194,6 +194,18 @@ async function stockedVariants(tx: Transaction, ids: string[]): Promise<Map<stri
   return new Map(rows.map((r) => [r.id, r.name]));
 }
 
+/**
+ * The day a supplier invoice falls due, as the books stand now: the latest correction of it (round 64: purchase_due_changes,
+ * a null date clears it), else the date it was posted with. Written for a query that names the invoice `p`; the
+ * purchase list and detail, the due list and the statement all share this one meaning.
+ */
+export const effectiveDue = sql`(case when exists (
+    select 1 from purchase_due_changes c where c.tenant_id = p.tenant_id and c.purchase_id = p.id
+  ) then (
+    select c.due_date from purchase_due_changes c where c.tenant_id = p.tenant_id and c.purchase_id = p.id
+    order by c.created_at desc, c.id desc limit 1
+  ) else p.due_date end)`;
+
 // A supplier's balance is the sum of its 2100 lines in the base currency. The lines kept in dollars (round 36,
 // decision 11) also give the dollars owed (the amounts, signed like the lines) and what the books value them at.
 export const supplierBalances = sql`
@@ -347,7 +359,7 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
   }>(sql`
     select p.id, p.number, p.business_date::text, p.supplier_id, s.name as supplier_name, p.payment,
            p.reference, p.total_minor::text, p.branch_id, p.notes, p.currency, p.rate,
-           p.due_date::text, p.discount_minor::text, p.charges_minor::text, p.tenant_id,
+           (${effectiveDue})::text as due_date, p.discount_minor::text, p.charges_minor::text, p.tenant_id,
            p.foreign_total_minor::text, r.id as reversal_id, r.number as reversal_number,
            r.business_date::text as reversal_date,
            (select o.id from purchase_orders o where o.tenant_id = p.tenant_id
@@ -745,7 +757,7 @@ export async function listPurchases(
       reversal_date: string | null;
     }>(sql`
       select p.id, p.number, p.business_date::text, p.supplier_id, s.name as supplier_name, p.payment,
-             p.reference, p.total_minor::text, p.currency, p.rate, p.foreign_total_minor::text, p.due_date::text,
+             p.reference, p.total_minor::text, p.currency, p.rate, p.foreign_total_minor::text, (${effectiveDue})::text as due_date,
              r.id as reversal_id, r.number as reversal_number, r.business_date::text as reversal_date
       from purchases p join suppliers s on s.tenant_id = p.tenant_id and s.id = p.supplier_id
       left join purchase_reversals r on r.tenant_id = p.tenant_id and r.purchase_id = p.id

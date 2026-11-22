@@ -57,8 +57,14 @@ export const listPurchasePage = (filters: PurchaseFilters, cursor: string | null
 export const updateSupplier = (id: string, input: Partial<SupplierInput>) =>
   apiFetch<SupplierRow>(`/v1/suppliers/${id}`, { method: 'PUT', body: input, auth: true });
 /** Round 62: the credit invoices still owed that fall due within `days` days (or already have) */
-export const listSupplierDues = (days = 7) =>
-  apiFetch<SupplierDueResponse>(`/v1/suppliers/due?days=${days}`, { auth: true });
+export const listSupplierDues = (days = 7, all = false) =>
+  apiFetch<SupplierDueResponse>(`/v1/suppliers/due?${all ? 'all=1' : `days=${days}`}`, { auth: true });
+/** Round 64: a due date corrected after posting (nothing is posted); null clears it */
+export const changePurchaseDue = (id: string, dueDate: string | null, reason?: string) =>
+  apiFetch<{ purchaseId: string; dueDate: string | null; previousDueDate: string | null }>(
+    `/v1/purchases/${id}/due`,
+    { method: 'PATCH', body: { dueDate, ...(reason ? { reason } : {}) }, auth: true },
+  );
 /** Round 62: a photo of the supplier's paper invoice, resized in the browser */
 export const addPurchasePhoto = (id: string, image: ResizedImage) =>
   apiFetch<PurchaseAttachment>(`/v1/purchases/${id}/attachments`, {
@@ -190,6 +196,6 @@ export const stockSerialsOf = (variantId: string, branchId: string, q = '') =>
     { auth: true },
   );
 
-/** `GET /v1/serials/drift` (catalog.manage, round 62): tracked products whose stock and in-stock numbers disagree */
+/** `GET /v1/serials/drift` (inventory.adjust or catalog.manage): tracked products whose stock and in-stock numbers disagree */
 export const getSerialDrift = () =>
-  apiFetch<{ items: SerialDriftRow[] }>('/v1/serials/drift', { auth: true });
+  apiFetch<{ items: SerialDriftRow[]; truncated?: boolean }>('/v1/serials/drift', { auth: true });

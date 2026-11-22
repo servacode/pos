@@ -56,6 +56,7 @@ import {
   storeToday,
 } from './api';
 import { InventoryGrid } from './InventoryGrid';
+import { SerialDriftChip } from './SerialDriftChip';
 import { SerialEntry, SerialPick } from './SerialPick';
 import { countProblem, differenceWord, reviewCount } from './stocktakeReview';
 import './inventory.css';
@@ -457,6 +458,56 @@ export function InventoryPage() {
     profit && profit.netSalesMinor > 0 && costOfSales > 0
       ? (profit.grossProfitMinor / profit.netSalesMinor) * 100
       : null;
+
+  // The month's gross profit sits inside the figures card: one line, and the details open under it
+  const profitBlock = profit ? (
+    <div className="ix-profit">
+      <p className="note">
+        ربح هذا الشهر (مجمل): <Amt minor={profit.grossProfitMinor} currency={base} className="font-bold" />{' '}
+        <button
+          type="button"
+          className="sx-linkbtn"
+          aria-expanded={profitOpen}
+          onClick={() => setProfitOpen((now) => !now)}
+        >
+          {profitOpen ? 'أخفِ التفاصيل' : 'التفاصيل'}
+        </button>
+      </p>
+      {profitOpen ? (
+        <>
+          <p className="sx-wait">من الدفاتر، من أول الشهر حتى اليوم، بعد المرتجع وبدون الضريبة.</p>
+          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Figure term="صافي المبيعات هذا الشهر">
+              <Amt minor={profit.netSalesMinor} currency={base} />
+            </Figure>
+            <Figure term="كلفة المبيعات">
+              <Amt minor={profit.costOfSalesMinor} currency={base} />
+            </Figure>
+            <Figure term="مجمل الربح">
+              <Amt minor={profit.grossProfitMinor} currency={base} />
+            </Figure>
+          </dl>
+          {margin !== null ? (
+            <p className="sx-note tight">
+              هامش <bdi className="sx-n font-semibold">{displayNumber(margin.toFixed(1), digits)}%</bdi> من
+              صافي المبيعات
+            </p>
+          ) : profit.netSalesMinor > 0 && costOfSales === 0 ? (
+            <p className="ix-warn" role="note" style={{ marginTop: 12 }}>
+              <AlertCircleIcon size={20} />
+              الكلفة غير مسجلة لهذه المبيعات: الهامش غير دقيق، فلا نعرضه.
+            </p>
+          ) : null}
+          {profit.stockLossMinor ? (
+            <p className="sx-note tight">
+              {profit.stockLossMinor > 0 ? 'تلف وفقد' : 'زيادة جرد'}:{' '}
+              <Amt minor={Math.abs(profit.stockLossMinor)} currency={base} />
+            </p>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  ) : null;
 
   const stateOf = (r: InventoryRow) =>
     r.qty < 0 ? (
@@ -896,6 +947,9 @@ export function InventoryPage() {
         {!counting && part === 'stock' ? (
           <>
             <section aria-label="أرقام المخزون" className="sx-card sx-strip ix-hero">
+              <div className="ix-hero-head">
+                <StockDefinitions />
+              </div>
               <div>
                 <span className="sx-eyebrow">قيمة المخزون بالكلفة</span>
                 <span className="v big">
@@ -946,10 +1000,7 @@ export function InventoryPage() {
               <div className="ix-hero-note">
                 <p className="ix-method" role="note">
                   <b>طريقة التقييم: المتوسط المرجّح للكلفة.</b>
-                  <span>
-                    كل شراء جديد يدخل في متوسط كلفة القطعة، والقطعة التي تُباع أو تخرج تُحسب بهذا المتوسط.
-                    قيمة الصنف = الكمية × متوسط الكلفة، وتجد «الأعلى قيمة أولاً» في الترتيب.
-                  </span>
+                  <span>كل شراء جديد يدخل في متوسط الكلفة، وما يُباع أو يخرج يُحسب به.</span>
                 </p>
                 {reorderKinds > 0 ? (
                   <p className="note">
@@ -967,6 +1018,8 @@ export function InventoryPage() {
                     </button>
                   </p>
                 ) : null}
+                <SerialDriftChip me={me} />
+                {profitBlock}
               </div>
             </section>
             {noCostKinds > 0 ? (
@@ -995,63 +1048,6 @@ export function InventoryPage() {
                   اعرضها في الصلاحية
                 </Link>
               </p>
-            ) : null}
-            <StockDefinitions />
-            {profit ? (
-              <Panel
-                title="ربح هذا الشهر"
-                aside={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-expanded={profitOpen}
-                    onClick={() => setProfitOpen((now) => !now)}
-                  >
-                    {profitOpen ? 'أخفِ' : 'اعرض'}
-                  </Button>
-                }
-              >
-                {profitOpen ? (
-                  <>
-                    <p className="sx-wait" style={{ marginBottom: 12 }}>
-                      من الدفاتر، من أول الشهر حتى اليوم، بعد المرتجع وبدون الضريبة.
-                    </p>
-                    <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                      <Figure term="صافي المبيعات هذا الشهر">
-                        <Amt minor={profit.netSalesMinor} currency={base} />
-                      </Figure>
-                      <Figure term="كلفة المبيعات">
-                        <Amt minor={profit.costOfSalesMinor} currency={base} />
-                      </Figure>
-                      <Figure term="مجمل الربح">
-                        <Amt minor={profit.grossProfitMinor} currency={base} />
-                      </Figure>
-                    </dl>
-                    {margin !== null ? (
-                      <p className="sx-note tight">
-                        هامش{' '}
-                        <bdi className="sx-n font-semibold">{displayNumber(margin.toFixed(1), digits)}%</bdi>{' '}
-                        من صافي المبيعات
-                      </p>
-                    ) : profit.netSalesMinor > 0 && costOfSales === 0 ? (
-                      <p className="ix-warn" role="note" style={{ marginTop: 12 }}>
-                        <AlertCircleIcon size={20} />
-                        الكلفة غير مسجلة لهذه المبيعات: الهامش غير دقيق، فلا نعرضه.
-                      </p>
-                    ) : null}
-                    {profit.stockLossMinor ? (
-                      <p className="sx-note tight">
-                        {profit.stockLossMinor > 0 ? 'تلف وفقد' : 'زيادة جرد'}:{' '}
-                        <Amt minor={Math.abs(profit.stockLossMinor)} currency={base} />
-                      </p>
-                    ) : null}
-                  </>
-                ) : (
-                  <p className="sx-note tight" style={{ margin: 0 }}>
-                    مجمل الربح: <Amt minor={profit.grossProfitMinor} currency={base} className="font-bold" />
-                  </p>
-                )}
-              </Panel>
             ) : null}
           </>
         ) : null}

@@ -52,6 +52,8 @@ export function SerialsPage() {
   const [confirming, setConfirming] = useState<{ serial: string; keep?: string } | null>(null);
   // Round 62: tracked products whose stock and in-stock numbers disagree (the server computes it on read)
   const [drift, setDrift] = useState<SerialDriftRow[]>([]);
+  // More products are out of step than the list holds: the rest show after these are put right
+  const [driftMore, setDriftMore] = useState(false);
   // Numbers typed for a product that has more pieces than numbers
   const [adding, setAdding] = useState<Record<string, string>>({});
   const [added, setAdded] = useState<string | null>(null);
@@ -77,7 +79,11 @@ export function SerialsPage() {
   useEffect(() => {
     let alive = true;
     void getSerialDrift().then(
-      (r) => alive && setDrift(r.items),
+      (r) => {
+        if (!alive) return;
+        setDrift(r.items);
+        setDriftMore(Boolean(r.truncated));
+      },
       () => undefined,
     );
     return () => {
@@ -373,6 +379,13 @@ export function SerialsPage() {
           </Alert>
         ) : null}
         {added ? <Alert tone="success">{added}</Alert> : null}
+        {driftMore ? (
+          <Alert tone="warning">
+            <span data-testid="serials-drift-more">
+              أصناف أخرى أرقامها لا تطابق المخزون ولم تظهر هنا. صحّح الظاهر أولاً ثم ستظهر البقية.
+            </span>
+          </Alert>
+        ) : null}
         {ahead.length > 0 ? (
           <Alert tone="warning">
             <span data-testid="serials-ahead" className="flex flex-col gap-2">
@@ -410,7 +423,7 @@ export function SerialsPage() {
                   <span>
                     {x.name}: المخزون <bdi className="num font-semibold">{x.stockPieces}</bdi> · الأرقام{' '}
                     <bdi className="num font-semibold">{x.serialPieces}</bdi> — تنقصه{' '}
-                    {countNoun(x.stockPieces - x.serialPieces, COUNT_NOUNS.piece)} برقمها.
+                    {countNoun(Math.ceil(x.stockPieces - x.serialPieces), COUNT_NOUNS.piece)} برقمها.
                   </span>
                   <span className="flex flex-wrap items-end gap-2">
                     <TextField
