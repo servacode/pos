@@ -2003,3 +2003,71 @@ a.sh-trial:hover {
     margin-inline-start: auto;
   }
 }
+
+/* Owner 2026-11-22: the sidebar is two cards, as the top bar is one. The logo card has the top bar's
+   height and stands on its line; the menu card (sections, plan and account) fills the rest. The
+   drawer on a phone stays one panel. */
+.sh-aside .sh-panel {
+  gap: 12px;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.sh-aside .sh-head,
+.sh-aside .sh-nav,
+.sh-aside .sh-foot {
+  background: var(--color-sidebar);
+  box-shadow:
+    0 1px 2px rgb(10 26 63 / 0.18),
+    0 4px 16px rgb(10 26 63 / 0.12);
+}
+.sh-aside .sh-head {
+  justify-content: center;
+  height: 72px;
+  padding: 0 16px;
+  border-radius: var(--radius-panel);
+}
+.sh-aside .sh-wm,
+.sh-aside .sh-wm-link {
+  min-height: 0;
+}
+.sh-aside .sh-wm-link img {
+  width: auto;
+  height: 56px;
+}
+.sh-aside[data-rail='true'] .sh-wm img {
+  width: 48px;
+  height: 48px;
+}
+.sh-aside .sh-nav {
+  padding-top: 14px;
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.sh-aside .sh-foot {
+  margin-top: -12px;
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
+}
+/* A faint light edge keeps the navy cards apart from a dark page */
+.sh-aside .sh-head,
+.sh-aside .sh-nav,
+.sh-aside .sh-foot,
+.sh-top {
+  box-shadow:
+    0 1px 2px rgb(10 26 63 / 0.18),
+    0 4px 16px rgb(10 26 63 / 0.12),
+    inset 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+.sh-aside .sh-nav {
+  clip-path: inset(-20px -20px 0 -20px);
+}
+.sh-aside .sh-foot {
+  clip-path: inset(0 -20px -20px -20px);
+}
+@media (max-width: 767px) {
+  .sh-top {
+    box-shadow: none;
+  }
+}
